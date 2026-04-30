@@ -108,11 +108,13 @@ class STTTimeoutWrapper(object):
     def stop_record(self):
         if self.recoder_status == "<REC_START>":
             print("STTTimeoutWrapper: Abort recoder")
-            self.recorder.set_enable_transcribe(False)
+            if hasattr(self.recorder, "set_enable_transcribe"):
+                self.recorder.set_enable_transcribe(False)
             self.recorder.abort()
             if self.recoder_thread is not None:
                 self.recoder_thread.join()
-            self.recorder.set_enable_transcribe(True)
+            if hasattr(self.recorder, "set_enable_transcribe"):
+                self.recorder.set_enable_transcribe(True)
         self.recoder_status = "<REC_STOP>"
 
     def record(self):
@@ -123,8 +125,10 @@ class STTTimeoutWrapper(object):
     def start(self, prompt=None):
         self.reset()
 
-        if prompt is not None:
+        if prompt and hasattr(self.recorder, "set_global_prompt"):
             self.recorder.set_global_prompt(prompt)
+        elif prompt:
+            print("Recorder 不支持 set_global_prompt，跳过全局提示词设置")
 
         self.recoder_status = "<REC_START>"
         self.recoder_thread = threading.Thread(target=self.record)
