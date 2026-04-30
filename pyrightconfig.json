@@ -1,0 +1,18 @@
+{
+  "include": [
+    "examples",
+    "rabbitbot",
+    "scripts",
+    "tests"
+  ],
+  "exclude": [
+    "3rdparty",
+    "docs",
+    "Log",
+    "py38",
+    "py310",
+    "workspace",
+    "**/__pycache__",
+    "**/.venv"
+  ]
+}

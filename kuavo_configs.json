@@ -1,0 +1,14 @@
+{
+    "edge_stt_host_url": "",
+    "edge_tts_host_url": "",
+
+    "edge_vlm_host_url": "",
+    "edge_quant_vlm_host_url": "http://10.10.30.12:8000/v1",
+
+    "kuavo_robot_ros": "enable",
+    "kuavo_robot_vln": "disable",
+    "kuavo_robot_camera": "gemini",
+
+    "enable_remote_memory_agent": "true",
+    "enable_remote_robot_agent": "true"
+}

@@ -1,0 +1,29 @@
+[build-system]
+# Should be mirrored in requirements/build.txt
+requires = [
+    "setuptools>=77.0.3,<80.0.0",
+    "setuptools-scm>=8.0",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rabbitbot"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "qwen-agent[gui,rag,code_interpreter,mcp]",
+    "opencv-python-headless",
+    "PyGObject == 3.42.1",
+    "numpy",
+    "graphiti-core",
+]
+dynamic = ["version"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rabbitbot"]
+
+[tool.setuptools_scm]
+version_file = "rabbitbot/_version.py"

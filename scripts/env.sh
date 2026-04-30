@@ -1,0 +1,9 @@
+export NEO4J_URI=bolt://localhost:7687
+export NEO4J_USER=neo4j
+export NEO4J_PASSWORD=your_password
+export GRAPHITI_EMBD_MODEL=Qwen3-Embedding-0.6B
+export GRAPHITI_EMBD_MODEL_URL=http://localhost:8005/v1
+export GRAPHITI_RERANK_MODEL=Qwen3-Reranker-0.6B
+export GRAPHITI_RERANK_MODEL_URL=http://localhost:8004/v1
+export DEFAULT_DATABASE=neo4j
+export GRAPHITI_TELEMETRY_ENABLED=false
