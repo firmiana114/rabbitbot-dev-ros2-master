@@ -4,6 +4,9 @@ import json
 import random
 import asyncio
 import threading
+from pathlib import Path
+import difflib
+import re
 from agno.workflow.v2 import (
     Workflow,
     Loop,
@@ -44,6 +47,7 @@ from rabbitbot.tools.sound_agno import (
     audio_input_execute_timeout,
     audio_input_execute_timeout_navi,
     audio_input_yes_or_no,
+    audio_input_yes_or_no_ignore_echo,
     audio_input_stop_chat,
     yes_or_no_quick_match,
     identify_think_type,
@@ -82,6 +86,223 @@ CHAT_SESSION_ID = 2
 last_chat_text = ""
 chat_queue = ChatQueue(10)
 before_text = ""
+pending_user_text = ""
+
+
+def _load_combined_data():
+    data_file = Path(__file__).resolve().parents[2] / "combined_data.json"
+    try:
+        return json.loads(data_file.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"加载 combined_data.json 失败: {exc}")
+        return []
+
+
+def _load_json_entity_order():
+    return [item.get("name") for item in _load_combined_data() if item.get("name")]
+
+
+def _load_json_entity(name):
+    for item in _load_combined_data():
+        if item.get("name") != name:
+            continue
+        sentences = item.get("sentences") or []
+        description = "".join(sentences)
+        return {
+            "name": name,
+            "summary": sentences[0] if sentences else name,
+            "description": description,
+            "location": item.get("location") or [],
+        }
+    return None
+
+
+JSON_ENTITY_ORDER = _load_json_entity_order()
+
+
+COMMON_SURNAMES = [
+    "欧阳", "司马", "上官", "诸葛", "东方", "夏侯", "皇甫", "尉迟", "公孙", "司徒",
+    "赵", "钱", "孙", "李", "周", "吴", "郑", "王", "冯", "陈", "褚", "卫", "蒋", "沈",
+    "韩", "杨", "朱", "秦", "尤", "许", "何", "吕", "施", "张", "孔", "曹", "严", "华",
+    "金", "魏", "陶", "姜", "戚", "谢", "邹", "喻", "柏", "水", "窦", "章", "云", "苏",
+    "潘", "葛", "奚", "范", "彭", "郎", "鲁", "韦", "昌", "马", "苗", "凤", "花", "方",
+    "俞", "任", "袁", "柳", "鲍", "史", "唐", "费", "廉", "岑", "薛", "雷", "贺", "倪",
+    "汤", "滕", "殷", "罗", "毕", "郝", "邬", "安", "常", "乐", "于", "时", "傅", "皮",
+    "卞", "齐", "康", "伍", "余", "元", "卜", "顾", "孟", "平", "黄", "和", "穆", "萧",
+    "尹", "姚", "邵", "湛", "汪", "祁", "毛", "禹", "狄", "米", "贝", "明", "臧", "计",
+    "伏", "成", "戴", "宋", "庞", "熊", "纪", "舒", "屈", "项", "祝", "董", "梁", "杜",
+    "阮", "蓝", "闵", "席", "季", "麻", "强", "贾", "路", "娄", "危", "江", "童", "颜",
+    "郭", "梅", "盛", "林", "刁", "钟", "徐", "邱", "骆", "高", "夏", "蔡", "田", "胡",
+    "凌", "霍", "虞", "万", "支", "柯", "昝", "管", "卢", "莫", "经", "房", "裘", "缪",
+    "干", "解", "应", "宗", "丁", "宣", "邓", "郁", "单", "杭", "洪", "包", "左", "石",
+    "崔", "吉", "龚", "程", "邢", "裴", "陆", "荣", "翁", "荀", "羊", "於", "惠", "甄",
+    "曲", "家", "封", "芮", "储", "靳", "汲", "邴", "糜", "松", "井", "段", "富", "巫",
+    "乌", "焦", "巴", "弓", "牧", "隗", "山", "谷", "车", "侯", "宓", "蓬", "全", "郗",
+    "班", "仰", "秋", "仲", "伊", "宫", "宁", "仇", "栾", "暴", "甘", "钭", "厉", "戎",
+    "祖", "武", "符", "刘", "詹", "龙", "叶", "幸", "司", "黎", "白", "蒲", "邰", "赖",
+    "卓", "蔺", "屠", "蒙", "池", "乔", "阴", "胥", "能", "苍", "闻", "莘", "党", "翟",
+    "谭", "贡", "劳", "逄", "姬", "申", "扶", "堵", "冉", "宰", "郦", "雍", "郤", "璩",
+    "桑", "桂", "濮", "牛", "寿", "通", "边", "扈", "燕", "冀", "郏", "浦", "尚", "农",
+    "温", "别", "庄", "晏", "柴", "瞿", "阎", "充", "慕", "连", "茹", "习", "宦", "艾",
+    "鱼", "容", "向", "古", "易", "慎", "戈", "廖", "庾", "终", "暨", "居", "衡", "步",
+    "都", "耿", "满", "弘", "匡", "国", "文", "寇", "广", "禄", "阙", "东", "殴", "利",
+    "师", "巩", "聂", "晁", "勾", "敖", "融", "冷", "訾", "辛", "阚", "那", "简", "饶",
+    "空", "曾", "毋", "沙", "乜", "养", "鞠", "须", "丰", "巢", "关", "蒯", "相", "查",
+    "后", "荆", "红", "游", "竺", "权", "逯", "盖", "益", "桓", "公",
+]
+
+
+def _find_common_surname(value):
+    for surname in COMMON_SURNAMES:
+        if value.startswith(surname):
+            return surname
+    return ""
+
+
+def _extract_leader_calling(text):
+    text = (text or "").strip()
+    normalized_text = re.sub(r"[\s，。！？?、,.!]+", "", text)
+    title_candidates = [
+        "副总经理", "总经理", "董事长", "副主任", "负责人", "主任", "书记", "部长",
+        "院长", "局长", "处长", "科长", "总监", "经理", "教授", "博士", "副总", "总",
+    ]
+
+    title = ""
+    for candidate in title_candidates:
+        if candidate in normalized_text:
+            title = candidate
+            break
+
+    surname = ""
+    for marker in ["免贵姓", "我姓", "姓", "我叫", "叫", "我是", "本人是"]:
+        index = normalized_text.find(marker)
+        if index < 0:
+            continue
+        surname = _find_common_surname(normalized_text[index + len(marker):])
+        if surname:
+            break
+
+    if not surname:
+        title_pattern = "|".join(re.escape(candidate) for candidate in title_candidates)
+        match = re.search(r"([\u4e00-\u9fff]{1,2})(?:" + title_pattern + r")", normalized_text)
+        if match:
+            surname = _find_common_surname(match.group(1))
+
+    if surname and title:
+        return f"{surname}{title}"
+    if surname:
+        return f"{surname}领导"
+    if title:
+        return f"{title}"
+    return "领导"
+
+
+def _parse_first_visit_answer(text):
+    normalized_text = re.sub(r"[\s，。！？?、,.!]+", "", text or "")
+    if normalized_text == "":
+        return "unknown"
+
+    repeat_keywords = [
+        "不是第一次", "不止一次", "以前来过", "之前来过", "已经来过", "我来过",
+        "来过很多次", "来过好多次", "来过几次", "来过多次", "来过一次", "来过",
+        "很多次", "好多次", "好几次", "几次了", "多次", "经常来", "常来",
+        "第二次", "第三次", "第四次", "第2次", "第3次", "第4次",
+        "不是", "不",
+    ]
+    first_keywords = [
+        "第一次", "首次", "头一次", "初次", "第一回来", "头回来", "刚来", "第一次来",
+        "没来过", "没有来过", "从没来过", "从来没来过", "没到过", "没去过", "是第一次",
+    ]
+    yes_words = {"是", "是的", "对", "对的", "没错", "嗯", "嗯嗯"}
+    no_words = {"不是", "不是的", "不", "不对", "没有"}
+
+    # 先判断“非第一次”，避免“不是第一次”被“第一次”误判为 first。
+    if any(keyword in normalized_text for keyword in repeat_keywords) or normalized_text in no_words:
+        return "repeat"
+    if any(keyword in normalized_text for keyword in first_keywords) or normalized_text in yes_words:
+        return "first"
+    return "unknown"
+
+
+def _is_empty_stt_text(text):
+    return text is None or text.strip() in {"", "<REC_TIMEOUT>", "<REC_STOP>", "Timeout"}
+
+
+async def guide_opening_speech(ctx: Any):
+    """Run the speech-only opening guide flow before the main workflow."""
+
+    def say(text):
+        tts_sound(ctx.tts_agent, text, "zh")
+        tts_wait(ctx.tts_agent)
+
+    say("各位领导都到齐了吗？")
+    await asyncio.sleep(1.0)
+    say("请问哪位是领导？")
+    await asyncio.sleep(1.0)
+    say("请把话筒给领导。")
+    say("领导，您怎么称呼？")
+
+    raw_name_text = audio_input_execute_timeout(ctx.stt_agent, timeout=30, text="")
+    if _is_empty_stt_text(raw_name_text):
+        leader_calling = "领导"
+    else:
+        leader_calling = _extract_leader_calling(raw_name_text)
+
+    say(f"{leader_calling}，您好。")
+    say("欢迎您来到我们人形机器人产业园，您是第一次来我们园区吗？")
+
+    raw_visit_text = audio_input_execute_timeout(ctx.stt_agent, timeout=30, text="")
+    visit_type = _parse_first_visit_answer(raw_visit_text)
+    if visit_type == "unknown":
+        say("我没听清，您是第一次来我们园区吗？")
+        raw_visit_text_retry = audio_input_execute_timeout(ctx.stt_agent, timeout=30, text="")
+        retry_visit_type = _parse_first_visit_answer(raw_visit_text_retry)
+        if retry_visit_type != "unknown":
+            raw_visit_text = raw_visit_text_retry
+            visit_type = retry_visit_type
+
+    if visit_type == "repeat":
+        first_visit = False
+        say("那之前您来的时候，我还没来，我们园区最近做了一些升级，您随我来，我简单的给您介绍一下。")
+    else:
+        first_visit = True
+        say("那您随我来，我简单的给您介绍一下园区。")
+
+    start_entity_name = "起始板块"
+    start_description = ""
+    start_entity = _load_json_entity(start_entity_name)
+    if start_entity is not None:
+        start_description = start_entity.get("description", "")
+    else:
+        try:
+            start_nodes = await ctx.memory.query(query=start_entity_name, group_name="展点", limit=1)
+        except Exception as exc:
+            print(f"查询起始板块失败: {exc}")
+            start_nodes = []
+        start_node = start_nodes[0] if start_nodes else None
+        if start_node is not None:
+            start_description = start_node.attributes.get("description", "") or start_node.attributes.get("describtion", "") or start_node.summary or ""
+
+    say("好的，我们现在去" + start_entity_name)
+    ctx.current_entity_name = start_entity_name
+    if start_entity_name in getattr(ctx, "entity_lst", []):
+        ctx.current_entity_index = ctx.entity_lst.index(start_entity_name)
+    if start_description:
+        interrupt_text = tts_long_text_with_stt_stop(ctx.tts_agent, start_description, ctx.stt_agent, ctx.robot, before_text)
+        if interrupt_text.strip():
+            global pending_user_text
+            pending_user_text = interrupt_text.strip()
+            print("设置导览开场打断后的下一轮用户输入: " + pending_user_text)
+
+    leader_info = {
+        "leader_calling": leader_calling,
+        "raw_name_text": raw_name_text,
+        "raw_visit_text": raw_visit_text,
+        "first_visit": first_visit,
+        "start_entity_name": start_entity_name,
+    }
+    ctx.leader_info = leader_info
+    return leader_info
 
 
 def create_main_workflow(ctx: Any) -> Workflow:
@@ -202,6 +423,48 @@ def create_main_workflow(ctx: Any) -> Workflow:
         num_history_runs=max_chat_history,
     )
 
+    def set_pending_user_text(text):
+        global pending_user_text
+        if text is None:
+            return False
+        text = text.strip()
+        if text == "":
+            return False
+        pending_user_text = text
+        print(f"设置打断后的下一轮用户输入: {pending_user_text}")
+        return True
+
+    def pop_pending_user_text():
+        global pending_user_text
+        text = pending_user_text
+        pending_user_text = ""
+        return text
+
+    def set_current_entity_name(name):
+        if not name:
+            return
+        ctx.current_entity_name = name
+        entity_order = getattr(ctx, 'json_entity_order', None) or JSON_ENTITY_ORDER or getattr(ctx, 'entity_lst', [])
+        if name in entity_order:
+            ctx.current_entity_index = entity_order.index(name)
+        elif hasattr(ctx, 'entity_lst') and name in ctx.entity_lst:
+            ctx.current_entity_index = ctx.entity_lst.index(name)
+
+    def get_next_entity_name():
+        entity_order = getattr(ctx, 'json_entity_order', None) or JSON_ENTITY_ORDER or getattr(ctx, 'entity_lst', [])
+        if not entity_order:
+            return None
+        current_name = getattr(ctx, 'current_entity_name', None)
+        current_index = getattr(ctx, 'current_entity_index', None)
+        if current_index is None:
+            if current_name not in entity_order:
+                return None
+            current_index = entity_order.index(current_name)
+        next_index = current_index + 1
+        if next_index >= len(entity_order):
+            return None
+        return entity_order[next_index]
+
     def audio_input_executor(step_input):
         original_task = step_input.message or ''
         previous_steps = step_input.get_all_previous_content()
@@ -218,12 +481,17 @@ def create_main_workflow(ctx: Any) -> Workflow:
         #tts_fast(tts_agent, "ready")
 
         text = "请介绍一下深圳这座城市"
-        time.sleep(1)
-        #out_text = audio_input_execute(stt_agent, "speech_to_text", timeout=300)
-        out_text = audio_input_execute_timeout(stt_agent, timeout=30, text="")
-        while out_text == "<REC_TIMEOUT>":
-            tts_sound(tts_agent, f"{before_text}你好，请问你需要我做什么吗？", "zh")
+        pending_text = pop_pending_user_text()
+        if pending_text:
+            out_text = pending_text
+            print(f"使用打断输入作为下一轮用户输入: {out_text}")
+        else:
+            time.sleep(1)
+            #out_text = audio_input_execute(stt_agent, "speech_to_text", timeout=300)
             out_text = audio_input_execute_timeout(stt_agent, timeout=30, text="")
+            while out_text == "<REC_TIMEOUT>":
+                tts_sound(tts_agent, f"{before_text}你好，请问你需要我做什么吗？", "zh")
+                out_text = audio_input_execute_timeout(stt_agent, timeout=30, text="")
         chat_queue.put(out_text, "用户")
 
         #tts_sound(tts_agent, f"{before_text}我听到了，但是可能要思考一会。请稍等片刻", "zh")
@@ -257,6 +525,14 @@ def create_main_workflow(ctx: Any) -> Workflow:
         history_text = chat_queue.build_history()
         text =  history_text
         print("in_text:", text)
+        rule_task = classify_task_by_rule(text_lst[2].replace("\n", ""))
+        if rule_task == "C":
+            print("plan_executor: rule classified as chat")
+            return await chat_executor(step_input)
+        if rule_task == "N":
+            print("plan_executor: rule classified as navigation")
+            return await navi_check_executor(step_input)
+
         start_time = time.time()
         #run_response = plan_agent.run(text, session_id=str(PLAN_SESSION_ID))
         #out_text = run_response.content
@@ -336,6 +612,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         speecher_start_event = threading.Event()
         speecher_stop_event = threading.Event()
         listener_stop_event = threading.Event()
+        interrupt_text_holder = {"text": ""}
 
         def stop_task():
             while True:
@@ -370,6 +647,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
                         print("收到停止口令，退出")
                         speecher_stop_event.set()
                         break
+                    elif resp_msg != "<UNKNOWN_MSG>":
+                        print("收到用户打断输入，退出当前回答：", resp_msg)
+                        interrupt_text_holder["text"] = resp_msg
+                        speecher_stop_event.set()
+                        break
                 if listener_stop_event.is_set():
                     print("监听线程收到信号量，退出")
                     break
@@ -393,7 +675,6 @@ def create_main_workflow(ctx: Any) -> Workflow:
             if speecher_stop_event.is_set():
                 tts_stop(tts_agent)
                 time.sleep(0.5)
-                tts_sound(tts_agent, f"{before_text}好，我停止说话了", "zh")
                 print("已经停止说话了") if lang == "zh" else print("Chatting stopped")
                 break
             if navi_tools is not None:
@@ -482,10 +763,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
         while True:
             time.sleep(0.5)
             if speecher_stop_event.is_set():
-                print("收到停止命令，准备退出聊天")
+                print("收到停止或打断命令，准备退出聊天")
                 tts_stop(tts_agent)
-                while tts_get_wav_count(tts_agent) > 0:
-                    time.sleep(0.5)
                 break
             if navi_tools is not None:
                 if not await is_navigating(navi_tools):
@@ -500,7 +779,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         audio_input_execute(stt_agent, "stop_async")
         speecher_stop_thread.join()
 
-        return out_text
+        return interrupt_text_holder["text"]
 
     class ChatSessionInfo:
         sess_idx: int = CHAT_SESSION_ID
@@ -520,7 +799,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
             #if i > 0:
             #    think_type = identify_think_type(text)
             #    tts_fast(tts_agent, think_type)
-            await chat_execute(text, ChatSessionInfo.sess_idx, navi_tools)
+            interrupt_text = await chat_execute(text, ChatSessionInfo.sess_idx, navi_tools)
+            if set_pending_user_text(interrupt_text):
+                break
             text = None
         out_text = "Chat loop finish"
         #ChatSessionInfo.sess_idx += 1
@@ -658,8 +939,103 @@ def create_main_workflow(ctx: Any) -> Workflow:
             show_tool_calls=True,
         )
 
+    def _normalize_nav_text(text):
+        text = (text or "").strip()
+        replacements = {
+            "复新": "复星",
+            "负星": "复星",
+            "福星": "复星",
+            "合营": "合影",
+            "合迎": "合影",
+            "和影": "合影",
+            "合映": "合影",
+            "合应": "合影",
+            "合英": "合影",
+            "和迎": "合影",
+            "合音": "合影",
+            "资源": "智元",
+            "自原": "智元",
+            "自愿": "智元",
+            "原区": "园区",
+        }
+        for old, new in replacements.items():
+            text = text.replace(old, new)
+        return re.sub(r"[\s，。！？?、,.!]+", "", text)
+
+    def _has_any(text, keywords):
+        return any(keyword in text for keyword in keywords)
+
+    def is_chat_info_request(text):
+        text = _normalize_nav_text(text)
+        chat_keywords = ["介绍", "讲讲", "说明", "了解", "是什么", "有什么", "内容", "功能", "特色", "怎么样"]
+        return _has_any(text, chat_keywords) and not has_navigation_action(text)
+
+    def has_navigation_action(text):
+        text = _normalize_nav_text(text)
+        direct_keywords = [
+            "我要去", "我想去", "带我去", "带我们去", "带着我去", "带着我们去",
+            "去", "前往", "过去", "导航到", "走到", "参观", "逛一下",
+        ]
+        return _has_any(text, direct_keywords)
+
+    def is_direct_navigation_request(text):
+        return has_navigation_action(text)
+
+    def is_next_board_request(text):
+        text = _normalize_nav_text(text)
+        next_keywords = [
+            "去下一个板块", "下一个板块", "下一板块", "下个板块",
+            "去下一个展点", "下一个展点", "下一展点",
+            "下一站", "去下一站", "继续下一个", "下一个地方",
+        ]
+        return _has_any(text, next_keywords)
+
+    def classify_task_by_rule(text):
+        if is_chat_info_request(text):
+            return "C"
+        if has_navigation_action(text):
+            return "N"
+        return None
+
+    def resolve_navigation_entity_by_fuzzy(text, entity_lst):
+        normalized_text = _normalize_nav_text(text)
+        if normalized_text == "":
+            return None, 0.0
+
+        remove_words = [
+            "我要去", "我想去", "带我去", "带我们去", "带着我去", "带着我们去",
+            "请", "帮我", "导航到", "走到", "前往", "过去", "去", "参观", "看看", "看一看", "看一下", "逛一下",
+        ]
+        target_text = normalized_text
+        for word in remove_words:
+            target_text = target_text.replace(word, "")
+
+        best_entity = None
+        best_score = 0.0
+        for entity_name in entity_lst:
+            normalized_entity = _normalize_nav_text(entity_name)
+            if not normalized_entity:
+                continue
+            if normalized_entity in normalized_text or normalized_entity in target_text:
+                return entity_name, 1.0
+            if target_text and target_text in normalized_entity:
+                score = max(0.85, len(target_text) / max(len(normalized_entity), 1))
+            else:
+                score = max(
+                    difflib.SequenceMatcher(None, normalized_text, normalized_entity).ratio(),
+                    difflib.SequenceMatcher(None, target_text, normalized_entity).ratio() if target_text else 0.0,
+                )
+            if score > best_score:
+                best_entity = entity_name
+                best_score = score
+
+        if best_score >= 0.62:
+            return best_entity, best_score
+        return None, best_score
+
     async def navi_execute(
-        subtask_description
+        subtask_description,
+        skip_confirm=False,
     ):
         nodes = await ctx.memory.query(query=subtask_description, group_name="展点", limit=5)
         print("nodes:", nodes)
@@ -712,24 +1088,32 @@ def create_main_workflow(ctx: Any) -> Workflow:
             # Stop the live display temporarily so we can ask for user confirmation
             #live.stop()  # type: ignore
 
-            # Ask for confirmation
-            #tts_sound(tts_agent, f"{before_text}你是否想去往{entity['name']}", "zh")
-            #tts_sound(tts_agent, f"{before_text}要不要我带你去{entity['name']}看看吧", "zh")
-            guide_go_to_text = build_guide_go_to_text(entity['name'])
-            tts_sound(tts_agent, guide_go_to_text, "zh")
-            #message = (
-            #    Prompt.ask("Do you want to go to the {}?".format(entity['name']), choices=["y", "n"], default="y")
-            #    .strip()
-            #    .lower()
-            #)
-            #live.start()
-            message = audio_input_yes_or_no(stt_agent)
-            #message = input("请输入 y/n 来开启或取消导航：")
-            while message != "y" and message != "n":
-                #tts_sound(tts_agent, f"{before_text}抱歉，我不理解你的回答。你是否想去往{entity['name']}", "zh")
-                tts_fast(tts_agent, "sorry")
+            # Ask for confirmation only when the user's navigation intent is ambiguous.
+            if skip_confirm:
+                print(f"用户已明确要求前往，跳过导航确认: {entity['name']}")
+                tts_sound(tts_agent, f"好的，我们现在去{entity['name']}", "zh")
+                tts_wait(tts_agent)
+                message = "y"
+            else:
+                #tts_sound(tts_agent, f"{before_text}你是否想去往{entity['name']}", "zh")
+                #tts_sound(tts_agent, f"{before_text}要不要我带你去{entity['name']}看看吧", "zh")
+                guide_go_to_text = build_guide_go_to_text(entity['name'])
                 tts_sound(tts_agent, guide_go_to_text, "zh")
-                message = audio_input_yes_or_no(stt_agent)
+                tts_wait(tts_agent)
+                #message = (
+                #    Prompt.ask("Do you want to go to the {}?".format(entity['name']), choices=["y", "n"], default="y")
+                #    .strip()
+                #    .lower()
+                #)
+                #live.start()
+                message = audio_input_yes_or_no_ignore_echo(stt_agent, guide_go_to_text, entity['name'])
+                #message = input("请输入 y/n 来开启或取消导航：")
+                while message != "y" and message != "n":
+                    #tts_sound(tts_agent, f"{before_text}抱歉，我不理解你的回答。你是否想去往{entity['name']}", "zh")
+                    tts_fast(tts_agent, "sorry")
+                    tts_sound(tts_agent, guide_go_to_text, "zh")
+                    tts_wait(tts_agent)
+                    message = audio_input_yes_or_no_ignore_echo(stt_agent, guide_go_to_text, entity['name'])
 
             #import pdb; pdb.set_trace()
             # If the user does not want to continue, raise a StopExecution exception
@@ -759,6 +1143,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     response = "Unable to reach the place the user wants to go!"
             else:
                 entity_name = entity['name']
+                set_current_entity_name(entity_name)
                 #tts_sound(tts_agent, f"{before_text}好的，我即将前往{entity_name}", "zh")
                 #tts_sound(tts_agent, f"{before_text}我已经知道了{entity_name}在哪里了，下面我带你去", "zh")
                 #tts_sound(tts_agent, f"{before_text}好的，下面我带你去{entity_name}", "zh")
@@ -809,7 +1194,10 @@ def create_main_workflow(ctx: Any) -> Workflow:
                         #action_with_tts(ctx.robot, "右手摆动（先内向后向外）", tts_agent, tts_index)
                         #text = f"{before_text}{entity['description']}"
                         text = f"{entity['description']}"
-                        tts_long_text_with_stt_stop(tts_agent, text, stt_agent, ctx.robot, before_text)
+                        interrupt_text = tts_long_text_with_stt_stop(tts_agent, text, stt_agent, ctx.robot, before_text)
+                        if set_pending_user_text(interrupt_text):
+                            response = f"Interrupted by user: {interrupt_text}"
+                            return response
                         #time.sleep(4.0)
                         #await ctx.robot.do_arm_async("右手摆动（先内向后向外）")
 
@@ -966,9 +1354,30 @@ def create_main_workflow(ctx: Any) -> Workflow:
             # 注意：不在这里放入队列，navi_execute 会处理确认询问
         print("out_text:", out_text)
 
+        if is_next_board_request(input_text):
+            next_entity_name = get_next_entity_name()
+            if next_entity_name is not None:
+                print(f"next board request resolved to: {next_entity_name}")
+                out_text = next_entity_name
+                response = await navi_execute(out_text, skip_confirm=True)
+                return response
+            out_text = f"{before_text}已经是最后一个板块了"
+            tts_sound(tts_agent, f"{out_text}", "zh")
+            return out_text
+
+        fuzzy_entity = None
+        fuzzy_score = 0.0
+        if out_text not in ctx.entity_lst and is_direct_navigation_request(input_text):
+            fuzzy_entity, fuzzy_score = resolve_navigation_entity_by_fuzzy(input_text, ctx.entity_lst)
+            if fuzzy_entity is not None:
+                print(f"导航目标模糊匹配: input={input_text}, entity={fuzzy_entity}, score={fuzzy_score:.3f}")
+                out_text = fuzzy_entity
+
         if out_text in ctx.entity_lst:
-            response = await navi_execute(out_text)
+            response = await navi_execute(out_text, skip_confirm=is_direct_navigation_request(input_text))
         else:
+            if is_direct_navigation_request(input_text):
+                out_text = f"{before_text}抱歉，我没听清你想去哪里，可以再说一遍吗？"
             tts_sound(tts_agent, f"{out_text}", "zh")
             response = out_text
 
@@ -1051,8 +1460,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
             #tts_index = tts_sound(tts_agent, f"{before_text}太好了，我找到了！下面我给你介绍{memory_node.name}", "zh")
             description = memory_node.attributes.get('description', '')
             #tts_sound(tts_agent, f"找到了哦，我指给你看，{description}", "zh")
-            #tts_long_text_with_stt_stop(tts_agent, description, stt_agent, ctx.robot, before_text)
-            tts_long_text(tts_agent, description, stt_agent, ctx.robot, before_text)
+            interrupt_text = tts_long_text_with_stt_stop(tts_agent, description, stt_agent, ctx.robot, before_text)
+            if set_pending_user_text(interrupt_text):
+                return
             #tts_index = tts_sound(tts_agent, f"{before_text}我介绍完了", "zh")
 
             summary = memory_node.summary

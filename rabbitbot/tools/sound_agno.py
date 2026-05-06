@@ -2,6 +2,7 @@
 import re
 import time
 import json
+import os
 import random
 import threading
 
@@ -59,11 +60,54 @@ def tts_get_wav_count(tts_agent):
     return wav_count
 
 
+def get_interrupt_rms_threshold():
+    raw_value = os.getenv("RABBITBOT_INTERRUPT_RMS_THRESHOLD", "0")
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        print(f"Invalid RABBITBOT_INTERRUPT_RMS_THRESHOLD={raw_value}, use 0")
+        return 0.0
+
+
+def stt_get_last_rms(stt_agent):
+    input_dict = {"task": "get_last_rms", "lang": "zh", "text": "", "timeout": 30}
+    try:
+        out_text = stt_agent.run(json.dumps(input_dict))
+        return float(out_text)
+    except Exception as exc:
+        print(f"stt_get_last_rms failed: {exc}")
+        return None
+
+
+def is_interrupt_loud_enough(stt_agent):
+    threshold = get_interrupt_rms_threshold()
+    if threshold <= 0:
+        return True
+    rms = stt_get_last_rms(stt_agent)
+    if rms is None:
+        return True
+    if rms < threshold:
+        print(f"忽略低音量打断: rms={rms:.6f}, threshold={threshold:.6f}")
+        return False
+    return True
+
+
+def _is_valid_interrupt_text(text):
+    if text is None:
+        return False
+    text = text.strip()
+    if text == "":
+        return False
+    ignored_texts = {"<REC_TIMEOUT>", "<REC_STOP>", "Timeout", "Started", "Stopped"}
+    return text not in ignored_texts
+
+
 def tts_long_text_with_stt_stop(tts_agent, text, stt_agent, robot, before_text=None):
     sentences = re.split(r'[，；。]', text)
 
     tts_stop_event = threading.Event()
     tts_stop_stop_event = threading.Event()
+    interrupt_text_holder = {"text": ""}
 
     def tts_stop_task():
         print("监听线程开始")
@@ -71,13 +115,16 @@ def tts_long_text_with_stt_stop(tts_agent, text, stt_agent, robot, before_text=N
         while True:
             time.sleep(0.1)  # 缩短检测间隔，提高响应速度
             out_text = stt_get_text_async(stt_agent)
-            if out_text != "":
-                print("收到命令：", out_text)
-                if out_text.startswith("停止") or "停" in out_text:
-                    tts_stop_event.set()
-                    break
-                else:
+            if _is_valid_interrupt_text(out_text):
+                out_text = out_text.strip()
+                if not is_interrupt_loud_enough(stt_agent):
                     stt_start_async(stt_agent)
+                    continue
+                print("收到打断输入：", out_text)
+                if not (out_text.startswith("停止") or "停" in out_text):
+                    interrupt_text_holder["text"] = out_text
+                tts_stop_event.set()
+                break
             if tts_stop_stop_event.is_set():
                 print("监听线程被停止")
                 break
@@ -123,6 +170,7 @@ def tts_long_text_with_stt_stop(tts_agent, text, stt_agent, robot, before_text=N
 
     tts_stop_stop_event.set()
     tts_stop_thread.join()
+    return interrupt_text_holder["text"]
 
 
 def tts_long_text(tts_agent, text, stt_agent, robot, before_text=None):
@@ -148,27 +196,34 @@ def tts_long_text(tts_agent, text, stt_agent, robot, before_text=None):
 
 def tts_get_play(tts_agent, tts_index):
     input_dict = {"task": "get_play", "lang": "", "text": f"{tts_index}", "timeout": 30}
-    print(input_dict)
     #run_response = tts_agent.run(json.dumps(input_dict))
     #out_text = run_response.content
     out_text = tts_agent.run(json.dumps(input_dict))
     return int(float(out_text))
 
 
-def action_with_tts(robot, action_name, tts_agent, tts_index):
+def action_with_tts(robot, action_name, tts_agent, tts_index, timeout=30):
     def _run():
+        start_time = time.time()
         while True:
             time.sleep(0.5)
             if tts_get_play(tts_agent, tts_index):
+                robot.do_arm(action_name)
                 break
-        robot.do_arm(action_name)
-    threading.Thread(target=_run).start()
+            if time.time() - start_time > timeout:
+                print(f"action_with_tts: wait tts_index={tts_index} timeout, skip action {action_name}")
+                break
+    threading.Thread(target=_run, daemon=True).start()
 
 
-def wait_with_tts(tts_agent, tts_index):
+def wait_with_tts(tts_agent, tts_index, timeout=30):
+    start_time = time.time()
     while True:
         time.sleep(0.5)
         if tts_get_play(tts_agent, tts_index):
+            break
+        if time.time() - start_time > timeout:
+            print(f"wait_with_tts: wait tts_index={tts_index} timeout")
             break
 
 
@@ -275,6 +330,37 @@ def audio_input_yes_or_no(stt_agent):
     return val
 
 
+def _normalize_confirm_text(text):
+    return re.sub(r"[\s，。！？?、,.!]+", "", text or "")
+
+
+def is_self_confirm_echo(text, prompt_text, entity_name=None):
+    normalized_text = _normalize_confirm_text(text)
+    normalized_prompt = _normalize_confirm_text(prompt_text)
+    if normalized_text == "" or normalized_prompt == "":
+        return False
+    if normalized_text in normalized_prompt or normalized_prompt in normalized_text:
+        return True
+    if entity_name:
+        normalized_entity = _normalize_confirm_text(entity_name)
+        if normalized_entity and normalized_entity in normalized_text:
+            confirm_words = ["带你去", "是否想去", "一起去", "看看", "看一看", "好吗"]
+            if any(word in normalized_text for word in confirm_words):
+                return True
+    return False
+
+
+def audio_input_yes_or_no_ignore_echo(stt_agent, prompt_text, entity_name=None, timeout=300, max_retry=2):
+    print("请说肯定或否定词")
+    for _ in range(max_retry + 1):
+        out_text = audio_input_execute_timeout(stt_agent, timeout=timeout)
+        if is_self_confirm_echo(out_text, prompt_text, entity_name):
+            print(f"忽略机器人确认语回声: {out_text}")
+            continue
+        return yes_or_no_quick_match(out_text)
+    return "?"
+
+
 def audio_input_stop_chat(stt_agent):
     def quick_match(text: str) -> int:
         text = text.strip().lower()
@@ -288,11 +374,15 @@ def audio_input_stop_chat(stt_agent):
 
     out_text = audio_input_execute_timeout(stt_agent, timeout=30)
     print(f"audio_input_stop_chat: out_text {out_text}")
+    if not _is_valid_interrupt_text(out_text):
+        return "<UNKNOWN_MSG>"
+    if not is_interrupt_loud_enough(stt_agent):
+        return "<UNKNOWN_MSG>"
+    out_text = out_text.strip()
     val = quick_match(out_text)
     if val == 1:
         return "<STOP_CHAT>"
-    else:
-        return "<UNKNOWN_MSG>"
+    return out_text
 
 
 def stt_start_async(stt_agent):

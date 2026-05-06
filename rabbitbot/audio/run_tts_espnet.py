@@ -153,6 +153,7 @@ class EspnetTTS(object):
         self.debug_mode = debug_mode
         self.status = TTSStatus.RUNNING
         self.tts_index = 0
+        self.interrupt_generation = 0
         queue_len = 4096
         self.tts_queue = np.zeros((queue_len))
         #self.tts_cloud_host_url = os.environ.get("TTS_CLOUD", None)
@@ -186,13 +187,19 @@ class EspnetTTS(object):
         if self.debug_mode:
             print("Text worker started")
         while True:
-            text, tts_index = self.text_q.get()
+            item = self.text_q.get()
+            if len(item) == 3:
+                text, tts_index, generation = item
+            else:
+                text, tts_index = item
+                generation = self.interrupt_generation
             if self.debug_mode:
                 print(f"Get text: {text}, {self.status}")
             if text is None:
-                self.wav_q.put((None, None))
+                self.num_text -= 1
+                self.wav_q.put((None, None, generation))
                 break
-            if self.status != TTSStatus.RUNNING:
+            if self.status != TTSStatus.RUNNING or generation != self.interrupt_generation:
                 self.num_text -= 1
                 continue
             start_time = time.time()
@@ -219,9 +226,9 @@ class EspnetTTS(object):
             log_text = f"KokoroTTS: text {text}, time {tts_time:.3f}"
             print(log_text)
             file_logger.debug(log_text)
-            if wav is not None:
+            if wav is not None and self.status == TTSStatus.RUNNING and generation == self.interrupt_generation:
                 self.num_wav += 1
-                self.wav_q.put((wav, tts_index))
+                self.wav_q.put((wav, tts_index, generation))
             #self.text_q.done()
             self.num_text -= 1
         if self.debug_mode:
@@ -231,14 +238,18 @@ class EspnetTTS(object):
         if self.debug_mode:
             print("WAV worker started")
         while True:
-            wav, tts_index = self.wav_q.get()
+            item = self.wav_q.get()
+            if len(item) == 3:
+                wav, tts_index, generation = item
+            else:
+                wav, tts_index = item
+                generation = self.interrupt_generation
             if self.debug_mode:
                 print(f"Get WAV: {self.status}, {self.num_wav}")
             if wav is None:
-                self.num_wav -= 1
                 #continue
                 break
-            if self.status != TTSStatus.RUNNING:
+            if self.status != TTSStatus.RUNNING or generation != self.interrupt_generation:
                 self.num_wav -= 1
                 continue
             if isinstance(wav, torch.Tensor):
@@ -264,7 +275,7 @@ class EspnetTTS(object):
     def put_text(self, text):
         if self.debug_mode:
             print(f"Put text: {text}")
-        self.text_q.put((text, self.tts_index))
+        self.text_q.put((text, self.tts_index, self.interrupt_generation))
         self.num_text += 1
         tts_index = self.tts_index
         self.tts_index += 1
@@ -272,17 +283,27 @@ class EspnetTTS(object):
 
     def put_wav(self, wav):
         self.num_wav += 1
-        self.wav_q.put((wav, self.tts_index))
+        self.wav_q.put((wav, self.tts_index, self.interrupt_generation))
         self.tts_index += 1
 
+    def _drain_queue(self, q):
+        count = 0
+        while True:
+            try:
+                q.get_nowait()
+                count += 1
+            except queue.Empty:
+                break
+        return count
+
     def get_wav_count(self):
-        return self.num_wav
+        return max(0, self.num_text) + max(0, self.num_wav)
 
     def get_play(self, tts_index):
         return self.tts_queue[tts_index]
 
     def wait_wav_queue(self):
-        while self.num_wav > 0:
+        while self.get_wav_count() > 0:
             time.sleep(0.5)
 
     def set_status(self, status):
@@ -294,16 +315,14 @@ class EspnetTTS(object):
 
     def stop_wait_restart(self, soft_stop):
         self.status = TTSStatus.STOPPED
+        self.interrupt_generation += 1
         try:
             if not soft_stop and self.sd_stream is not None:
                 self.sd_stream.stop()
-            # 清空队列而不是等待播放完
-            while not self.wav_q.empty():
-                try:
-                    self.wav_q.get_nowait()
-                    self.num_wav -= 1
-                except:
-                    break
+            drained_text = self._drain_queue(self.text_q)
+            drained_wav = self._drain_queue(self.wav_q)
+            self.num_text = max(0, self.num_text - drained_text)
+            self.num_wav = max(0, self.num_wav - drained_wav)
             if not soft_stop and self.sd_stream is not None:
                 self.sd_stream.restart()
         except Exception as e:

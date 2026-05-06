@@ -386,18 +386,22 @@ class MemoryAgent:
         try:
             entity = json.loads(resp.text)
             print("entity", entity)
-            uuid = entity['uuid']
-            name = entity['name']
-            group_id = entity['group_id']
-            summary = entity['summary']
-            attributes = entity['attributes']
+            if "error" in entity:
+                raise ValueError(entity["error"])
+            uuid = entity.get('uuid')
+            name = entity.get('name')
+            group_id = entity.get('group_id')
+            summary = entity.get('summary')
+            attributes = entity.get('attributes') or {}
+            if not uuid or not name or not summary:
+                raise ValueError(f"invalid memory node: {entity}")
             location = attributes['location'] if 'location' in attributes else (0, 0, 0, 0, 0, 0)
             description = attributes['description'] if 'description' in attributes else ""
             image_path = attributes['image_path'] if 'image_path' in attributes else ""
             #location = ast.literal_eval(location)
             print(f"Recv: name {name}, location {location}, summary {summary}, description {description}")
-        except:
-            logger.warning(f"Can't parse node from {resp.text}")
+        except Exception as exc:
+            logger.warning(f"Can't parse node from {resp.text}: {exc}")
             uuid = None
             name = None
             location = None
@@ -416,6 +420,8 @@ class MemoryAgent:
             summary = "公司简介总结"
             description = "公司简介描述"
             image_path = "leju.jpg"
+        if not entity_uuid or not name or not summary:
+            return []
         return [EntityNode(
             uuid=entity_uuid,
             name=name,
@@ -532,8 +538,8 @@ class RobotAgent:
         print(f"Task: go to {task}")
         try:
             resp = requests.post(urljoin(self.host_url, 'go_to_async'), data=data, timeout=10)
-        except Timeout as e:
-            print('go_to_async: Timeout')
+        except (Timeout, RequestException) as e:
+            print(f'go_to_async: request failed: {e}')
 
     def do_arm(self, action_name):
         if not provider_configs['enable_remote_robot_agent']:
@@ -542,8 +548,8 @@ class RobotAgent:
         print(f"Task: do arm {action_name}")
         try:
             resp = requests.post(urljoin(self.host_url, 'do_arm_async'), data=data, timeout=10)
-        except Timeout as e:
-            print('do_arm: Timeout')
+        except (Timeout, RequestException) as e:
+            print(f'do_arm: request failed: {e}')
 
     async def do_arm_async(self, action_name):
         if not provider_configs['enable_remote_robot_agent']:
@@ -552,8 +558,8 @@ class RobotAgent:
         print(f"Task: do arm {action_name}")
         try:
             resp = requests.post(urljoin(self.host_url, 'do_arm_async'), data=data, timeout=10)
-        except Timeout as e:
-            print('do_arm_async: Timeout')
+        except (Timeout, RequestException) as e:
+            print(f'do_arm_async: request failed: {e}')
 
     async def do_head_async(self, yaw, pitch):
         if not provider_configs['enable_remote_robot_agent']:
@@ -574,8 +580,8 @@ class RobotAgent:
         print(f"Task: do finger ({param})")
         try:
             resp = requests.post(urljoin(self.host_url, 'do_finger_async'), data=data, timeout=10)
-        except Timeout as e:
-            print('do_finger: Timeout')
+        except (Timeout, RequestException) as e:
+            print(f'do_finger: request failed: {e}')
 
     async def do_finger_async(self, x, y, z):
         if not provider_configs['enable_remote_robot_agent']:
@@ -585,8 +591,8 @@ class RobotAgent:
         print(f"Task: do finger ({param})")
         try:
             resp = requests.post(urljoin(self.host_url, 'do_finger_async'), data=data, timeout=10)
-        except Timeout as e:
-            print('do_finger_async: Timeout')
+        except (Timeout, RequestException) as e:
+            print(f'do_finger_async: request failed: {e}')
 
     async def do_finger_status_async(self):
         if not provider_configs['enable_remote_robot_agent']:
@@ -674,8 +680,8 @@ class RobotAgent:
         print(f"Task: do grab cancel ({param})")
         try:
             resp = requests.post(urljoin(self.host_url, 'do_grab_cancel_async'), data=data, timeout=10)
-        except Timeout as e:
-            print('do_grab_cancel_async: Timeout')
+        except (Timeout, RequestException) as e:
+            print(f'do_grab_cancel_async: request failed: {e}')
 
     async def go_to_status(self):
         if not provider_configs['enable_remote_robot_agent']:
@@ -694,8 +700,8 @@ class RobotAgent:
             except:
                 logger.warning(f"Can't parse node from {resp.text}")
                 status = -1
-        except Timeout as e:
-            print('go_to_status: Timeout')
+        except (Timeout, RequestException) as e:
+            print(f'go_to_status: request failed: {e}')
             status = -1
         return status
 
@@ -744,8 +750,8 @@ class RobotAgent:
             except:
                 logger.warning(f"Can't parse node from {resp.text}")
                 output = None
-        except Timeout as e:
-            print('get_camera_info: Timeout')
+        except (Timeout, RequestException) as e:
+            print(f'get_camera_info: request failed: {e}')
             output = None
         return output
 
@@ -757,8 +763,8 @@ class RobotAgent:
         print(f"Task: {task}")
         try:
             resp = requests.post(urljoin(self.host_url, 'reset_go_to_status'), data=data, timeout=10)
-        except Timeout as e:
-            print('reset_go_to_status: Timeout')
+        except (Timeout, RequestException) as e:
+            print(f'reset_go_to_status: request failed: {e}')
 
     async def vln(self, task):
         if not provider_configs['enable_remote_robot_agent']:
@@ -767,8 +773,8 @@ class RobotAgent:
         print(f"Task: {task}")
         try:
             resp = requests.post(urljoin(self.host_url, 'vln'), data=data, timeout=600)
-        except Timeout as e:
-            print('vln: Timeout')
+        except (Timeout, RequestException) as e:
+            print(f'vln: request failed: {e}')
 
     async def move(self, action_idx):
         if not provider_configs['enable_remote_robot_agent']:
@@ -778,8 +784,8 @@ class RobotAgent:
         print(f"Task: {task}")
         try:
             resp = requests.post(urljoin(self.host_url, 'move'), data=data, timeout=10)
-        except Timeout as e:
-            print('move: Timeout')
+        except (Timeout, RequestException) as e:
+            print(f'move: request failed: {e}')
 
     async def view(self, task):
         if not provider_configs['enable_remote_robot_agent']:
@@ -796,8 +802,8 @@ class RobotAgent:
             except:
                 logger.warning(f"Can't parse node from {resp.text}")
                 output = None
-        except Timeout as e:
-            print('view: Timeout')
+        except (Timeout, RequestException) as e:
+            print(f'view: request failed: {e}')
             output = None
         return output
 

@@ -12,6 +12,7 @@ import threading
 from opencc import OpenCC
 from RealtimeSTT import AudioToTextRecorder
 import concurrent.futures
+import numpy as np
 
 from openai_chat_app import (
     ChatCompletionRequest,
@@ -30,6 +31,30 @@ app = FastAPI()
 in_device_id = os.environ.get("INPUT_DEVICE_INDEX")
 in_device_id = int(in_device_id) if in_device_id and in_device_id.strip() else None
 print(f"in_device_id: {in_device_id}")
+
+last_recorded_rms = 0.0
+last_recorded_rms_lock = threading.Lock()
+
+
+def update_last_recorded_rms(chunk):
+    global last_recorded_rms
+    try:
+        audio = np.frombuffer(chunk, dtype=np.int16)
+        if audio.size == 0:
+            rms = 0.0
+        else:
+            audio_float = audio.astype(np.float32) / 32768.0
+            rms = float(np.sqrt(np.mean(audio_float * audio_float)))
+        with last_recorded_rms_lock:
+            last_recorded_rms = rms
+    except Exception as exc:
+        print(f"update_last_recorded_rms error: {exc}")
+
+
+def get_last_recorded_rms():
+    with last_recorded_rms_lock:
+        return last_recorded_rms
+
 
 class NoInputRecorder:
     def __init__(self):
@@ -82,7 +107,8 @@ else:
         silero_deactivity_detection=False,
         device=stt_device,
         spinner=False,
-        level=logging.WARNING
+        level=logging.WARNING,
+        on_recorded_chunk=update_last_recorded_rms,
     )
 
 cc = OpenCC('t2s')
@@ -254,6 +280,8 @@ async def _exec(task, lang, text, timeout) -> str:
             recorder_timeout.reset()
         if lang == "zh":
             out_text = cc.convert(out_text)
+    elif task == "get_last_rms":
+        out_text = f"{get_last_recorded_rms():.6f}"
     else:
         out_text = f"Unsupported task: {task}"
 

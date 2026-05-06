@@ -166,7 +166,7 @@ stop_existing_if_requested() {
         pkill -9 -f "uvicorn tts_app:app" 2>/dev/null || true
         pkill -9 -f "scripts/start_tts_app.bash" 2>/dev/null || true
         pkill -9 -f "uvicorn stt_app:app" 2>/dev/null || true
-        pkill -9 -f "scripts/start_stt_app.bash" 2>/dev/null || true
+        pkill -9 -f "scripts/start_stt_funasr_app.bash" 2>/dev/null || true
     ' 2>/dev/null || true
     docker exec "${WORKFLOW_CONTAINER}" bash -lc '
         pkill -9 -f "uvicorn memory_app:app" 2>/dev/null || true
@@ -263,8 +263,8 @@ start_stt() {
         return 0
     fi
 
-    log_info "通过 scripts/start_stt_app.bash 启动 STT"
-    exec_detached "${AUDIO_CONTAINER}" "cd /data/rabbitbot-dev-ros2-master && export STT_DEVICE_NAME='${STT_DEVICE_NAME}' && bash scripts/start_stt_app.bash > /tmp/rabbitbot_stt.log 2>&1"
+    log_info "通过 scripts/start_stt_funasr_app.bash 启动 STT"
+    exec_detached "${AUDIO_CONTAINER}" "cd /data/rabbitbot-dev-ros2-master && export STT_DEVICE_NAME='${STT_DEVICE_NAME}' && bash scripts/start_stt_funasr_app.bash > /tmp/rabbitbot_stt.log 2>&1"
     wait_until "STT 服务 (${STT_PORT})" "${WAIT_DEFAULT_SECONDS}" stt_ready
 }
 
