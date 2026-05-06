@@ -557,12 +557,16 @@ def create_main_workflow(ctx: Any) -> Workflow:
         print(log_text)
         file_logger.debug(log_text)
 
-        if out_text[0] == "C":
+        planner_choice = (out_text or "").strip()[:1].upper()
+        if planner_choice == "C":
             response = await chat_executor(step_input)
-        elif out_text[0] == "N":
+        elif planner_choice == "N":
             response = await navi_check_executor(step_input)
         else:
-            response = await unknown_executor(step_input)
+            # The planner is intentionally conservative: ordinary dialogue should
+            # remain usable even if the routing model returns an empty or noisy token.
+            print(f"plan_executor: invalid planner output {out_text!r}, fallback to chat")
+            response = await chat_executor(step_input)
 
         return response
 
@@ -746,6 +750,37 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 num_setence += 1
                 #if num_setence > 3:
                 #    break
+
+        remaining_text = out_text.strip()
+        if remaining_text and not speecher_stop_event.is_set():
+            print(f"remaining out_text: {remaining_text}")
+            action_name = None
+            if remaining_text.startswith("[A:") and "]" in remaining_text:
+                ei = remaining_text.index("]")
+                action_name = remaining_text[3:ei]
+                remaining_text = remaining_text[ei+1:].strip()
+                print(f"remaining action_name: {action_name}")
+
+            if remaining_text:
+                if is_chinese(remaining_text):
+                    lang = "zh"
+                elif is_english(remaining_text):
+                    lang = "en"
+                else:
+                    lang = "zh"
+                    print(f"Unkown lanugage: {lang}")
+                WorkflowTimePoints.CHAT_FIRST_TEXT_START = time.time()
+                first_infer_time = WorkflowTimePoints.CHAT_FIRST_TEXT_START - WorkflowTimePoints.CHAT_START
+                WorkflowTimePoints.CHAT_START = WorkflowTimePoints.CHAT_FIRST_TEXT_START
+                log_text = f"chat_executor: seq_idx {num_setence}, infer_time {first_infer_time:.3f}, text {remaining_text}"
+                print(log_text)
+                file_logger.debug(log_text)
+                tts_index = tts_sound(tts_agent, remaining_text, lang)
+                speecher_start_event.set()
+                if action_name is not None:
+                    action_with_tts(ctx.robot, action_name, tts_agent, tts_index)
+                last_chat_text += remaining_text
+                num_setence += 1
 
         if False:
             go_to_status = await navi_tools.go_to_status()
