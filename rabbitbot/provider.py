@@ -844,6 +844,7 @@ class STTAgent:
 
     def __init__(self, host_url):
         self.host_url = host_url
+        self.last_utterance_id = 0
 
     def run(self, input_dict_str: str) -> str:
         data = {"task": input_dict_str}
@@ -855,6 +856,12 @@ class STTAgent:
             try:
                 resp_dict = json.loads(resp.text)
                 out_text = resp_dict['out_text']
+                utterance_id = resp_dict.get('utterance_id')
+                if utterance_id is not None:
+                    try:
+                        self.last_utterance_id = int(utterance_id)
+                    except (TypeError, ValueError):
+                        logger.warning(f"Can't parse utterance_id from {utterance_id}")
                 #print(f"Recv: out_text {out_text}")
             except:
                 logger.warning(f"Can't parse node from {resp.text}")

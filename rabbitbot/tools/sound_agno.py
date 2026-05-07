@@ -9,9 +9,103 @@ import threading
 from rabbitbot.tools.navi_agno import is_navigating
 
 
+_recent_tts_texts = []
+_recent_tts_lock = threading.Lock()
+
+
+def _normalize_echo_text(text):
+    text = re.sub(r"\[A:[^\]]+\]", "", text or "")
+    return re.sub(r"[\s，。！？?、,.!；;：:\"'“”‘’（）()\[\]【】]+", "", text)
+
+
+def _remember_tts_text(text):
+    normalized_text = _normalize_echo_text(text)
+    if len(normalized_text) < 4:
+        return
+
+    now = time.time()
+    max_age = float(os.getenv("RABBITBOT_TTS_ECHO_WINDOW_SECONDS", "45"))
+    with _recent_tts_lock:
+        _recent_tts_texts.append((now, normalized_text))
+        _recent_tts_texts[:] = [
+            item for item in _recent_tts_texts[-20:]
+            if now - item[0] <= max_age
+        ]
+
+
+def _longest_common_substring(a, b):
+    if not a or not b:
+        return 0, 0, 0
+
+    previous = [0] * (len(b) + 1)
+    best_len = 0
+    best_a_end = 0
+    best_b_end = 0
+    for i, a_char in enumerate(a, 1):
+        current = [0] * (len(b) + 1)
+        for j, b_char in enumerate(b, 1):
+            if a_char == b_char:
+                current[j] = previous[j - 1] + 1
+                if current[j] > best_len:
+                    best_len = current[j]
+                    best_a_end = i
+                    best_b_end = j
+        previous = current
+    return best_len, best_a_end - best_len, best_b_end - best_len
+
+
+def clean_stt_echo_text(text):
+    if not _is_valid_interrupt_text(text):
+        return text
+
+    cleaned_text = _normalize_echo_text(text)
+    if not cleaned_text:
+        return ""
+
+    min_match_chars = int(os.getenv("RABBITBOT_TTS_ECHO_MIN_CHARS", "8"))
+    max_age = float(os.getenv("RABBITBOT_TTS_ECHO_WINDOW_SECONDS", "45"))
+    now = time.time()
+    with _recent_tts_lock:
+        recent_tts_texts = [
+            tts_text for timestamp, tts_text in _recent_tts_texts
+            if now - timestamp <= max_age
+        ]
+
+    changed = False
+    # Remove at most a few contaminated chunks; most inputs contain one echo tail.
+    for _ in range(3):
+        best = (0, 0, 0)
+        for tts_text in recent_tts_texts:
+            match_len, stt_start, _ = _longest_common_substring(cleaned_text, tts_text)
+            if match_len > best[0]:
+                best = (match_len, stt_start, stt_start + match_len)
+
+        match_len, remove_start, remove_end = best
+        if match_len < min_match_chars:
+            break
+
+        # ASR often inserts a short connector before copied robot speech, e.g.
+        # "一加一等于几这滨湖区..." where the echo starts at "滨湖区".
+        if remove_start > 0 and cleaned_text[remove_start - 1] in {"这", "那", "是", "的", "了"}:
+            remove_start -= 1
+
+        before = cleaned_text
+        cleaned_text = (cleaned_text[:remove_start] + cleaned_text[remove_end:]).strip()
+        changed = True
+        print(f"清理TTS回声污染: match_len={match_len}, before={before}, after={cleaned_text}")
+
+        if not cleaned_text:
+            break
+
+    if changed:
+        return cleaned_text
+    return text
+
+
 def tts_sound(tts_agent, text, lang):
     input_dict = {"task": "text_to_speech", "lang": lang, "text": text, "timeout": 30}
     print(input_dict)
+    _remember_tts_text(text)
     #def sound_agent_run():
     #    tts_agent.run(json.dumps(input_dict))
     #threading.Thread(target=sound_agent_run).start()
@@ -98,7 +192,7 @@ def _is_valid_interrupt_text(text):
     text = text.strip()
     if text == "":
         return False
-    ignored_texts = {"<REC_TIMEOUT>", "<REC_STOP>", "Timeout", "Started", "Stopped"}
+    ignored_texts = {"<REC_TIMEOUT>", "<REC_STOP>", "<REC_DUPLICATE>", "Timeout", "Started", "Stopped"}
     return text not in ignored_texts
 
 
@@ -245,6 +339,25 @@ def audio_input_execute(stt_agent, task, text="", timeout=30):
     return out_text
 
 
+def _dedupe_stt_utterance(stt_agent, text):
+    text = clean_stt_echo_text(text)
+    if not _is_valid_interrupt_text(text):
+        return text
+
+    utterance_id = getattr(stt_agent, "last_utterance_id", 0)
+    if not utterance_id:
+        return text
+
+    consumed_ids = getattr(stt_agent, "_consumed_utterance_ids", set())
+    if utterance_id in consumed_ids:
+        print(f"忽略重复语音识别结果: utterance_id={utterance_id}, text={text}")
+        return "<REC_DUPLICATE>"
+
+    consumed_ids.add(utterance_id)
+    setattr(stt_agent, "_consumed_utterance_ids", consumed_ids)
+    return text
+
+
 def audio_input_execute_timeout(stt_agent, timeout=30, text=""):
     #out_text = input("请输入语音文字：")
     #return out_text
@@ -262,6 +375,7 @@ def audio_input_execute_timeout(stt_agent, timeout=30, text=""):
             break
         audio_input_status = audio_input_execute(stt_agent, "get_status_async")
         audio_input_text = audio_input_execute(stt_agent, "get_text_async")
+    audio_input_text = _dedupe_stt_utterance(stt_agent, audio_input_text)
     if audio_input_status == "<REC_STOP>" and audio_input_text == "":
         audio_input_text = "<REC_STOP>"
     if audio_input_text == "<REC_TIMEOUT>":
@@ -285,6 +399,7 @@ async def audio_input_execute_timeout_navi(stt_agent, timeout, navi_tools):
             break
         audio_input_status = audio_input_execute(stt_agent, "get_status_async")
         audio_input_text = audio_input_execute(stt_agent, "get_text_async")
+    audio_input_text = _dedupe_stt_utterance(stt_agent, audio_input_text)
     if audio_input_status == "<REC_STOP>" and audio_input_text == "":
         audio_input_text = "<REC_STOP>"
     if audio_input_text == "<REC_TIMEOUT>" or audio_input_text == "<NAVI_REACH>":

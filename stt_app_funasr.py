@@ -116,6 +116,9 @@ class AudioRecorder:
         self.vad_buffer = []
         self.last_voice_time = 0
         self.input_speech = False
+        self.utterance_id = 0
+        self.output_utterance_id = 0
+        self.has_recognized = False
         
     def reset(self):
         with self.lock:
@@ -123,6 +126,9 @@ class AudioRecorder:
             self.vad_buffer = []
             self.input_speech = False
             self.last_voice_time = 0
+            self.output_text = ""
+            self.output_utterance_id = 0
+            self.has_recognized = False
             self.recording_complete.clear()
             
     def start(self):
@@ -172,6 +178,8 @@ class AudioRecorder:
                 self.vad_buffer = self.vad_buffer[-int(0.1 * SAMPLE_RATE_MODEL):]
                 
     def _recognize(self):
+        if self.has_recognized:
+            return
         if len(self.audio_buffer) < int(0.3 * SAMPLE_RATE_MODEL):
             return
             
@@ -196,7 +204,10 @@ class AudioRecorder:
             if text:
                 print(f"[SenseVoice] Recognized: {text}")
                 print(f"[SenseVoice] Time: {time.time() - start_time:.2f}s")
+                recorder.utterance_id += 1
+                recorder.output_utterance_id = recorder.utterance_id
                 recorder.output_text = text
+                recorder.has_recognized = True
                 
     def get_status(self):
         if self.is_recording and self.input_speech:
@@ -208,10 +219,14 @@ class AudioRecorder:
     def get_text(self):
         return getattr(self, 'output_text', "") or ""
 
+    def get_utterance_id(self):
+        return getattr(self, 'output_utterance_id', 0) or 0
+
 
 # ===== 全局录音器 =====
 recorder = AudioRecorder()
 recorder.output_text = ""
+recorder.output_utterance_id = 0
 
 # ===== 音频流回调 =====
 def audio_callback(indata, frames, time_info, status):
@@ -256,8 +271,9 @@ print("Initialization completed!")
 
 
 # ===== 核心执行函数 =====
-async def _exec(task, lang, text, timeout) -> str:
+async def _exec(task, lang, text, timeout):
     out_text = None
+    utterance_id = 0
     
     if task == "set_language":
         out_text = "Set language success"
@@ -268,6 +284,7 @@ async def _exec(task, lang, text, timeout) -> str:
         recorder.recording_complete.wait(timeout=timeout)
         recorder.stop()
         out_text = recorder.get_text()
+        utterance_id = recorder.get_utterance_id()
         if lang == "zh" and out_text:
             out_text = cc.convert(out_text)
             
@@ -277,6 +294,7 @@ async def _exec(task, lang, text, timeout) -> str:
         recorder.recording_complete.wait(timeout=timeout)
         recorder.stop()
         out_text = recorder.get_text()
+        utterance_id = recorder.get_utterance_id()
         if lang == "zh" and out_text:
             out_text = cc.convert(out_text)
         if out_text is None:
@@ -290,7 +308,7 @@ async def _exec(task, lang, text, timeout) -> str:
     elif task == "stop_async":
         recorder.stop()
         # 立即进行一次识别
-        if len(recorder.audio_buffer) > int(0.3 * SAMPLE_RATE_MODEL):
+        if not recorder.get_text() and len(recorder.audio_buffer) > int(0.3 * SAMPLE_RATE_MODEL):
             recorder._recognize()
         out_text = "Stopped"
         
@@ -299,18 +317,20 @@ async def _exec(task, lang, text, timeout) -> str:
         
     elif task == "get_text_async":
         out_text = recorder.get_text()
+        utterance_id = recorder.get_utterance_id()
         if lang == "zh" and out_text:
             out_text = cc.convert(out_text)
         if out_text is None:
             out_text = ""
         else:
             recorder.output_text = ""
+            recorder.output_utterance_id = 0
             
     else:
         out_text = f"Unsupported task: {task}"
         
     print("out_text:", out_text)
-    return out_text or ""
+    return out_text or "", utterance_id
 
 
 # ===== FastAPI 接口 =====
@@ -323,8 +343,8 @@ async def exec_api(task: str = Form(...)):
         text = input_dict.get("text", "")
         timeout = input_dict.get("timeout", 30)
         
-        out_text = await _exec(task, lang, text, timeout)
-        return JSONResponse(content={"out_text": str(out_text)})
+        out_text, utterance_id = await _exec(task, lang, text, timeout)
+        return JSONResponse(content={"out_text": str(out_text), "utterance_id": utterance_id})
         
     except Exception as e:
         traceback.print_exc()
@@ -341,7 +361,7 @@ async def chat_completions(request: ChatCompletionRequest):
         text = input_dict.get("text", "")
         timeout = input_dict.get("timeout", 30)
         
-        out_text = await _exec(task, lang, text, timeout)
+        out_text, _ = await _exec(task, lang, text, timeout)
         
         response = ChatCompletionResponse(
             id="chatcmpl-stt",

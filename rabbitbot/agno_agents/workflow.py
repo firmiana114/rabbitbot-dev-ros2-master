@@ -493,7 +493,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             time.sleep(1)
             #out_text = audio_input_execute(stt_agent, "speech_to_text", timeout=300)
             out_text = audio_input_execute_timeout(stt_agent, timeout=30, text="")
-            while out_text == "<REC_TIMEOUT>":
+            while out_text == "<REC_TIMEOUT>" or out_text == "<REC_DUPLICATE>":
                 tts_sound(tts_agent, f"{before_text}你好，请问你需要我做什么吗？", "zh")
                 out_text = audio_input_execute_timeout(stt_agent, timeout=30, text="")
         chat_queue.put(out_text, "用户")
@@ -836,7 +836,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     text = audio_input_execute_timeout(stt_agent, timeout=60)
                 else:
                     text = await audio_input_execute_timeout_navi(stt_agent, 60, navi_tools)
-            if text == "<REC_TIMEOUT>" or text == "<NAVI_REACH>":
+            if text == "<REC_TIMEOUT>" or text == "<NAVI_REACH>" or text == "<REC_DUPLICATE>":
                 break
             if "停止聊天" in text:
                 break

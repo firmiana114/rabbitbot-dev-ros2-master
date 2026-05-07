@@ -126,10 +126,13 @@ class STTTimeoutWrapper(object):
         self.recorder = recorder
         self.recoder_thread = None
         self.output_text = None
+        self.output_utterance_id = 0
+        self.utterance_id = 0
         self.recoder_status = "<REC_STOP>"
 
     def reset(self):
         self.output_text = None
+        self.output_utterance_id = 0
 
     def stop_record(self):
         if self.recoder_status == "<REC_START>":
@@ -145,6 +148,9 @@ class STTTimeoutWrapper(object):
 
     def record(self):
         self.output_text = self.recorder.text()
+        if self.output_text:
+            self.utterance_id += 1
+            self.output_utterance_id = self.utterance_id
         print(f"STTTimeoutWrapper: output_text {self.output_text}")
         self.recoder_status = "<REC_STOP>"
 
@@ -181,6 +187,9 @@ class STTTimeoutWrapper(object):
     def get_output_text(self):
         return self.output_text
 
+    def get_output_utterance_id(self):
+        return self.output_utterance_id
+
 
 recorder_timeout = STTTimeoutWrapper(recorder)
 
@@ -193,7 +202,7 @@ tts_sound(tts_agent, "，，机器人语音输入模块加载完毕", "zh")
 print("Initilization completed!")
 
 
-async def _exec(task, lang, text, timeout) -> str:
+async def _exec(task, lang, text, timeout):
     def set_recorder_language(language):
         if hasattr(recorder, "set_language"):
             recorder.set_language(language)
@@ -217,6 +226,7 @@ async def _exec(task, lang, text, timeout) -> str:
                 return "Timeout"
 
     out_text = None
+    utterance_id = 0
     if task == "set_language":
         set_recorder_language(lang)
         out_text = "Set language success"
@@ -237,6 +247,7 @@ async def _exec(task, lang, text, timeout) -> str:
         try:
             recorder_timeout.text(timeout)
             out_text = recorder_timeout.get_output_text()
+            utterance_id = recorder_timeout.get_output_utterance_id()
         except Exception as e:
             traceback.print_exc()
             raise e
@@ -271,6 +282,7 @@ async def _exec(task, lang, text, timeout) -> str:
     elif task == "get_text_async":
         try:
             out_text = recorder_timeout.get_output_text()
+            utterance_id = recorder_timeout.get_output_utterance_id()
         except Exception as e:
             traceback.print_exc()
             raise e
@@ -286,7 +298,7 @@ async def _exec(task, lang, text, timeout) -> str:
         out_text = f"Unsupported task: {task}"
 
     print("out_text:", out_text)
-    return out_text
+    return out_text, utterance_id
 
 
 @app.post("/exec")
@@ -301,9 +313,9 @@ async def exec_api(task: str = Form(...)):
         text = input_dict["text"]
         timeout = input_dict["timeout"]
 
-        out_text = await _exec(task, lang, text, timeout)
+        out_text, utterance_id = await _exec(task, lang, text, timeout)
 
-        return JSONResponse(content={"out_text": str(out_text)})
+        return JSONResponse(content={"out_text": str(out_text), "utterance_id": utterance_id})
 
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
@@ -322,7 +334,7 @@ async def chat_completions(request: ChatCompletionRequest):
         timeout = input_dict["timeout"]
         print(f"Received request: task={task}, lang={lang}, text={text}")
 
-        out_text = await _exec(task, lang, text, timeout)
+        out_text, _ = await _exec(task, lang, text, timeout)
 
         response_content = out_text
         print(f"Response content: {out_text}")
