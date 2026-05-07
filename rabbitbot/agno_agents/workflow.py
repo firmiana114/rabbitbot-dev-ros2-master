@@ -4,6 +4,7 @@ import json
 import random
 import asyncio
 import threading
+import os
 from pathlib import Path
 import difflib
 import re
@@ -63,6 +64,8 @@ from rich.pretty import pprint
 from rich.prompt import Prompt
 from agno.exceptions import StopAgentRun
 import numpy as np
+import cv2
+from rabbitbot.provider import create_general_vlm_openai
 
 
 class WorkflowTimePoints:
@@ -422,6 +425,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         add_history_to_messages=True,
         num_history_runs=max_chat_history,
     )
+    general_vlm_openai = create_general_vlm_openai()
 
     def set_pending_user_text(text):
         global pending_user_text
@@ -532,6 +536,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
         if rule_task == "N":
             print("plan_executor: rule classified as navigation")
             return await navi_check_executor(step_input)
+        if rule_task == "V":
+            print("plan_executor: rule classified as view")
+            return await view_executor(step_input)
 
         start_time = time.time()
         #run_response = plan_agent.run(text, session_id=str(PLAN_SESSION_ID))
@@ -562,6 +569,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
             response = await chat_executor(step_input)
         elif planner_choice == "N":
             response = await navi_check_executor(step_input)
+        elif planner_choice == "V":
+            response = await view_executor(step_input)
         else:
             # The planner is intentionally conservative: ordinary dialogue should
             # remain usable even if the routing model returns an empty or noisy token.
@@ -886,17 +895,46 @@ def create_main_workflow(ctx: Any) -> Workflow:
             print("task: ", task)
             await ctx.robot.vln(task)
 
-    async def view_execute(ctx):
-        tts_sound(tts_agent, f"{before_text}下面我将展示我的视觉理解能力", "zh")
-        while True:
-            tts_sound(tts_agent, f"{before_text}请告诉我你想让我看什么？", "zh")
-            audio_input_text = audio_input_execute_timeout(stt_agent, 300)
-            task = audio_input_text
-            print("task: ", task)
+    def load_mock_view_image():
+        image_path = os.getenv(
+            "RABBITBOT_MOCK_IMAGE",
+            str(Path(__file__).resolve().parents[2] / "tests" / "tasks" / "resources" / "frig.jpg"),
+        )
+        image = cv2.imread(image_path)
+        if image is not None:
+            print(f"使用 mock 视觉图片: {image_path}")
+            return image
 
-            print("task: ", task)
+        print(f"mock 视觉图片不存在或无法读取: {image_path}，使用内置测试图")
+        image = np.full((720, 1280, 3), 245, dtype=np.uint8)
+        cv2.rectangle(image, (120, 180), (520, 520), (80, 160, 240), -1)
+        cv2.rectangle(image, (700, 220), (1080, 500), (80, 190, 120), -1)
+        cv2.putText(image, "orange display board", (150, 560), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (30, 30, 30), 2)
+        cv2.putText(image, "green robot area", (720, 540), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (30, 30, 30), 2)
+        return image
+
+    async def view_execute(ctx, task):
+        print("view task:", task)
+        view_mode = os.getenv("RABBITBOT_VIEW_MODE", "mock").strip().lower()
+        if view_mode == "robot":
             out_text = await ctx.robot.view(task)
-            tts_sound(tts_agent, f"{before_text}{out_text}", "zh")
+        else:
+            image = load_mock_view_image()
+            prompt = dedent(f"""\
+                你是机二机器人的视觉问答模块。请根据图片内容回答用户问题。
+                用户问题：{task}
+
+                要求：
+                - 用中文回答。
+                - 回答要简短、自然，适合机器人直接说出来。
+                - 如果图片中看不清或无法确定，请明确说明。
+            """)
+            messages, extra_body = general_vlm_openai.prepare_message_for_vllm([image], prompt)
+            out_text = general_vlm_openai.get_chat_response(messages, extra_body)
+        print("view out_text:", out_text)
+        chat_queue.put(out_text, "机器人")
+        tts_sound(tts_agent, f"{before_text}{out_text}", "zh")
+        return out_text
 
     async def move_execute(ctx):
         tts_sound(tts_agent, f"{before_text}下面我将展示我的转向能力", "zh")
@@ -922,9 +960,14 @@ def create_main_workflow(ctx: Any) -> Workflow:
         )
 
     async def view_executor(step_input):
-        await view_execute(ctx)
+        previous_steps = step_input.get_all_previous_content()
+        print("view previous_steps:", previous_steps)
+        text_lst = previous_steps.split("===")
+        assert text_lst[1].replace(" ", "") == "audio_input_step"
+        task = text_lst[2].replace("\n", "")
+        await view_execute(ctx, task)
         response = 'VLM completed.'
-        yield StepOutput(
+        return StepOutput(
             content=response,
         )
 
@@ -1013,6 +1056,16 @@ def create_main_workflow(ctx: Any) -> Workflow:
         ]
         return _has_any(text, direct_keywords)
 
+    def is_visual_request(text):
+        text = _normalize_nav_text(text)
+        visual_keywords = [
+            "你看到了什么", "你看到什么", "你现在看到什么", "前面有什么",
+            "画面里有什么", "图片里有什么", "桌子上有什么", "桌上有什么",
+            "帮我看一下", "看一下前面", "看看前面", "看一下画面", "看看画面",
+            "识别一下", "视觉理解",
+        ]
+        return _has_any(text, visual_keywords)
+
     def is_direct_navigation_request(text):
         return has_navigation_action(text)
 
@@ -1026,6 +1079,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
         return _has_any(text, next_keywords)
 
     def classify_task_by_rule(text):
+        if is_visual_request(text):
+            return "V"
         if is_chat_info_request(text):
             return "C"
         if has_navigation_action(text):
@@ -1758,6 +1813,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
         #     return [vision_step]
         elif task.t == 'C':
             return [chat_step]
+        elif task.t == 'V':
+            return [view_step]
         elif task.t == 'G':
             return [game_step]
         elif task.t == 'O':
@@ -1778,7 +1835,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
     router_step = Router(
         name='task_router',
         selector=simple_delegate_task,
-        choices=[navigation_step, chat_step, game_step],
+        choices=[navigation_step, chat_step, view_step, game_step],
         description="Delegate the task to the appropriate agent based on the task description.",
     )
 

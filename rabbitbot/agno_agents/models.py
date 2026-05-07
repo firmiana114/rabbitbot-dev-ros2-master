@@ -7,7 +7,7 @@ class StaticOrDynamicNavigationModel(BaseModel):
 
 
 class SimpleDelegationTaskModel(BaseModel):
-    t: Literal['N', 'C', 'O'] = Field(
+    t: Literal['N', 'C', 'V', 'O'] = Field(
         description='The agent to which the subtask should be delegated.'
     )
 
