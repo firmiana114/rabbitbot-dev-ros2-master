@@ -1241,7 +1241,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 print("entity['location']", entity['location'])
                 location = entity['location']
                 x, y, ox, oy, oz, ow = location[0], location[1], location[2], location[3], location[4], location[5]
-                enable_navi = False
+                enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
+                print(f"workflow enable_navi: {enable_navi}")
                 if enable_navi:
                     # v1
                     #response = await navigation_tools.go_to(x, y, yaw)

@@ -33,9 +33,13 @@ from std_msgs.msg import UInt8, Bool
 from .constants import MoveType, NavigationStatus
 from .meta import RobotMeta
 from .cameras import CameraFactory, BaseCamera
-from rabbitbot.provider import TTSAgent, get_vln, create_general_vlm_openai
-from rabbitbot.tools.navi_agno import NavigationQuery
-from rabbitbot.tools.sound_agno import tts_sound
+
+
+def tts_sound(tts_agent, text, lang):
+    input_dict = {"task": "text_to_speech", "lang": lang, "text": text, "timeout": 30}
+    print(input_dict)
+    tts_index = tts_agent.run(json.dumps(input_dict))
+    return int(tts_index) if tts_index else -1
 
 
 class KuavoNavigator(object):
@@ -450,6 +454,12 @@ class AutonomyBot(metaclass=RobotMeta):
                 return camera
         raise ValueError("No depth camera available")
 
+    def try_get_depth_camera(self):
+        for camera in self._cameras:
+            if camera.has_depth:
+                return camera
+        return None
+
     async def wait_until_stopped(self):
         pass
 
@@ -595,14 +605,19 @@ class KuavoAutonomyBot(AutonomyBot):
             self._spin_thread = None
 
         if self.enable_vln:
+            from rabbitbot.provider import get_vln
             self.vln_agent = get_vln()
 
-        self.vlm_openai = create_general_vlm_openai()
+        self.vlm_openai = None
 
         time.sleep(5)
         print(f'KuavoAutonomyBot: Started')
-        self.get_depth_camera().start_record()
-        # print(f'KuavoAutonomyBot: Depth camera recording started')
+        depth_camera = self.try_get_depth_camera()
+        if depth_camera is not None:
+            depth_camera.start_record()
+            # print(f'KuavoAutonomyBot: Depth camera recording started')
+        else:
+            print(f'KuavoAutonomyBot: No depth camera, skip recording')
 
     def _spin_executor(self):
         try:
@@ -618,8 +633,9 @@ class KuavoAutonomyBot(AutonomyBot):
         if self._spin_thread is not None:
             self._spin_thread.join()
         print(f'KuavoAutonomyBot: Stopped')
-        if self.get_depth_camera()._recording:
-            self.get_depth_camera().stop_record()
+        depth_camera = self.try_get_depth_camera()
+        if depth_camera is not None and depth_camera._recording:
+            depth_camera.stop_record()
             print(f'KuavoAutonomyBot: Recording stopped')
 
     def jazzy_control_sync(self, move_type: MoveType):
@@ -690,7 +706,7 @@ class KuavoAutonomyBot(AutonomyBot):
         self,
         location: str = None,
         point: tuple = None,
-        query: NavigationQuery = None
+        query = None
     ):
         if self.way_point_client is None:
             return self._go_to_fake(location, point, query)
@@ -719,7 +735,7 @@ class KuavoAutonomyBot(AutonomyBot):
         self,
         location: str = None,
         point: tuple = None,
-        query: NavigationQuery = None
+        query = None
     ):
         self._go_to_thread = threading.Thread(target=self._go_to, args=(location, point, query))
         self._go_to_thread.start()
@@ -729,7 +745,7 @@ class KuavoAutonomyBot(AutonomyBot):
         self,
         location: str = None,
         point: tuple = None,
-        query: NavigationQuery = None
+        query = None
     ):
         print(f"Run go to (fake): {point}")
         query.set_status(NavigationStatus.ACTIVE)
@@ -741,7 +757,7 @@ class KuavoAutonomyBot(AutonomyBot):
         self,
         location: str = None,
         point: tuple = None,
-        query: NavigationQuery = None
+        query = None
     ):
         self._go_to_thread = threading.Thread(target=self._go_to_fake, args=(location, point, query))
         self._go_to_thread.start()
@@ -751,7 +767,7 @@ class KuavoAutonomyBot(AutonomyBot):
         self,
         location: str = None,
         point: tuple = None,
-        query: NavigationQuery = None
+        query = None
     ):
         print("Create go to (fake) thread")
         self._go_to_thread = threading.Thread(target=self._go_to, args=(location, point, query))
@@ -830,7 +846,7 @@ class KuavoAutonomyBot(AutonomyBot):
         image = cv2.resize(cropped_image, (w, h))
         return image
 
-    def vln(self, task: str, tts_agent: TTSAgent):
+    def vln(self, task: str, tts_agent):
         if not self.enable_vln:
             tts_sound(tts_agent, "，，“威阿恩“尚未开启，请检查配置文件，是否开启了“威阿恩“", "zh")
             return
@@ -927,6 +943,9 @@ class KuavoAutonomyBot(AutonomyBot):
         return VISION_FEATURE_EXTRACTOR_PROMPT
 
     def view(self, task: str):
+        if self.vlm_openai is None:
+            from rabbitbot.provider import create_general_vlm_openai
+            self.vlm_openai = create_general_vlm_openai()
         inst = self.get_inst_view()
         prompt = f"{inst}\n{task}"
         image = self.view_2d()

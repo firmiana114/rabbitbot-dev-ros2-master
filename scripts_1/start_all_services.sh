@@ -51,6 +51,7 @@ ROBOT_AGENT_PORT=28180
 
 TTS_DEVICE_NAME="${TTS_DEVICE_NAME:-BT67}"
 STT_DEVICE_NAME="${STT_DEVICE_NAME:-DJI MIC MINI}"
+ROBOT_CAMERA_MODE="${RABBITBOT_ROBOT_CAMERA:-null}"
 
 AUTO_START_WORKFLOW="${AUTO_START_WORKFLOW:-1}"
 RESTART_EXISTING="${RESTART_EXISTING:-0}"
@@ -171,6 +172,8 @@ stop_existing_if_requested() {
     docker exec "${WORKFLOW_CONTAINER}" bash -lc '
         pkill -9 -f "uvicorn memory_app:app" 2>/dev/null || true
         pkill -9 -f "scripts/start_memory_agent.sh" 2>/dev/null || true
+        pkill -9 -f "uvicorn robot_app:app" 2>/dev/null || true
+        pkill -9 -f "scripts/start_robot_app.bash" 2>/dev/null || true
         pkill -9 -f "examples/run_kuavo_agno.py" 2>/dev/null || true
         pkill -9 -f "scripts/start_kuavo_agno_workflow.bash" 2>/dev/null || true
     ' 2>/dev/null || true
@@ -290,6 +293,17 @@ start_memory_agent() {
     wait_until "Memory Agent 服务 (${MEMORY_AGENT_PORT})" "${WAIT_DEFAULT_SECONDS}" memory_ready
 }
 
+start_robot_agent() {
+    if robot_agent_ready; then
+        log_success "Robot Agent 服务已运行"
+        return 0
+    fi
+
+    log_info "通过 scripts/start_robot_app.bash 启动 Robot Agent，camera=${ROBOT_CAMERA_MODE}"
+    exec_detached "${WORKFLOW_CONTAINER}" "cd /data/rabbitbot-dev-ros2-master && export RABBITBOT_ROBOT_CAMERA='${ROBOT_CAMERA_MODE}' && bash scripts/start_robot_app.bash > /tmp/robot_agent.log 2>&1"
+    wait_until "Robot Agent 服务 (${ROBOT_AGENT_PORT})" "${WAIT_DEFAULT_SECONDS}" robot_agent_ready
+}
+
 start_workflow() {
     if [ "${AUTO_START_WORKFLOW}" != "1" ]; then
         log_info "AUTO_START_WORKFLOW=${AUTO_START_WORKFLOW}，跳过 workflow 启动"
@@ -329,6 +343,7 @@ print_status() {
     echo "  STT:        容器 ${AUDIO_CONTAINER}:/tmp/rabbitbot_stt.log"
     echo "  VLN:        当前已跳过，不启动 ${VLN_CONTAINER}"
     echo "  Memory:     容器 ${WORKFLOW_CONTAINER}:/tmp/memory_agent.log"
+    echo "  Robot:      容器 ${WORKFLOW_CONTAINER}:/tmp/robot_agent.log"
     echo "  Workflow:   前台输出到当前终端"
 }
 
@@ -381,6 +396,7 @@ start_stt || exit 1
 # 当前阶段暂不需要 VLN，先不启动 8001 服务。
 # start_vln || log_warn "VLN 未就绪，workflow 中 VLN 相关能力可能不可用"
 start_memory_agent || exit 1
+start_robot_agent || exit 1
 
 print_status
 start_workflow

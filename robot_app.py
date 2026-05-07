@@ -4,20 +4,66 @@ from typing import Dict, Any
 from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.responses import JSONResponse
 from rabbitbot.robots import create_robot
-from rabbitbot.robots.constants import MoveType
-from rabbitbot.tools.navi_agno import NavigationQuery
-from rabbitbot.provider import create_tts_agent
-from rabbitbot.tools.sound_agno import tts_sound
+from rabbitbot.robots.constants import MoveType, NavigationStatus
 import ast
 import tempfile
 import traceback
 import logging
 import json
+import time
+import requests
+from urllib.parse import urljoin
+from requests.exceptions import Timeout
 
 
 enable_into_tts = False
 
 app = FastAPI()
+
+
+class NavigationQuery(object):
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.status = NavigationStatus.PENDING
+
+    def set_status(self, status):
+        self.status = status
+
+    def get_status(self):
+        return self.status
+
+
+class TTSAgent:
+    def __init__(self, host_url):
+        print(f"TTSAgent: host_url {host_url}")
+        self.host_url = host_url
+
+    def run(self, input_dict_str: str) -> str:
+        data = {"task": input_dict_str}
+        try:
+            resp = requests.post(urljoin(self.host_url, 'exec'), data=data, timeout=10)
+            resp_dict = json.loads(resp.text)
+            return resp_dict['out_text']
+        except Timeout:
+            print('TTSAgent: Timeout')
+        except Exception as exc:
+            print(f'TTSAgent: request failed: {exc}')
+        return ""
+
+
+def create_tts_agent(host_url: str = None):
+    host_url = host_url or os.getenv('RABBITBOT_TTS_AGENT_URL', 'http://127.0.0.1:8001')
+    return TTSAgent(host_url)
+
+
+def tts_sound(tts_agent, text, lang):
+    input_dict = {"task": "text_to_speech", "lang": lang, "text": text, "timeout": 30}
+    print(input_dict)
+    tts_index = tts_agent.run(json.dumps(input_dict))
+    return int(tts_index) if tts_index else -1
+
 
 tts_agent = create_tts_agent()
 if enable_into_tts:
@@ -28,9 +74,13 @@ with open('kuavo_configs.json', 'r', encoding='utf-8') as file:
     config = json.load(file)
     enable_ros = config["kuavo_robot_ros"]
     enable_vln = config["kuavo_robot_vln"]
-    camera_type = config["kuavo_robot_camera"]
+    camera_type = (os.getenv("RABBITBOT_ROBOT_CAMERA") or config["kuavo_robot_camera"]).strip().lower()
     enable_ros = True if enable_ros == "enable" else False
     enable_vln = True if enable_vln == "enable" else False
+
+if camera_type not in {"gemini", "null"}:
+    raise ValueError(f"Unsupported RABBITBOT_ROBOT_CAMERA/kuavo_robot_camera: {camera_type}")
+print(f"robot_app camera_type: {camera_type}")
 
 workspace = "workspace"
 robot_kwargs = {"robot_type": 'kuavo',
@@ -50,9 +100,10 @@ if enable_into_tts:
     # else:
     #     tts_sound(tts_agent, "，，尚未开启“威阿恩“动态导航，请放心测试", "zh")
 
-    camera_name = "未连接"
-    if robot_kwargs['camera_types'][0] == "gemini":
-        camera_name = "基米奶"
+    camera_name = {
+        "gemini": "基米奶",
+        "null": "未连接",
+    }.get(robot_kwargs['camera_types'][0], "未连接")
     tts_sound(tts_agent, f"，，相机：{camera_name}", "zh")
 
 robot = create_robot(

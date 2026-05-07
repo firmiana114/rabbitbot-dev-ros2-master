@@ -8,7 +8,7 @@ export ROS_HOSTNAME=${ROS_IP}
 
 source py38/bin/activate
 
-source /opt/ros/noetic/setup.bash
+# source /opt/ros/noetic/setup.bash
 source /opt/ros/foxy/setup.bash
 
 source /data/vln/ros2_ws/install/setup.bash
@@ -35,8 +35,11 @@ export REALTIME_TTS_BASE_URL=http://localhost:28185/v1
 export RABBITBOT_STT_AGENT_URL=${REALTIME_STT_BASE_URL}
 export RABBITBOT_TTS_AGENT_URL=${REALTIME_TTS_BASE_URL}
 
+# 可选值：gemini 或 null。不设置时使用 kuavo_configs.json。
+export RABBITBOT_ROBOT_CAMERA="${RABBITBOT_ROBOT_CAMERA:-}"
+
 export DEBUG_PROPAGATE_EXCEPTIONS=True
 
-uvicorn robot_app:app --host 0.0.0.0 --port 28180 --log-level debug
+python -m uvicorn robot_app:app --host 0.0.0.0 --port 28180 --log-level debug
 
 #python3 robot_app.py

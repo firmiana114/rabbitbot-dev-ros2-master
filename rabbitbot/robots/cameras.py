@@ -20,7 +20,6 @@ from qwen_agent.log import logger
 
 from .utils import transform_360_image_to_2d, frame_to_bgr_image
 from pyorbbecsdk import *
-from rabbitbot.provider import create_vlm_openai
 from openai import OpenAI
 from datetime import datetime
 import base64
@@ -566,8 +565,13 @@ class GeminiCamera(BaseCamera):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._pipeline = None
-        self.vlm_openai = create_vlm_openai()
+        self.vlm_openai = None
 
+    def _get_vlm_openai(self):
+        if self.vlm_openai is None:
+            from rabbitbot.provider import create_vlm_openai
+            self.vlm_openai = create_vlm_openai()
+        return self.vlm_openai
         
     def _start_pipeline(self):
         """Start the Genimi camera pipeline for both color and depth frames."""
@@ -840,7 +844,8 @@ class GeminiCamera(BaseCamera):
         # TODO: 根据text到vllm获取bbox
         try:
             image = self.get_frame()
-            self.vlm_openai.prompt = dedent(f"""\
+            vlm_openai = self._get_vlm_openai()
+            vlm_openai.prompt = dedent(f"""\
                 你是一名专业的视觉目标匹配和定位专家。你的任务是根据物品的描述，在画面中找到最相似的一个物品并提取其边界框。
                 需要识别的物品描述如下：{text}。
                 **输出要求：**
@@ -853,8 +858,8 @@ class GeminiCamera(BaseCamera):
                 ```
                 """)
             start_time = time.time()
-            image_message, video_kwargs = self.vlm_openai.prepare_message_for_vllm([image])
-            json_content = self.vlm_openai.get_chat_response(
+            image_message, video_kwargs = vlm_openai.prepare_message_for_vllm([image])
+            json_content = vlm_openai.get_chat_response(
                 messages=image_message,
                 extra_body={
                     "mm_processor_kwargs": video_kwargs
@@ -947,7 +952,8 @@ class GeminiCamera(BaseCamera):
     # TODO: 根据text到vllm获取bbox
         try:
             image = self.get_frame()
-            self.vlm_openai.prompt = dedent(f"""\
+            vlm_openai = self._get_vlm_openai()
+            vlm_openai.prompt = dedent(f"""\
                 你是一名专业的视觉目标匹配和定位专家。你的任务是定位画面中最近的用户的手部位置，并返回目标框。
             **输出要求：**
             请以下格式输出，不要包含任何其他文字：
@@ -958,8 +964,8 @@ class GeminiCamera(BaseCamera):
                 ```
                 """)
             start_time = time.time()
-            image_message, video_kwargs = self.vlm_openai.prepare_message_for_vllm([image])
-            json_content = self.vlm_openai.get_chat_response(
+            image_message, video_kwargs = vlm_openai.prepare_message_for_vllm([image])
+            json_content = vlm_openai.get_chat_response(
                 messages=image_message,
                 extra_body={
                     "mm_processor_kwargs": video_kwargs

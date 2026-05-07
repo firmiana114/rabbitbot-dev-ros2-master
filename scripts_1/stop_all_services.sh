@@ -38,12 +38,14 @@ stop_container_if_exists() {
     fi
 }
 
-echo "正在停止 Workflow 和 Memory Agent..."
+echo "正在停止 Workflow、Memory Agent 和 Robot Agent..."
 exec_if_running "${WORKFLOW_CONTAINER}" '
 pkill -9 -f "[e]xamples/run_kuavo_agno.py" 2>/dev/null || true
 pkill -9 -f "[s]cripts/start_kuavo_agno_workflow.bash" 2>/dev/null || true
 pkill -9 -f "[u]vicorn memory_app:app" 2>/dev/null || true
 pkill -9 -f "[s]cripts/start_memory_agent.sh" 2>/dev/null || true
+pkill -9 -f "[u]vicorn robot_app:app" 2>/dev/null || true
+pkill -9 -f "[s]cripts/start_robot_app.bash" 2>/dev/null || true
 '
 
 echo "正在停止 TTS/STT 音频服务..."

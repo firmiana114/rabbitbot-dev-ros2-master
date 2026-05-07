@@ -529,10 +529,10 @@ class RobotAgent:
     def __init__(self, host_url):
         self.host_url = host_url
 
-    async def go_to_async(self, x, y, z, ox, oy, oz, ow):
+    async def go_to_async(self, x, y, ox, oy, oz, ow):
         if not provider_configs['enable_remote_robot_agent']:
             return
-        point = (x, y, z, ox, oy, oz, ow)
+        point = (x, y, ox, oy, oz, ow)
         task = str(point)
         data = {'task': task}
         print(f"Task: go to {task}")
