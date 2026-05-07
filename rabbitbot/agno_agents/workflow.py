@@ -234,31 +234,81 @@ def _is_empty_stt_text(text):
 async def guide_opening_speech(ctx: Any):
     """Run the speech-only opening guide flow before the main workflow."""
 
-    def say(text):
+    def set_opening_pending_text(text):
+        global pending_user_text
+        if _is_empty_stt_text(text):
+            return False
+        pending_user_text = text.strip()
+        print("设置导览开场打断后的下一轮用户输入: " + pending_user_text)
+        return True
+
+    def say(text, interruptible=True):
+        if interruptible:
+            interrupt_text = tts_long_text_with_stt_stop(ctx.tts_agent, text, ctx.stt_agent, ctx.robot, before_text=None)
+            return set_opening_pending_text(interrupt_text)
         tts_sound(ctx.tts_agent, text, "zh")
         tts_wait(ctx.tts_agent)
+        return False
 
-    say("各位领导都到齐了吗？")
-    await asyncio.sleep(1.0)
-    say("请问哪位是领导？")
-    await asyncio.sleep(1.0)
-    say("请把话筒给领导。")
-    say("领导，您怎么称呼？")
+    opening_mode = os.getenv("RABBITBOT_OPENING_MODE", "full").strip().lower()
+    if opening_mode in {"0", "false", "no", "off", "skip"}:
+        print(f"跳过导览开场: RABBITBOT_OPENING_MODE={opening_mode}")
+        return {
+            "leader_calling": "领导",
+            "raw_name_text": "",
+            "raw_visit_text": "",
+            "first_visit": True,
+            "start_entity_name": None,
+        }
 
-    raw_name_text = audio_input_execute_timeout(ctx.stt_agent, timeout=30, text="")
+    if opening_mode != "full":
+        if say("欢迎您来到我们人形机器人产业园。我是机二，可以带您参观展区，也可以回答您的问题。"):
+            return {
+                "leader_calling": "领导",
+                "raw_name_text": pending_user_text,
+                "raw_visit_text": "",
+                "first_visit": True,
+                "start_entity_name": None,
+            }
+        say("如果您想开始参观，可以直接告诉我想去哪个板块。", interruptible=False)
+        leader_info = {
+            "leader_calling": "领导",
+            "raw_name_text": "",
+            "raw_visit_text": "",
+            "first_visit": True,
+            "start_entity_name": None,
+        }
+        ctx.leader_info = leader_info
+        return leader_info
+
+    if say("各位领导都到齐了吗？"):
+        return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
+    await asyncio.sleep(1.0)
+    if say("请问哪位是领导？"):
+        return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
+    await asyncio.sleep(1.0)
+    if say("请把话筒给领导。"):
+        return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
+    if say("领导，您怎么称呼？"):
+        return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
+
+    raw_name_text = audio_input_execute_timeout(ctx.stt_agent, timeout=8, text="")
     if _is_empty_stt_text(raw_name_text):
         leader_calling = "领导"
     else:
         leader_calling = _extract_leader_calling(raw_name_text)
 
-    say(f"{leader_calling}，您好。")
-    say("欢迎您来到我们人形机器人产业园，您是第一次来我们园区吗？")
+    if say(f"{leader_calling}，您好。"):
+        return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
+    if say("欢迎您来到我们人形机器人产业园，您是第一次来我们园区吗？"):
+        return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
 
-    raw_visit_text = audio_input_execute_timeout(ctx.stt_agent, timeout=30, text="")
+    raw_visit_text = audio_input_execute_timeout(ctx.stt_agent, timeout=8, text="")
     visit_type = _parse_first_visit_answer(raw_visit_text)
     if visit_type == "unknown":
-        say("我没听清，您是第一次来我们园区吗？")
-        raw_visit_text_retry = audio_input_execute_timeout(ctx.stt_agent, timeout=30, text="")
+        if say("我没听清，您是第一次来我们园区吗？"):
+            return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
+        raw_visit_text_retry = audio_input_execute_timeout(ctx.stt_agent, timeout=8, text="")
         retry_visit_type = _parse_first_visit_answer(raw_visit_text_retry)
         if retry_visit_type != "unknown":
             raw_visit_text = raw_visit_text_retry
@@ -266,10 +316,12 @@ async def guide_opening_speech(ctx: Any):
 
     if visit_type == "repeat":
         first_visit = False
-        say("那之前您来的时候，我还没来，我们园区最近做了一些升级，您随我来，我简单的给您介绍一下。")
+        if say("那之前您来的时候，我还没来，我们园区最近做了一些升级，您随我来，我简单的给您介绍一下。"):
+            return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": None}
     else:
         first_visit = True
-        say("那您随我来，我简单的给您介绍一下园区。")
+        if say("那您随我来，我简单的给您介绍一下园区。"):
+            return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": None}
 
     start_entity_name = "起始板块"
     start_description = ""
@@ -286,16 +338,14 @@ async def guide_opening_speech(ctx: Any):
         if start_node is not None:
             start_description = start_node.attributes.get("description", "") or start_node.attributes.get("describtion", "") or start_node.summary or ""
 
-    say("好的，我们现在去" + start_entity_name)
+    if say("好的，我们现在去" + start_entity_name):
+        return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": start_entity_name}
     ctx.current_entity_name = start_entity_name
     if start_entity_name in getattr(ctx, "entity_lst", []):
         ctx.current_entity_index = ctx.entity_lst.index(start_entity_name)
     if start_description:
         interrupt_text = tts_long_text_with_stt_stop(ctx.tts_agent, start_description, ctx.stt_agent, ctx.robot, before_text)
-        if interrupt_text.strip():
-            global pending_user_text
-            pending_user_text = interrupt_text.strip()
-            print("设置导览开场打断后的下一轮用户输入: " + pending_user_text)
+        set_opening_pending_text(interrupt_text)
 
     leader_info = {
         "leader_calling": leader_calling,
@@ -1035,6 +1085,30 @@ def create_main_workflow(ctx: Any) -> Workflow:
             "自原": "智元",
             "自愿": "智元",
             "原区": "园区",
+            "骑石": "起始",
+            "骑士": "起始",
+            "骑是": "起始",
+            "奇石": "起始",
+            "奇士": "起始",
+            "启示": "起始",
+            "其实": "起始",
+            "其是": "起始",
+            "起事": "起始",
+            "趣奇石": "去起始",
+            "趣骑士": "去起始",
+            "趣起始": "去起始",
+            "去骑石": "去起始",
+            "去骑士": "去起始",
+            "去奇石": "去起始",
+            "骑石板块": "起始板块",
+            "骑士板块": "起始板块",
+            "骑是板块": "起始板块",
+            "奇石板块": "起始板块",
+            "奇士板块": "起始板块",
+            "启示板块": "起始板块",
+            "其实板块": "起始板块",
+            "其是板块": "起始板块",
+            "起事板块": "起始板块",
         }
         for old, new in replacements.items():
             text = text.replace(old, new)
