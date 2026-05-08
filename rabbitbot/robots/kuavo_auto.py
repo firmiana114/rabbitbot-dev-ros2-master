@@ -7,6 +7,7 @@ import json
 import atexit
 import signal
 import sys
+import ast
 import cv2
 import numpy as np
 from textwrap import dedent
@@ -28,7 +29,7 @@ from .kuavo_action_client import (
 from tf2_ros import Buffer, TransformListener
 from geometry_msgs.msg import PoseStamped
 from actionlib_msgs.msg import GoalStatusArray
-from std_msgs.msg import UInt8, Bool
+from std_msgs.msg import UInt8, Bool, String
 
 from .constants import MoveType, NavigationStatus
 from .meta import RobotMeta
@@ -240,6 +241,34 @@ class GoalReachTopicV2(Node):
         if self.debug:
             print(f"GoalReachTopic: Get status")
         return self.cur_status
+
+
+class NavStatusTopic(Node):
+
+    def __init__(self, callback):
+        super().__init__('nav_status_topic')
+        self.callback = callback
+        self.debug = True
+
+    def start(self):
+        self.topic = "/nav_status"
+        assert self.topic is not None, "topic cannot be none"
+
+        self.subscription = self.create_subscription(
+            String, self.topic, self.nav_status_callback, 10
+        )
+        print(f'NavStatusTopic: Started')
+
+    def stop(self):
+        self.destroy_subscription(self.subscription)
+        print(f'NavStatusTopic: Stopped')
+
+    def nav_status_callback(self, msg: String) -> None:
+        status = (msg.data or "").strip()
+        if self.debug:
+            print(f"NavStatusTopic: recv status={status}")
+        self.callback(status)
+
 
 class FingerStatus(Node):
 
@@ -561,10 +590,16 @@ class KuavoAutonomyBot(AutonomyBot):
             self.lio_pose = LioPoseTopic()
             #self.goal_reach = GoalReachTopic()
             self.goal_reach = GoalReachTopicV2()
+            self.nav_status = NavStatusTopic(self._handle_nav_status)
             self.finger_status = FingerStatus()
             self.grab_status = GrabStatus()
+            self._waypoint_lock = threading.Lock()
+            self._waypoints = []
+            self._waypoint_index = 0
+            self._last_mid_advance_time = 0.0
             self.lio_pose.start()
             self.goal_reach.start()
+            self.nav_status.start()
             self.finger_status.start()
             self.grab_status.start()
 
@@ -583,6 +618,7 @@ class KuavoAutonomyBot(AutonomyBot):
             # self._executor.add_node(self.tf_odom_base_link)
             self._executor.add_node(self.lio_pose)
             self._executor.add_node(self.goal_reach)
+            self._executor.add_node(self.nav_status)
             self._executor.add_node(self.finger_status)
             self._executor.add_node(self.grab_status)
             self._spin_thread = threading.Thread(target=self._spin_executor, args=(), daemon=True)
@@ -602,6 +638,7 @@ class KuavoAutonomyBot(AutonomyBot):
             self.tf_odom_base_link = None
             self.lio_pose = None
             self.goal_reach = None
+            self.nav_status = None
             self._spin_thread = None
 
         if self.enable_vln:
@@ -693,6 +730,14 @@ class KuavoAutonomyBot(AutonomyBot):
         distance_threshold = 0.2
         return math.sqrt(dx * dx + dy * dy) <= distance_threshold
 
+    def _get_navigation_float_env(self, name, default):
+        raw_value = os.getenv(name, str(default))
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError):
+            print(f"Invalid {name}={raw_value}, use {default}")
+            return float(default)
+
     def is_go_to_complete_v2(self, last_status):
         next_status = self.goal_reach.get_status() if self.goal_reach is not None else -1
         #if last_status == 1 and next_status == 3:
@@ -701,6 +746,81 @@ class KuavoAutonomyBot(AutonomyBot):
             return True, next_status
         else:
             return False, next_status
+
+    def _normalize_waypoints(self, point):
+        if point is None:
+            return []
+        if isinstance(point, str):
+            try:
+                point = ast.literal_eval(point)
+            except (SyntaxError, ValueError):
+                return []
+        if isinstance(point, dict):
+            point = [
+                point.get("x"),
+                point.get("y"),
+                point.get("ox"),
+                point.get("oy"),
+                point.get("oz"),
+                point.get("ow"),
+            ]
+        if not isinstance(point, (list, tuple)):
+            return []
+
+        if len(point) >= 6 and not isinstance(point[0], (list, tuple, dict)):
+            point = [point]
+
+        waypoints = []
+        for item in point:
+            if isinstance(item, dict):
+                values = [
+                    item.get("x"),
+                    item.get("y"),
+                    item.get("ox"),
+                    item.get("oy"),
+                    item.get("oz"),
+                    item.get("ow"),
+                ]
+            elif isinstance(item, (list, tuple)) and len(item) >= 6:
+                values = item[:6]
+            else:
+                continue
+            try:
+                waypoints.append(tuple(float(value) for value in values))
+            except (TypeError, ValueError):
+                continue
+        return waypoints
+
+    def _send_waypoint(self, index):
+        if self.way_point_client is None:
+            return False
+        with self._waypoint_lock:
+            if index < 0 or index >= len(self._waypoints):
+                return False
+            self._waypoint_index = index
+            x, y, ox, oy, oz, ow = self._waypoints[index]
+        print(f"KuavoAutonomyBot: Send waypoint {index + 1}/{len(self._waypoints)} {(x, y, ox, oy, oz, ow)}")
+        self.way_point_client.send_goal(x, y, ox, oy, oz, ow, spin=False)
+        return True
+
+    def _handle_nav_status(self, status):
+        if status != "mid_arrived":
+            return
+
+        now = time.time()
+        debounce = self._get_navigation_float_env("RABBITBOT_NAV_STATUS_DEBOUNCE_SECONDS", 2.0)
+        with self._waypoint_lock:
+            if now - self._last_mid_advance_time < debounce:
+                print(f"KuavoAutonomyBot: ignore duplicated mid_arrived within {debounce:.1f}s")
+                return
+            next_index = self._waypoint_index + 1
+            if next_index >= len(self._waypoints):
+                print("KuavoAutonomyBot: recv mid_arrived but no next waypoint")
+                return
+            self._last_mid_advance_time = now
+
+        print(f"KuavoAutonomyBot: recv mid_arrived, go to waypoint {next_index + 1}")
+        self._send_waypoint(next_index)
 
     def _go_to(
         self,
@@ -713,10 +833,16 @@ class KuavoAutonomyBot(AutonomyBot):
 
         print(f"KuavoAutonomyBot: Go to (point={point})")
         query.set_status(NavigationStatus.ACTIVE)
-        #x, y, yaw = point
-        x, y, ox, oy, oz, ow = point
-        if self.way_point_client is not None:
-            self.way_point_client.send_goal(x, y, ox, oy, oz, ow)
+        waypoints = self._normalize_waypoints(point)
+        if not waypoints:
+            print(f"KuavoAutonomyBot: no valid waypoint from {point}")
+            query.set_status(NavigationStatus.ABORTED)
+            return
+        with self._waypoint_lock:
+            self._waypoints = waypoints
+            self._waypoint_index = 0
+            self._last_mid_advance_time = 0.0
+        self._send_waypoint(0)
         time.sleep(5)
         is_completed = False
         last_status = self.goal_reach.get_status() if self.goal_reach is not None else -1

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import difflib
 import re
+import ast
 from agno.workflow.v2 import (
     Workflow,
     Loop,
@@ -121,33 +122,47 @@ def _load_json_entity(name):
 
 
 def _extract_first_location_point(entity):
+    points = _extract_location_points(entity)
+    return points[0] if points else None
+
+
+def _extract_location_points(entity):
     if not entity:
-        return None
-    location = entity.get("location") or []
-    if not isinstance(location, list) or not location:
-        return None
+        return []
+    location = entity.get("location") if isinstance(entity, dict) else entity
+    if isinstance(location, str):
+        try:
+            location = ast.literal_eval(location)
+        except (SyntaxError, ValueError):
+            return []
+    if isinstance(location, dict):
+        location = [location]
+    if not isinstance(location, (list, tuple)) or not location:
+        return []
 
-    first_location = location[0]
-    if isinstance(first_location, dict):
-        point = [
-            first_location.get("x"),
-            first_location.get("y"),
-            first_location.get("ox"),
-            first_location.get("oy"),
-            first_location.get("oz"),
-            first_location.get("ow"),
-        ]
-    elif isinstance(first_location, (list, tuple)) and len(first_location) >= 6:
-        point = list(first_location[:6])
-    elif len(location) >= 6:
-        point = list(location[:6])
-    else:
-        return None
+    if len(location) >= 6 and not isinstance(location[0], (list, tuple, dict)):
+        location = [location]
 
-    try:
-        return tuple(float(value) for value in point)
-    except (TypeError, ValueError):
-        return None
+    points = []
+    for item in location:
+        if isinstance(item, dict):
+            point = [
+                item.get("x"),
+                item.get("y"),
+                item.get("ox"),
+                item.get("oy"),
+                item.get("oz"),
+                item.get("ow"),
+            ]
+        elif isinstance(item, (list, tuple)) and len(item) >= 6:
+            point = list(item[:6])
+        else:
+            continue
+        try:
+            points.append(tuple(float(value) for value in point))
+        except (TypeError, ValueError):
+            continue
+    return points
 
 
 JSON_ENTITY_ORDER = _load_json_entity_order()
@@ -372,7 +387,8 @@ async def guide_opening_speech(ctx: Any):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": start_entity_name}
 
     start_navi_status = NavigationStatus.SUCCEEDED
-    start_point = _extract_first_location_point(start_entity)
+    start_points = _extract_location_points(start_entity)
+    start_point = start_points[0] if start_points else None
     enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
     print(f"opening enable_navi: {enable_navi}")
     if enable_navi:
@@ -383,7 +399,10 @@ async def guide_opening_speech(ctx: Any):
             navi_tools = NavigationToolkit(ctx)
             navi_query = NavigationQuery()
             x, y, ox, oy, oz, ow = start_point
-            await navi_tools.go_to_async(x, y, ox, oy, oz, ow, navi_query)
+            await navi_tools.go_to_async(
+                x, y, ox, oy, oz, ow, navi_query,
+                waypoints=start_points if len(start_points) > 1 else None,
+            )
             while await is_navigating(navi_tools):
                 await asyncio.sleep(0.5)
             start_navi_status = await navi_tools.go_to_status()
@@ -1364,8 +1383,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 #tts_sound(tts_agent, f"{before_text}好的，下面我带你去{entity_name}", "zh")
                 tts_fast(tts_agent, "naviguide")
                 print("entity['location']", entity['location'])
-                location = entity['location']
-                x, y, ox, oy, oz, ow = location[0], location[1], location[2], location[3], location[4], location[5]
+                location_points = _extract_location_points(entity)
+                if not location_points:
+                    print(f"展点缺少可用导航点位: {entity}")
+                    return "Unable to reach the place the user wants to go!"
+                x, y, ox, oy, oz, ow = location_points[0]
                 enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
                 print(f"workflow enable_navi: {enable_navi}")
                 if enable_navi:
@@ -1373,7 +1395,10 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     #response = await navigation_tools.go_to(x, y, yaw)
                     # v2
                     navi_query = NavigationQuery()
-                    await navi_tools.go_to_async(x, y, ox, oy, oz, ow, navi_query)
+                    await navi_tools.go_to_async(
+                        x, y, ox, oy, oz, ow, navi_query,
+                        waypoints=location_points if len(location_points) > 1 else None,
+                    )
                     # v3
                     #await navigation_tools.go_to(x, y, ox, oy, oz, ow)
 

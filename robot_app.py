@@ -127,7 +127,6 @@ async def go_to_async_api(task: str = Form(...)):
         print(f"Get data")
         print(task)
         point = ast.literal_eval(task)
-        x, y, ox, oy, oz, ow = point
         print(f"Go to: {point}")
         navi_query.reset()
         #robot.go_to_async(point=point, query=navi_query)

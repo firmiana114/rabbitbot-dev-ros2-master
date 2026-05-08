@@ -64,13 +64,13 @@ class NavigationToolkit(BaseToolkit):
         else :
             return 'Navigation to ({}, {}) failed.'.format(x, y)
 
-    async def go_to_async(self, x: float, y: float, ox: float, oy: float, oz: float, ow: float, query: NavigationQuery):
-        point = (x, y, ox, oy, oz, ow)
+    async def go_to_async(self, x: float, y: float, ox: float, oy: float, oz: float, ow: float, query: NavigationQuery, waypoints=None):
+        point = waypoints if waypoints else (x, y, ox, oy, oz, ow)
         print(f"go_to_async: {point}")
         #import pdb; pdb.set_trace()
         #self.ctx.robot.go_to_async(point=point, query=query)
         #await self.ctx.robot.go_to_async(point=point, query=query)
-        await self.ctx.robot.go_to_async(x, y, ox, oy, oz, ow)
+        await self.ctx.robot.go_to_async(x, y, ox, oy, oz, ow, waypoints=waypoints)
 
     async def go_to_status(self):
         status = await self.ctx.robot.go_to_status()
