@@ -8,6 +8,7 @@ import atexit
 import signal
 import sys
 import ast
+import traceback
 import cv2
 import numpy as np
 from textwrap import dedent
@@ -659,10 +660,15 @@ class KuavoAutonomyBot(AutonomyBot):
             print(f'KuavoAutonomyBot: No depth camera, skip recording')
 
     def _spin_executor(self):
-        try:
-            self._executor.spin()
-        except Exception:
-            print(f"KuavoAutonomyBot: Spin exception")
+        while rclpy.ok():
+            try:
+                self._executor.spin_once(timeout_sec=0.1)
+            except Exception:
+                if not rclpy.ok():
+                    break
+                print("KuavoAutonomyBot: Spin exception")
+                traceback.print_exc()
+                time.sleep(0.1)
 
     def stop(self):
         super().stop()
