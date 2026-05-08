@@ -598,6 +598,8 @@ class KuavoAutonomyBot(AutonomyBot):
             self._waypoints = []
             self._waypoint_index = 0
             self._last_nav_status = ""
+            self._last_navigation_last_status = -1
+            self._last_navigation_next_status = -1
             self._pending_arrival_transition = False
             self._nav_status_final_arrived = False
             self._nav_status_arm_ready = False
@@ -754,6 +756,8 @@ class KuavoAutonomyBot(AutonomyBot):
             nav_status = self._last_nav_status
             nav_status_final_arrived = self._nav_status_final_arrived
             nav_status_arm_ready = self._nav_status_arm_ready
+            self._last_navigation_last_status = last_status
+            self._last_navigation_next_status = next_status
         print(f"last_status {last_status}, next_status {next_status}, sub {nav_status}")
         if nav_status_final_arrived and nav_status_arm_ready:
             return True, NavigationStatus.SUCCEEDED.value
@@ -761,6 +765,14 @@ class KuavoAutonomyBot(AutonomyBot):
             return self._handle_navigation_arrival_transition(next_status)
         else:
             return False, next_status
+
+    def get_navigation_debug_status(self):
+        with self._waypoint_lock:
+            return {
+                "last_status": self._last_navigation_last_status,
+                "next_status": self._last_navigation_next_status,
+                "sub": self._last_nav_status,
+            }
 
     def _normalize_waypoints(self, point):
         if point is None:
@@ -911,6 +923,8 @@ class KuavoAutonomyBot(AutonomyBot):
             self._waypoints = waypoints
             self._waypoint_index = 0
             self._last_nav_status = ""
+            self._last_navigation_last_status = -1
+            self._last_navigation_next_status = -1
             self._pending_arrival_transition = False
             self._nav_status_final_arrived = False
             self._nav_status_arm_ready = False

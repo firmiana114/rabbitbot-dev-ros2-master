@@ -148,8 +148,9 @@ async def go_to_status_api(task: str = Form(...)):
         print(f"Query go to status")
         status = navi_query.get_status()
         print(status)
+        debug_status = robot.get_navigation_debug_status()
 
-        return JSONResponse(content={"status": str(status.value)})
+        return JSONResponse(content={"status": str(status.value), **debug_status})
 
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)

@@ -696,6 +696,12 @@ class RobotAgent:
                 status = resp_dict['status']
                 status = int(status)
                 print(f"Recv: status {status}")
+                if all(key in resp_dict for key in ("last_status", "next_status", "sub")):
+                    print(
+                        f"last_status {resp_dict['last_status']}, "
+                        f"next_status {resp_dict['next_status']}, "
+                        f"sub {resp_dict['sub']}"
+                    )
             except:
                 logger.warning(f"Can't parse node from {resp.text}")
                 status = -1
