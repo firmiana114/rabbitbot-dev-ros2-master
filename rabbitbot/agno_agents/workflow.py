@@ -165,6 +165,31 @@ def _extract_location_points(entity):
     return points
 
 
+def _prefer_json_entity_location(entity):
+    if not isinstance(entity, dict):
+        return entity
+    name = entity.get("name")
+    if not name:
+        return entity
+
+    json_entity = _load_json_entity(name)
+    json_points = _extract_location_points(json_entity)
+    if not json_points:
+        return entity
+
+    merged_entity = dict(entity)
+    merged_entity["location"] = json_entity["location"]
+    if not merged_entity.get("description") and json_entity.get("description"):
+        merged_entity["description"] = json_entity["description"]
+    if not merged_entity.get("summary") and json_entity.get("summary"):
+        merged_entity["summary"] = json_entity["summary"]
+
+    memory_points = _extract_location_points(entity)
+    if len(json_points) != len(memory_points):
+        print(f"使用 combined_data.json 中的完整导航点位: {name}, points={len(json_points)}")
+    return merged_entity
+
+
 JSON_ENTITY_ORDER = _load_json_entity_order()
 
 
@@ -1274,12 +1299,15 @@ def create_main_workflow(ctx: Any) -> Workflow:
         nodes = await ctx.memory.query(query=subtask_description, group_name="展点", limit=5)
         print("nodes:", nodes)
         #import pdb; pdb.set_trace()
-        entities = [{
-            'name': node.name,
-            'summary': node.summary,
-            'location': node.attributes.get('location', ''),
-            'description': node.attributes.get('description', ''),
-        } for node in nodes]
+        entities = [
+            _prefer_json_entity_location({
+                'name': node.name,
+                'summary': node.summary,
+                'location': node.attributes.get('location', ''),
+                'description': node.attributes.get('description', ''),
+            })
+            for node in nodes
+        ]
 
         rerank_prompt = dedent("""\
             Task: "{task_description}"
