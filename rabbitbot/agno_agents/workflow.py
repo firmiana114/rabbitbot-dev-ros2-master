@@ -614,7 +614,143 @@ def create_main_workflow(ctx: Any) -> Workflow:
             return None
         return entity_order[next_index]
 
-    def audio_input_executor(step_input):
+    SCRIPTED_TOUR_STEP_DONE = "<SCRIPTED_TOUR_STEP_DONE>"
+    SCRIPTED_TOUR_FINISHED = "<SCRIPTED_TOUR_FINISHED>"
+    SCRIPTED_TOUR_ORDER = [
+        "起始板块",
+        "多功能展示区",
+        "园区历史板块",
+        "复星集团板块",
+        "园区布局板块",
+        "园区介绍板块",
+        "园区企业介绍板块",
+        "智慧园区板块",
+        "合影板块",
+    ]
+    SCRIPTED_TOUR_ACTIONS = {
+        "起始板块": "打招呼",
+        "多功能展示区": "right_hand_pointing",
+        "园区历史板块": "right_hand_pointing",
+        "复星集团板块": "right_hand_pointing",
+        "园区布局板块": "right_hand_pointing",
+        "园区介绍板块": "right_hand_pointing",
+        "园区企业介绍板块": "right_hand_pointing",
+        "智慧园区板块": "right_hand_pointing",
+        "合影板块": "再见",
+    }
+
+    def scripted_tour_enabled():
+        value = os.getenv("RABBITBOT_SCRIPTED_TOUR", "1").strip().lower()
+        return value not in {"0", "false", "no", "off", "skip"}
+
+    def init_scripted_tour_state():
+        if hasattr(ctx, "scripted_tour_index"):
+            return
+        entity_order = [name for name in SCRIPTED_TOUR_ORDER if _load_json_entity(name) is not None]
+        if not entity_order:
+            entity_order = getattr(ctx, "json_entity_order", None) or JSON_ENTITY_ORDER or getattr(ctx, "entity_lst", [])
+        ctx.scripted_tour_order = list(entity_order)
+        current_name = getattr(ctx, "current_entity_name", None)
+        if current_name in ctx.scripted_tour_order:
+            ctx.scripted_tour_index = ctx.scripted_tour_order.index(current_name) + 1
+        else:
+            ctx.scripted_tour_index = 0
+        ctx.scripted_tour_arrived_index = None
+        ctx.scripted_tour_done = False
+        print(f"初始化剧本导览状态: index={ctx.scripted_tour_index}, order={ctx.scripted_tour_order}")
+
+    def build_scripted_intro(entity_name):
+        leader_info = getattr(ctx, "leader_info", {}) or {}
+        leader_calling = leader_info.get("leader_calling") or "各位领导"
+        if entity_name == "合影板块":
+            return f"{leader_calling}，请各位移步合影区。"
+        return f"{leader_calling}，下面请随我来到{entity_name}。"
+
+    async def run_scripted_tour_next_step():
+        if not scripted_tour_enabled():
+            return None, None
+        if pending_user_text:
+            return None, None
+
+        init_scripted_tour_state()
+        if getattr(ctx, "scripted_tour_done", False):
+            return None, None
+
+        entity_order = getattr(ctx, "scripted_tour_order", [])
+        index = getattr(ctx, "scripted_tour_index", 0)
+        if index >= len(entity_order):
+            ctx.scripted_tour_done = True
+            await ctx.robot.do_arm_async("再见")
+            tts_sound(tts_agent, f"{before_text}各位领导再会，欢迎您再次来到我们人形机器人产业园。", "zh")
+            tts_wait(tts_agent)
+            return "done", SCRIPTED_TOUR_FINISHED
+
+        entity_name = entity_order[index]
+        entity = _load_json_entity(entity_name)
+        if entity is None:
+            print(f"剧本导览跳过未知展点: {entity_name}")
+            ctx.scripted_tour_index = index + 1
+            return "done", SCRIPTED_TOUR_STEP_DONE
+
+        print(f"剧本导览步骤开始: index={index}, entity={entity_name}")
+        already_arrived = (
+            getattr(ctx, "scripted_tour_arrived_index", None) == index
+            and getattr(ctx, "current_entity_name", None) == entity_name
+        )
+        if not already_arrived:
+            guide_text = build_scripted_intro(entity_name)
+            tts_sound(tts_agent, f"{before_text}{guide_text}", "zh")
+            tts_wait(tts_agent)
+
+            location_points = _extract_location_points(entity)
+            if not location_points:
+                print(f"剧本导览展点缺少可用导航点位: {entity}")
+                ctx.scripted_tour_index = index + 1
+                return "done", SCRIPTED_TOUR_STEP_DONE
+
+            enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
+            navi_status = NavigationStatus.SUCCEEDED
+            if enable_navi:
+                navi_query = NavigationQuery()
+                x, y, ox, oy, oz, ow = location_points[0]
+                await navi_tools.go_to_async(
+                    x, y, ox, oy, oz, ow, navi_query,
+                    waypoints=location_points if len(location_points) > 1 else None,
+                )
+                while await is_navigating(navi_tools):
+                    await asyncio.sleep(0.5)
+                navi_status = await navi_tools.go_to_status()
+                print(f"剧本导览导航状态: entity={entity_name}, status={navi_status}")
+                await navi_tools.reset_go_to_status()
+
+            if navi_status != NavigationStatus.SUCCEEDED:
+                tts_sound(tts_agent, f"{before_text}很抱歉，我暂时无法到达{entity_name}。", "zh")
+                tts_wait(tts_agent)
+                return "done", SCRIPTED_TOUR_STEP_DONE
+
+            set_current_entity_name(entity_name)
+            ctx.scripted_tour_arrived_index = index
+        else:
+            tts_sound(tts_agent, f"{before_text}我们继续刚才的介绍。", "zh")
+            tts_wait(tts_agent)
+
+        action_name = SCRIPTED_TOUR_ACTIONS.get(entity_name)
+        if action_name:
+            await ctx.robot.do_arm_async(action_name)
+
+        description = entity.get("description", "")
+        if description:
+            interrupt_text = tts_long_text_with_stt_stop(tts_agent, description, stt_agent, ctx.robot, before_text)
+            if not _is_empty_stt_text(interrupt_text):
+                print(f"剧本导览被用户打断: entity={entity_name}, text={interrupt_text}")
+                return "interrupt", interrupt_text.strip()
+
+        ctx.scripted_tour_index = index + 1
+        ctx.scripted_tour_arrived_index = None
+        print(f"剧本导览步骤完成: entity={entity_name}, next_index={ctx.scripted_tour_index}")
+        return "done", SCRIPTED_TOUR_STEP_DONE
+
+    async def audio_input_executor(step_input):
         original_task = step_input.message or ''
         previous_steps = step_input.get_all_previous_content()
         print("original_task:", original_task)
@@ -635,12 +771,20 @@ def create_main_workflow(ctx: Any) -> Workflow:
             out_text = pending_text
             print(f"使用打断输入作为下一轮用户输入: {out_text}")
         else:
-            time.sleep(1)
-            #out_text = audio_input_execute(stt_agent, "speech_to_text", timeout=300)
-            out_text = audio_input_execute_timeout(stt_agent, timeout=30, text="")
-            while out_text == "<REC_TIMEOUT>" or out_text == "<REC_DUPLICATE>":
-                tts_sound(tts_agent, f"{before_text}你好，请问你需要我做什么吗？", "zh")
+            script_kind, script_text = await run_scripted_tour_next_step()
+            if script_kind == "done":
+                WorkflowTimePoints.PLAN_START = time.time()
+                return StepOutput(content=f"{script_text}")
+            if script_kind == "interrupt":
+                out_text = script_text
+                print(f"使用剧本导览打断输入作为用户输入: {out_text}")
+            else:
+                time.sleep(1)
+                #out_text = audio_input_execute(stt_agent, "speech_to_text", timeout=300)
                 out_text = audio_input_execute_timeout(stt_agent, timeout=30, text="")
+                while out_text == "<REC_TIMEOUT>" or out_text == "<REC_DUPLICATE>":
+                    tts_sound(tts_agent, f"{before_text}你好，请问你需要我做什么吗？", "zh")
+                    out_text = audio_input_execute_timeout(stt_agent, timeout=30, text="")
         chat_queue.put(out_text, "用户")
 
         #tts_sound(tts_agent, f"{before_text}我听到了，但是可能要思考一会。请稍等片刻", "zh")
@@ -671,6 +815,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
         text = text_lst[2].replace("\n", "")
 
         print("in_text:", text)
+        if text in {SCRIPTED_TOUR_STEP_DONE, SCRIPTED_TOUR_FINISHED}:
+            print(f"plan_executor: scripted tour control token {text}, skip planner")
+            return StepOutput(content=text)
         history_text = chat_queue.build_history()
         text =  history_text
         print("in_text:", text)
