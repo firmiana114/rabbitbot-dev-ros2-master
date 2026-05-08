@@ -120,6 +120,36 @@ def _load_json_entity(name):
     return None
 
 
+def _extract_first_location_point(entity):
+    if not entity:
+        return None
+    location = entity.get("location") or []
+    if not isinstance(location, list) or not location:
+        return None
+
+    first_location = location[0]
+    if isinstance(first_location, dict):
+        point = [
+            first_location.get("x"),
+            first_location.get("y"),
+            first_location.get("ox"),
+            first_location.get("oy"),
+            first_location.get("oz"),
+            first_location.get("ow"),
+        ]
+    elif isinstance(first_location, (list, tuple)) and len(first_location) >= 6:
+        point = list(first_location[:6])
+    elif len(location) >= 6:
+        point = list(location[:6])
+    else:
+        return None
+
+    try:
+        return tuple(float(value) for value in point)
+    except (TypeError, ValueError):
+        return None
+
+
 JSON_ENTITY_ORDER = _load_json_entity_order()
 
 
@@ -340,12 +370,33 @@ async def guide_opening_speech(ctx: Any):
 
     if say("好的，我们现在去" + start_entity_name):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": start_entity_name}
+
+    start_navi_status = NavigationStatus.SUCCEEDED
+    start_point = _extract_first_location_point(start_entity)
+    enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
+    print(f"opening enable_navi: {enable_navi}")
+    if enable_navi:
+        start_navi_status = NavigationStatus.ABORTED
+        if start_point is None:
+            print(f"起始板块缺少可用导航点位: {start_entity}")
+        else:
+            navi_tools = NavigationToolkit(ctx)
+            navi_query = NavigationQuery()
+            x, y, ox, oy, oz, ow = start_point
+            await navi_tools.go_to_async(x, y, ox, oy, oz, ow, navi_query)
+            while await is_navigating(navi_tools):
+                await asyncio.sleep(0.5)
+            start_navi_status = await navi_tools.go_to_status()
+            print(f"opening start_navi_status: {start_navi_status}")
+
     ctx.current_entity_name = start_entity_name
     if start_entity_name in getattr(ctx, "entity_lst", []):
         ctx.current_entity_index = ctx.entity_lst.index(start_entity_name)
-    if start_description:
+    if start_navi_status == NavigationStatus.SUCCEEDED and start_description:
         interrupt_text = tts_long_text_with_stt_stop(ctx.tts_agent, start_description, ctx.stt_agent, ctx.robot, before_text)
         set_opening_pending_text(interrupt_text)
+    elif start_navi_status != NavigationStatus.SUCCEEDED:
+        print(f"起始板块导航未完成，跳过开场介绍: {start_navi_status}")
 
     leader_info = {
         "leader_calling": leader_calling,
