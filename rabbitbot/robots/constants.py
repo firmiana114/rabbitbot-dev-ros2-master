@@ -14,3 +14,4 @@ class NavigationStatus(Enum):
     PREEMPTED = 2
     SUCCEEDED = 3
     ABORTED = 4
+    MID = 99
