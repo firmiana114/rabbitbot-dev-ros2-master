@@ -93,6 +93,49 @@ before_text = ""
 pending_user_text = ""
 
 
+def _env_enabled(name, default="0"):
+    value = os.getenv(name, default).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _workflow_verbose_enabled():
+    return _env_enabled("RABBITBOT_WORKFLOW_VERBOSE", "0")
+
+
+def _workflow_non_integration_enabled():
+    return _env_enabled("RABBITBOT_WORKFLOW_NON_INTEGRATION", "0")
+
+
+def _workflow_log(message, verbose=False):
+    if verbose and not _workflow_verbose_enabled():
+        return
+    print(message)
+
+
+def _wait_manual_navigation_success(location_name):
+    if not _workflow_non_integration_enabled():
+        return False
+
+    prompt = f"[非联调模式] 请在确认到达“{location_name}”后按任意键，workflow 将视为导航成功..."
+    print(prompt, flush=True)
+    try:
+        import sys
+        import termios
+        import tty
+
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        print()
+    except Exception:
+        input(f"[非联调模式] 请在确认到达“{location_name}”后按回车继续...")
+    return True
+
+
 def _load_combined_data():
     data_file = Path(__file__).resolve().parents[2] / "combined_data.json"
     try:
@@ -415,11 +458,13 @@ async def guide_opening_speech(ctx: Any):
     start_points = _extract_location_points(start_entity)
     start_point = start_points[0] if start_points else None
     enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
-    print(f"opening enable_navi: {enable_navi}")
+    _workflow_log(f"开场导航配置: enable_navi={enable_navi}", verbose=True)
     if enable_navi:
         start_navi_status = NavigationStatus.ABORTED
         if start_point is None:
-            print(f"起始板块缺少可用导航点位: {start_entity}")
+            _workflow_log(f"起始板块缺少可用导航点位: {start_entity}")
+        elif _wait_manual_navigation_success(start_entity_name):
+            start_navi_status = NavigationStatus.SUCCEEDED
         else:
             navi_tools = NavigationToolkit(ctx)
             navi_query = NavigationQuery()
@@ -431,7 +476,7 @@ async def guide_opening_speech(ctx: Any):
             while await is_navigating(navi_tools):
                 await asyncio.sleep(0.5)
             start_navi_status = await navi_tools.go_to_status()
-            print(f"opening start_navi_status: {start_navi_status}")
+            _workflow_log(f"开场导航完成: status={start_navi_status}")
 
     ctx.current_entity_name = start_entity_name
     if start_entity_name in getattr(ctx, "entity_lst", []):
@@ -657,7 +702,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             ctx.scripted_tour_index = 0
         ctx.scripted_tour_arrived_index = None
         ctx.scripted_tour_done = False
-        print(f"初始化剧本导览状态: index={ctx.scripted_tour_index}, order={ctx.scripted_tour_order}")
+        _workflow_log(f"初始化剧本导览状态: index={ctx.scripted_tour_index}, order={ctx.scripted_tour_order}", verbose=True)
 
     def build_scripted_intro(entity_name):
         leader_info = getattr(ctx, "leader_info", {}) or {}
@@ -692,7 +737,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             ctx.scripted_tour_index = index + 1
             return "done", SCRIPTED_TOUR_STEP_DONE
 
-        print(f"剧本导览步骤开始: index={index}, entity={entity_name}")
+        _workflow_log(f"剧本导览步骤开始: index={index}, entity={entity_name}")
         already_arrived = (
             getattr(ctx, "scripted_tour_arrived_index", None) == index
             and getattr(ctx, "current_entity_name", None) == entity_name
@@ -711,17 +756,20 @@ def create_main_workflow(ctx: Any) -> Workflow:
             enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
             navi_status = NavigationStatus.SUCCEEDED
             if enable_navi:
-                navi_query = NavigationQuery()
-                x, y, ox, oy, oz, ow = location_points[0]
-                await navi_tools.go_to_async(
-                    x, y, ox, oy, oz, ow, navi_query,
-                    waypoints=location_points if len(location_points) > 1 else None,
-                )
-                while await is_navigating(navi_tools):
-                    await asyncio.sleep(0.5)
-                navi_status = await navi_tools.go_to_status()
-                print(f"剧本导览导航状态: entity={entity_name}, status={navi_status}")
-                await navi_tools.reset_go_to_status()
+                if _wait_manual_navigation_success(entity_name):
+                    navi_status = NavigationStatus.SUCCEEDED
+                else:
+                    navi_query = NavigationQuery()
+                    x, y, ox, oy, oz, ow = location_points[0]
+                    await navi_tools.go_to_async(
+                        x, y, ox, oy, oz, ow, navi_query,
+                        waypoints=location_points if len(location_points) > 1 else None,
+                    )
+                    while await is_navigating(navi_tools):
+                        await asyncio.sleep(0.5)
+                    navi_status = await navi_tools.go_to_status()
+                    await navi_tools.reset_go_to_status()
+                _workflow_log(f"剧本导览导航完成: entity={entity_name}, status={navi_status}")
 
             if navi_status != NavigationStatus.SUCCEEDED:
                 tts_sound(tts_agent, f"{before_text}很抱歉，我暂时无法到达{entity_name}。", "zh")
@@ -747,19 +795,19 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
         ctx.scripted_tour_index = index + 1
         ctx.scripted_tour_arrived_index = None
-        print(f"剧本导览步骤完成: entity={entity_name}, next_index={ctx.scripted_tour_index}")
+        _workflow_log(f"剧本导览步骤完成: entity={entity_name}, next_index={ctx.scripted_tour_index}")
         return "done", SCRIPTED_TOUR_STEP_DONE
 
     async def audio_input_executor(step_input):
         original_task = step_input.message or ''
         previous_steps = step_input.get_all_previous_content()
-        print("original_task:", original_task)
-        print("previous_steps:", previous_steps)
+        _workflow_log(f"original_task: {original_task}", verbose=True)
+        _workflow_log(f"previous_steps: {previous_steps}", verbose=True)
 
         text = original_task
         #text = previous_steps.split("===")[-1]
         #text = text[1:]
-        print("text:", text)
+        _workflow_log(f"text: {text}", verbose=True)
 
         #tts_sound(tts_agent, f"{before_text}我准备好了，您需要帮助吗？", "zh")
         #tts_sound(tts_agent, "You can chat with me now", "en")
@@ -809,27 +857,27 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
     async def plan_executor(step_input):
         previous_steps = step_input.get_all_previous_content()
-        print("previous_steps:", previous_steps)
+        _workflow_log(f"previous_steps: {previous_steps}", verbose=True)
         text_lst = previous_steps.split("===")
         assert text_lst[1].replace(" ", "") == "audio_input_step"
         text = text_lst[2].replace("\n", "")
 
-        print("in_text:", text)
+        _workflow_log(f"in_text: {text}", verbose=True)
         if text in {SCRIPTED_TOUR_STEP_DONE, SCRIPTED_TOUR_FINISHED}:
-            print(f"plan_executor: scripted tour control token {text}, skip planner")
+            _workflow_log(f"plan_executor: scripted tour control token {text}, skip planner", verbose=True)
             return StepOutput(content=text)
         history_text = chat_queue.build_history()
         text =  history_text
-        print("in_text:", text)
+        _workflow_log(f"in_text: {text}", verbose=True)
         rule_task = classify_task_by_rule(text_lst[2].replace("\n", ""))
         if rule_task == "C":
-            print("plan_executor: rule classified as chat")
+            _workflow_log("plan_executor: rule classified as chat", verbose=True)
             return await chat_executor(step_input)
         if rule_task == "N":
-            print("plan_executor: rule classified as navigation")
+            _workflow_log("plan_executor: rule classified as navigation", verbose=True)
             return await navi_check_executor(step_input)
         if rule_task == "V":
-            print("plan_executor: rule classified as view")
+            _workflow_log("plan_executor: rule classified as view", verbose=True)
             return await view_executor(step_input)
 
         start_time = time.time()
@@ -845,15 +893,15 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 #print(f"Content: {event.content}")
                 out_text += event.content
             elif event.event == "ToolCallStarted":
-                print(f"Tool call started: {event.tool}")
+                _workflow_log(f"Tool call started: {event.tool}", verbose=True)
             elif event.event == "ReasoningStep":
-                print(f"Reasoning step: {event.content}")
+                _workflow_log(f"Reasoning step: {event.content}", verbose=True)
             if len(out_text) > 0:
                 break
         duration  = time.time() - start_time
-        print("out_text:", out_text)
+        _workflow_log(f"out_text: {out_text}", verbose=True)
         log_text = f"plan_executor: plan_duration {duration:.3f}, text {out_text}"
-        print(log_text)
+        _workflow_log(log_text, verbose=True)
         file_logger.debug(log_text)
 
         planner_choice = (out_text or "").strip()[:1].upper()
@@ -886,7 +934,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         return 'a' <= s[0].lower() <= 'z'
 
     async def chat_execute(text, sess_idx=None, navi_tools=None):
-        print(f"chat_execute: text {text}")
+        _workflow_log(f"chat_execute: text {text}", verbose=True)
         if is_chinese(text): lang = "zh"
         elif is_english(text): lang = "en"
         else:
@@ -894,7 +942,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             #print(f"Unkown lanugage")
             #out_text = "<CHAT_UNKOWN_LANG>"
             #return StepOutput(content=f"{out_text}")
-        print("lang:", lang)
+        _workflow_log(f"lang: {lang}", verbose=True)
         if text == "<REC_TIMEOUT>":
             out_text = text
             return StepOutput(content=f"{out_text}")
@@ -903,8 +951,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
         WorkflowTimePoints.CHAT_START = time.time()
         if sess_idx is not None:
-            print(f"chat_agent: session_id {str(sess_idx)}")
-            print(f"chat_agent: text {text}")
+            _workflow_log(f"chat_agent: session_id {str(sess_idx)}", verbose=True)
+            _workflow_log(f"chat_agent: text {text}", verbose=True)
             response_stream = chat_agent.run(
                 text, stream=True, stream_intermediate_steps=False,
                 session_id=str(sess_idx)
@@ -944,7 +992,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                         speecher_stop_event.set()
                         break
                 if listener_stop_event.is_set():
-                    print("监听线程收到信号量，退出")
+                    _workflow_log("监听线程收到信号量，退出", verbose=True)
                     break
                 if True:
                     resp_msg = audio_input_stop_chat(stt_agent)
@@ -958,7 +1006,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                         speecher_stop_event.set()
                         break
                 if listener_stop_event.is_set():
-                    print("监听线程收到信号量，退出")
+                    _workflow_log("监听线程收到信号量，退出", verbose=True)
                     break
 
         speecher_stop_thread = threading.Thread(target=stop_task)
@@ -973,18 +1021,18 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 #print(f"Content: {event.content}")
                 out_text += event.content
             elif event.event == "ToolCallStarted":
-                print(f"Tool call started: {event.tool}")
+                _workflow_log(f"Tool call started: {event.tool}", verbose=True)
             elif event.event == "ReasoningStep":
-                print(f"Reasoning step: {event.content}")
+                _workflow_log(f"Reasoning step: {event.content}", verbose=True)
 
             if speecher_stop_event.is_set():
                 tts_stop(tts_agent)
                 time.sleep(0.5)
-                print("已经停止说话了") if lang == "zh" else print("Chatting stopped")
+                _workflow_log("已经停止说话了" if lang == "zh" else "Chatting stopped", verbose=True)
                 break
             if navi_tools is not None:
                 if not await is_navigating(navi_tools):
-                    print("导航达到，停止生成文本")
+                    _workflow_log("导航达到，停止生成文本", verbose=True)
                     break
 
             #print(f"OutText: {out_text}")
@@ -992,7 +1040,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             if out_text.endswith("，") or out_text.endswith("；") or \
                 out_text.endswith("。") or out_text.endswith("？") or out_text.endswith("！") or \
                 out_text.endswith(".") or out_text.endswith("!") or out_text.endswith("\n"):
-                print(f"out_text: {out_text}")
+                _workflow_log(f"out_text: {out_text}", verbose=True)
                 action_name = None
 
                 if out_text.startswith("[A:"):
@@ -1001,17 +1049,17 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 else:
                     text_len = len(out_text)
 
-                print(f"text_len: {text_len}")
+                _workflow_log(f"text_len: {text_len}", verbose=True)
                 if text_len < 8:
                     continue
 
                 if out_text.startswith("[A:"):
                     ei = out_text.index("]")
-                    print(f"ei: {ei}")
+                    _workflow_log(f"ei: {ei}", verbose=True)
                     action_name = out_text[3:ei]
-                    print(f"action_name: {action_name}")
+                    _workflow_log(f"action_name: {action_name}", verbose=True)
                     out_text = out_text[ei+1:]
-                    print(f"out_text: {out_text}")
+                    _workflow_log(f"out_text: {out_text}", verbose=True)
                 #time.sleep(10)
 
                 if is_chinese(out_text):
@@ -1025,7 +1073,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 first_infer_time = WorkflowTimePoints.CHAT_FIRST_TEXT_START - WorkflowTimePoints.CHAT_START
                 WorkflowTimePoints.CHAT_START = WorkflowTimePoints.CHAT_FIRST_TEXT_START
                 log_text = f"chat_executor: seq_idx {num_setence}, infer_time {first_infer_time:.3f}, text {out_text}"
-                print(log_text)
+                _workflow_log(log_text, verbose=True)
                 file_logger.debug(log_text)
                 #tts_index = tts_sound(tts_agent, f"{before_text}" + out_text.strip(), lang)
                 tts_index = tts_sound(tts_agent, out_text.strip(), lang)
@@ -1054,13 +1102,13 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
         remaining_text = out_text.strip()
         if remaining_text and not speecher_stop_event.is_set():
-            print(f"remaining out_text: {remaining_text}")
+            _workflow_log(f"remaining out_text: {remaining_text}", verbose=True)
             action_name = None
             if remaining_text.startswith("[A:") and "]" in remaining_text:
                 ei = remaining_text.index("]")
                 action_name = remaining_text[3:ei]
                 remaining_text = remaining_text[ei+1:].strip()
-                print(f"remaining action_name: {action_name}")
+                _workflow_log(f"remaining action_name: {action_name}", verbose=True)
 
             if remaining_text:
                 if is_chinese(remaining_text):
@@ -1074,7 +1122,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 first_infer_time = WorkflowTimePoints.CHAT_FIRST_TEXT_START - WorkflowTimePoints.CHAT_START
                 WorkflowTimePoints.CHAT_START = WorkflowTimePoints.CHAT_FIRST_TEXT_START
                 log_text = f"chat_executor: seq_idx {num_setence}, infer_time {first_infer_time:.3f}, text {remaining_text}"
-                print(log_text)
+                _workflow_log(log_text, verbose=True)
                 file_logger.debug(log_text)
                 tts_index = tts_sound(tts_agent, remaining_text, lang)
                 speecher_start_event.set()
@@ -1099,15 +1147,15 @@ def create_main_workflow(ctx: Any) -> Workflow:
         while True:
             time.sleep(0.5)
             if speecher_stop_event.is_set():
-                print("收到停止或打断命令，准备退出聊天")
+                _workflow_log("收到停止或打断命令，准备退出聊天", verbose=True)
                 tts_stop(tts_agent)
                 break
             if navi_tools is not None:
                 if not await is_navigating(navi_tools):
-                    print("导航达到，停止等待语音")
+                    _workflow_log("导航达到，停止等待语音", verbose=True)
                     break
             if tts_get_wav_count(tts_agent) == 0:
-                print("WAV播完，退出聊天")
+                _workflow_log("WAV播完，退出聊天", verbose=True)
                 break
         listener_stop_event.set()
         speecher_start_event.set()
@@ -1146,20 +1194,20 @@ def create_main_workflow(ctx: Any) -> Workflow:
     async def chat_executor(step_input):
         WorkflowTimePoints.PLAN_END = time.time()
         plan_time = WorkflowTimePoints.PLAN_END - WorkflowTimePoints.PLAN_START
-        print(f"chat_executor: plan_time: {plan_time:.3f}")
+        _workflow_log(f"chat_executor: plan_time: {plan_time:.3f}", verbose=True)
         original_task = step_input.message or ''
         previous_step = step_input.get_last_step_content()
         previous_steps = step_input.get_all_previous_content()
-        print("original_task:", original_task)
-        print("previous_step:", previous_step)
-        print("previous_steps:", previous_steps)
+        _workflow_log(f"original_task: {original_task}", verbose=True)
+        _workflow_log(f"previous_step: {previous_step}", verbose=True)
+        _workflow_log(f"previous_steps: {previous_steps}", verbose=True)
 
         #text = previous_step.split("=")[2][1:-1]
         #text = previous_step.subtask_description
         text_lst = previous_steps.split("===")
         assert text_lst[1].replace(" ", "") == "audio_input_step"
         text = text_lst[2].replace("\n", "")
-        print("chat_input_text:", text)
+        _workflow_log(f"chat_input_text: {text}", verbose=True)
         #text = str(previous_step)
         #text = text.split("=")[2][1:-1]
         #text = str(original_task)
@@ -1177,14 +1225,14 @@ def create_main_workflow(ctx: Any) -> Workflow:
             tts_sound(tts_agent, f"{before_text}请告诉我你想让我找什么？", "zh")
             audio_input_text = audio_input_execute_timeout(stt_agent, 300)
             task = audio_input_text
-            print("task: ", task)
+            _workflow_log(f"task: {task}", verbose=True)
 
             run_response = ctoe_translate_agent.run(task)
             out_text = run_response.content
-            print("out_text:", out_text)
+            _workflow_log(f"out_text: {out_text}", verbose=True)
 
             task = out_text
-            print("task: ", task)
+            _workflow_log(f"task: {task}", verbose=True)
             await ctx.robot.vln(task)
 
     def load_mock_view_image():
@@ -1206,7 +1254,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         return image
 
     async def view_execute(ctx, task):
-        print("view task:", task)
+        _workflow_log(f"view task: {task}", verbose=True)
         view_mode = os.getenv("RABBITBOT_VIEW_MODE", "mock").strip().lower()
         if view_mode == "robot":
             out_text = await ctx.robot.view(task)
@@ -1223,7 +1271,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             """)
             messages, extra_body = general_vlm_openai.prepare_message_for_vllm([image], prompt)
             out_text = general_vlm_openai.get_chat_response(messages, extra_body)
-        print("view out_text:", out_text)
+        _workflow_log(f"view out_text: {out_text}", verbose=True)
         chat_queue.put(out_text, "机器人")
         tts_sound(tts_agent, f"{before_text}{out_text}", "zh")
         return out_text
@@ -1253,7 +1301,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
     async def view_executor(step_input):
         previous_steps = step_input.get_all_previous_content()
-        print("view previous_steps:", previous_steps)
+        _workflow_log(f"view previous_steps: {previous_steps}", verbose=True)
         text_lst = previous_steps.split("===")
         assert text_lst[1].replace(" ", "") == "audio_input_step"
         task = text_lst[2].replace("\n", "")
@@ -1444,7 +1492,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         skip_confirm=False,
     ):
         nodes = await ctx.memory.query(query=subtask_description, group_name="展点", limit=5)
-        print("nodes:", nodes)
+        _workflow_log(f"nodes: {nodes}", verbose=True)
         #import pdb; pdb.set_trace()
         entities = [
             _prefer_json_entity_location({
@@ -1462,7 +1510,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             task_description=subtask_description,
             entities=entities,
         )
-        print("rerank_prompt:", rerank_prompt)
+        _workflow_log(f"rerank_prompt: {rerank_prompt}", verbose=True)
         # response_iterator = await entity_reranker_agent.arun(
         #     rerank_prompt, stream=True, stream_intermediate_steps=True,
         # )
@@ -1472,7 +1520,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         # response = entity_reranker_agent.run_response
         # entity_name = response.content.strip()
         entity_name = nodes[0].name
-        print("entity_name:", entity_name)
+        _workflow_log(f"entity_name: {entity_name}", verbose=True)
         entity = next(
             (e for e in entities if e['name'] == entity_name), None
         )
@@ -1557,43 +1605,46 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 #tts_sound(tts_agent, f"{before_text}我已经知道了{entity_name}在哪里了，下面我带你去", "zh")
                 #tts_sound(tts_agent, f"{before_text}好的，下面我带你去{entity_name}", "zh")
                 tts_fast(tts_agent, "naviguide")
-                print("entity['location']", entity['location'])
+                _workflow_log(f"entity location: {entity['location']}", verbose=True)
                 location_points = _extract_location_points(entity)
                 if not location_points:
                     print(f"展点缺少可用导航点位: {entity}")
                     return "Unable to reach the place the user wants to go!"
                 x, y, ox, oy, oz, ow = location_points[0]
                 enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
-                print(f"workflow enable_navi: {enable_navi}")
+                _workflow_log(f"workflow enable_navi: {enable_navi}", verbose=True)
                 if enable_navi:
-                    # v1
-                    #response = await navigation_tools.go_to(x, y, yaw)
-                    # v2
-                    navi_query = NavigationQuery()
-                    await navi_tools.go_to_async(
-                        x, y, ox, oy, oz, ow, navi_query,
-                        waypoints=location_points if len(location_points) > 1 else None,
-                    )
-                    # v3
-                    #await navigation_tools.go_to(x, y, ox, oy, oz, ow)
+                    if _wait_manual_navigation_success(entity_name):
+                        navi_status = NavigationStatus.SUCCEEDED
+                    else:
+                        # v1
+                        #response = await navigation_tools.go_to(x, y, yaw)
+                        # v2
+                        navi_query = NavigationQuery()
+                        await navi_tools.go_to_async(
+                            x, y, ox, oy, oz, ow, navi_query,
+                            waypoints=location_points if len(location_points) > 1 else None,
+                        )
+                        # v3
+                        #await navigation_tools.go_to(x, y, ox, oy, oz, ow)
 
-                    #navi_status = navi_query.get_status()
-                    enable_chat = False
-                    while await is_navigating(navi_tools):
-                        if enable_chat:
-                            #tts_sound(tts_agent, f"{before_text}现在你可以和我聊天哟", "zh")
-                            tts_fast(tts_agent, "navichat")
-                            #audio_input_text = audio_input_execute(stt_agent, "speech_to_text_async", timeout=30)
-                            audio_input_text = await audio_input_execute_timeout_navi(stt_agent, 30, navi_tools)
-                            if audio_input_text != "<REC_TIMEOUT>" and audio_input_text != "<NAVI_REACH>":
-                                #tts_sound(tts_agent, f"{before_text}我听到了，让我想一想", "zh")
-                                think_type = identify_think_type(audio_input_text)
-                                tts_fast(tts_agent, think_type)
-                                #await chat_execute(audio_input_text)
-                                await chat_loop_execute(audio_input_text, navi_tools)
                         #navi_status = navi_query.get_status()
+                        enable_chat = False
+                        while await is_navigating(navi_tools):
+                            if enable_chat:
+                                #tts_sound(tts_agent, f"{before_text}现在你可以和我聊天哟", "zh")
+                                tts_fast(tts_agent, "navichat")
+                                #audio_input_text = audio_input_execute(stt_agent, "speech_to_text_async", timeout=30)
+                                audio_input_text = await audio_input_execute_timeout_navi(stt_agent, 30, navi_tools)
+                                if audio_input_text != "<REC_TIMEOUT>" and audio_input_text != "<NAVI_REACH>":
+                                    #tts_sound(tts_agent, f"{before_text}我听到了，让我想一想", "zh")
+                                    think_type = identify_think_type(audio_input_text)
+                                    tts_fast(tts_agent, think_type)
+                                    #await chat_execute(audio_input_text)
+                                    await chat_loop_execute(audio_input_text, navi_tools)
+                            #navi_status = navi_query.get_status()
 
-                    navi_status = await navi_tools.go_to_status()
+                        navi_status = await navi_tools.go_to_status()
                 else:
                     #time.sleep(10.0)
                     navi_status = NavigationStatus.SUCCEEDED
@@ -1656,7 +1707,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 else:
                     tts_sound(tts_agent, f"{before_text}很抱歉，我无法到达目的地", "zh")
                     response = 'Navigation to ({}, {}) failed.'.format(x, y)
-            print("response", response)
+            _workflow_log(f"response: {response}", verbose=True)
         else:
             console = ctx.console
             # Get the live display instance from the console
@@ -1695,10 +1746,10 @@ def create_main_workflow(ctx: Any) -> Workflow:
         #task: DelegationTaskModel = step_input.previous_step_content
         WorkflowTimePoints.PLAN_END = time.time()
         plan_time = WorkflowTimePoints.PLAN_END - WorkflowTimePoints.PLAN_START
-        print(f"chat_executor: plan_time: {plan_time:.3f}")
+        _workflow_log(f"chat_executor: plan_time: {plan_time:.3f}", verbose=True)
 
         previous_steps = step_input.get_all_previous_content()
-        print("previous_steps:", previous_steps)
+        _workflow_log(f"previous_steps: {previous_steps}", verbose=True)
         text_lst = previous_steps.split("===")
         assert text_lst[1].replace(" ", "") == "audio_input_step"
         text = text_lst[2].replace("\n", "")
@@ -1714,22 +1765,22 @@ def create_main_workflow(ctx: Any) -> Workflow:
     async def navi_check_execute(input_text):
         WorkflowTimePoints.PLAN_END = time.time()
         plan_time = WorkflowTimePoints.PLAN_END - WorkflowTimePoints.PLAN_START
-        print(f"chat_executor: plan_time: {plan_time:.3f}")
+        _workflow_log(f"chat_executor: plan_time: {plan_time:.3f}", verbose=True)
 
         global last_chat_text
-        print("last_chat_text:", last_chat_text)
+        _workflow_log(f"last_chat_text: {last_chat_text}", verbose=True)
         #print("input_text:", "机器人："  + last_chat_text + "用户："  + input_text)
         #input_text_with_chat = "机器人："  + last_chat_text + "用户："  + input_text
         history_text = chat_queue.build_history(max_count=4)
         input_text_with_chat = history_text
-        print("input_text_with_chat:", input_text_with_chat)
+        _workflow_log(f"input_text_with_chat: {input_text_with_chat}", verbose=True)
         run_response = navi_check_agent.run(input_text_with_chat, session_id=str(NAVI_CHECK_SESSION_ID))
         out_text = run_response.content
-        print("out_text:", out_text)
+        _workflow_log(f"out_text: {out_text}", verbose=True)
         out_text = out_text.split("\n")[0]
         WorkflowTimePoints.NAVI_CHECK_END = time.time()
         navi_check_time = WorkflowTimePoints.NAVI_CHECK_END - WorkflowTimePoints.NAVI_CHECK_START
-        print(f"navi_check_execute: navi_check_time: {navi_check_time:.3f}")
+        _workflow_log(f"navi_check_execute: navi_check_time: {navi_check_time:.3f}", verbose=True)
 
         num_entity = 1
         recommand_entity_lst = random.sample(ctx.entity_lst, num_entity)
@@ -1767,12 +1818,12 @@ def create_main_workflow(ctx: Any) -> Workflow:
             rand_n = random.randint(0, n-1)
             out_text = ctx.entity_lst[rand_n]
             # 注意：不在这里放入队列，navi_execute 会处理确认询问
-        print("out_text:", out_text)
+        _workflow_log(f"out_text: {out_text}", verbose=True)
 
         if is_next_board_request(input_text):
             next_entity_name = get_next_entity_name()
             if next_entity_name is not None:
-                print(f"next board request resolved to: {next_entity_name}")
+                _workflow_log(f"next board request resolved to: {next_entity_name}", verbose=True)
                 out_text = next_entity_name
                 response = await navi_execute(out_text, skip_confirm=True)
                 return response
@@ -1785,7 +1836,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         if out_text not in ctx.entity_lst and is_direct_navigation_request(input_text):
             fuzzy_entity, fuzzy_score = resolve_navigation_entity_by_fuzzy(input_text, ctx.entity_lst)
             if fuzzy_entity is not None:
-                print(f"导航目标模糊匹配: input={input_text}, entity={fuzzy_entity}, score={fuzzy_score:.3f}")
+                _workflow_log(f"导航目标模糊匹配: input={input_text}, entity={fuzzy_entity}, score={fuzzy_score:.3f}", verbose=True)
                 out_text = fuzzy_entity
 
         if out_text in ctx.entity_lst:
@@ -1801,7 +1852,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
     async def navi_check_executor(step_input):
         WorkflowTimePoints.NAVI_CHECK_START = time.time()
         previous_steps = step_input.get_all_previous_content()
-        print("previous_steps:", previous_steps)
+        _workflow_log(f"previous_steps: {previous_steps}", verbose=True)
         text_lst = previous_steps.split("===")
         assert text_lst[1].replace(" ", "") == "audio_input_step"
         text = text_lst[2].replace("\n", "")
