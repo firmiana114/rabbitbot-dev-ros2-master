@@ -1400,7 +1400,6 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 if navi_status == NavigationStatus.SUCCEEDED and "礼品" not in entity['name']:
                     enable_intro_description = True
                     if enable_intro_description:
-                        input("按回车开始介绍")
                         #tts_sound(tts_agent, f"{before_text}我已经到达了，一会再聊", "zh")
                         #tts_sound(tts_agent, f"{before_text}下面我为你介绍{entity_name}", "zh")
                         time.sleep(0.1)
