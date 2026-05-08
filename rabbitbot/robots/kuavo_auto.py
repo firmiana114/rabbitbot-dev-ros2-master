@@ -597,6 +597,7 @@ class KuavoAutonomyBot(AutonomyBot):
             self._waypoints = []
             self._waypoint_index = 0
             self._last_mid_advance_time = 0.0
+            self._nav_status_final_arrived = False
             self.lio_pose.start()
             self.goal_reach.start()
             self.nav_status.start()
@@ -742,6 +743,10 @@ class KuavoAutonomyBot(AutonomyBot):
         next_status = self.goal_reach.get_status() if self.goal_reach is not None else -1
         #if last_status == 1 and next_status == 3:
         print(f"last_status {last_status}, next_status {next_status}")
+        with self._waypoint_lock:
+            nav_status_final_arrived = self._nav_status_final_arrived
+        if nav_status_final_arrived:
+            return True, NavigationStatus.SUCCEEDED.value
         if last_status == 1 and next_status == 2:
             return True, next_status
         else:
@@ -815,7 +820,8 @@ class KuavoAutonomyBot(AutonomyBot):
                 return
             next_index = self._waypoint_index + 1
             if next_index >= len(self._waypoints):
-                print("KuavoAutonomyBot: recv mid_arrived but no next waypoint")
+                self._nav_status_final_arrived = True
+                print("KuavoAutonomyBot: recv mid_arrived at final waypoint")
                 return
             self._last_mid_advance_time = now
 
@@ -842,6 +848,7 @@ class KuavoAutonomyBot(AutonomyBot):
             self._waypoints = waypoints
             self._waypoint_index = 0
             self._last_mid_advance_time = 0.0
+            self._nav_status_final_arrived = False
         self._send_waypoint(0)
         time.sleep(5)
         is_completed = False
