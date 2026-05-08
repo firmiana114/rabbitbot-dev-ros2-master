@@ -600,6 +600,7 @@ class KuavoAutonomyBot(AutonomyBot):
             self._last_nav_status = ""
             self._pending_arrival_transition = False
             self._nav_status_final_arrived = False
+            self._nav_status_arm_ready = False
             self.lio_pose.start()
             self.goal_reach.start()
             self.nav_status.start()
@@ -752,8 +753,9 @@ class KuavoAutonomyBot(AutonomyBot):
         with self._waypoint_lock:
             nav_status = self._last_nav_status
             nav_status_final_arrived = self._nav_status_final_arrived
+            nav_status_arm_ready = self._nav_status_arm_ready
         print(f"last_status {last_status}, next_status {next_status}, sub {nav_status}")
-        if nav_status_final_arrived:
+        if nav_status_final_arrived and nav_status_arm_ready:
             return True, NavigationStatus.SUCCEEDED.value
         if last_status == 1 and next_status == 2:
             return self._handle_navigation_arrival_transition(next_status)
@@ -823,8 +825,8 @@ class KuavoAutonomyBot(AutonomyBot):
             if nav_status == "arrived":
                 self._pending_arrival_transition = False
                 self._nav_status_final_arrived = True
-                print("KuavoAutonomyBot: nav_status arrived, reached final waypoint")
-                return True, next_status
+                print("KuavoAutonomyBot: nav_status arrived, reached final waypoint, wait arm_ready")
+                return False, next_status
             if nav_status == "mid_arrived":
                 current_index = self._waypoint_index
                 next_index = current_index + 1
@@ -843,25 +845,34 @@ class KuavoAutonomyBot(AutonomyBot):
             if self._send_waypoint(next_index):
                 print(f"KuavoAutonomyBot: arrived at mid waypoint, go to waypoint {next_index + 1}")
             else:
-                print("KuavoAutonomyBot: mid_arrived but no next waypoint")
+                with self._waypoint_lock:
+                    self._nav_status_final_arrived = True
+                print("KuavoAutonomyBot: mid_arrived but no next waypoint, wait arm_ready")
             return False, -1
 
         return False, next_status
 
     def _handle_nav_status(self, status):
-        if status not in {"arrived", "mid_arrived"}:
+        if status not in {"arrived", "mid_arrived", "arm_ready"}:
             return
 
         next_index = None
         with self._waypoint_lock:
             self._last_nav_status = status
             print(f"KuavoAutonomyBot: recv nav_status {status}")
+            if status == "arm_ready":
+                self._nav_status_arm_ready = True
+                if self._nav_status_final_arrived:
+                    print("KuavoAutonomyBot: nav_status arm_ready, final waypoint ready")
+                else:
+                    print("KuavoAutonomyBot: nav_status arm_ready before final arrived")
+                return
             if not self._pending_arrival_transition:
                 return
             if status == "arrived":
                 self._pending_arrival_transition = False
                 self._nav_status_final_arrived = True
-                print("KuavoAutonomyBot: nav_status arrived after 1->2, reached final waypoint")
+                print("KuavoAutonomyBot: nav_status arrived after 1->2, reached final waypoint, wait arm_ready")
                 return
             if status == "mid_arrived":
                 current_index = self._waypoint_index
@@ -876,7 +887,9 @@ class KuavoAutonomyBot(AutonomyBot):
             if self._send_waypoint(next_index):
                 print(f"KuavoAutonomyBot: arrived at mid waypoint, go to waypoint {next_index + 1}")
             else:
-                print("KuavoAutonomyBot: mid_arrived but no next waypoint")
+                with self._waypoint_lock:
+                    self._nav_status_final_arrived = True
+                print("KuavoAutonomyBot: mid_arrived but no next waypoint, wait arm_ready")
 
     def _go_to(
         self,
@@ -900,6 +913,7 @@ class KuavoAutonomyBot(AutonomyBot):
             self._last_nav_status = ""
             self._pending_arrival_transition = False
             self._nav_status_final_arrived = False
+            self._nav_status_arm_ready = False
         self._send_waypoint(0)
         time.sleep(5)
         is_completed = False
