@@ -39,15 +39,18 @@ class SDOutputStream(object):
         self.target_sr = target_sr
         self.play_finish_event = threading.Event()
         self.stream = None
+        self.stream_lock = threading.Lock()
         self.restart()
 
     def play_finish_cb(self):
         self.play_finish = True
 
     def play_and_wait(self, audio):
-        self.play_finish = False
-        self.play_finish_event.clear()
-        self.stream.write(audio)
+        with self.stream_lock:
+            self.play_finish = False
+            self.play_finish_event.clear()
+            if self.stream is not None:
+                self.stream.write(audio)
         #while not self.play_finish:
         #    time.sleep(0.1)
         #print("SDOutputStream: Wait ...")
@@ -55,16 +58,22 @@ class SDOutputStream(object):
         #print("SDOutputStream: Play and wait finish!")
 
     def stop(self):
-        self.play_finish = True
-        self.stream.stop()
-        self.stream.close()
+        with self.stream_lock:
+            self.play_finish = True
+            if self.stream is not None:
+                self.stream.stop()
+                self.stream.close()
+                self.stream = None
 
     def restart(self):
-        self.stream = sd.OutputStream(device=self.device_id,
-                                      samplerate=self.target_sr,
-                                      channels=1,
-                                      finished_callback=self.play_finish_event.set)
-        self.stream.start()
+        with self.stream_lock:
+            if self.stream is not None:
+                return
+            self.stream = sd.OutputStream(device=self.device_id,
+                                          samplerate=self.target_sr,
+                                          channels=1,
+                                          finished_callback=self.play_finish_event.set)
+            self.stream.start()
 
 
 class CloudTTS(object):
@@ -317,14 +326,13 @@ class EspnetTTS(object):
         self.status = TTSStatus.STOPPED
         self.interrupt_generation += 1
         try:
-            if not soft_stop and self.sd_stream is not None:
-                self.sd_stream.stop()
             drained_text = self._drain_queue(self.text_q)
             drained_wav = self._drain_queue(self.wav_q)
             self.num_text = max(0, self.num_text - drained_text)
             self.num_wav = max(0, self.num_wav - drained_wav)
-            if not soft_stop and self.sd_stream is not None:
-                self.sd_stream.restart()
+            # 不在 stop 请求里关闭并重建 sounddevice 流。
+            # 现场发现 stop 与播放线程的 stream.write 并发时，ALSA/PortAudio
+            # 可能触发底层内存损坏并导致 TTS 服务进程退出。
         except Exception as e:
             print(f"TTS stop_wait_restart error: {e}")
         self.status = TTSStatus.RUNNING

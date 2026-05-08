@@ -902,8 +902,11 @@ class TTSAgent:
             except:
                 logger.warning(f"Can't parse node from {resp.text}")
                 out_text = ""
-        except Timeout as e:
+        except Timeout:
             print('TTSAgent: Timeout')
+            out_text = ""
+        except RequestException as e:
+            print(f'TTSAgent: request failed: {e}')
             out_text = ""
         return out_text
 
