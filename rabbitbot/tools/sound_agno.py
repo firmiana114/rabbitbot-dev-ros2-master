@@ -196,7 +196,24 @@ def _is_valid_interrupt_text(text):
     return text not in ignored_texts
 
 
-def tts_long_text_with_stt_stop(tts_agent, text, stt_agent, robot, before_text=None):
+def _normalize_interrupt_control_text(text):
+    return re.sub(r"[\s，。！？?、,.!；;：:\"'“”‘’（）()\[\]【】]+", "", text or "").lower()
+
+
+def _is_ignored_interrupt_text(text, ignored_interrupt_texts=None):
+    if not ignored_interrupt_texts:
+        return False
+    normalized_text = _normalize_interrupt_control_text(text)
+    if normalized_text == "":
+        return False
+    normalized_ignored_texts = {
+        _normalize_interrupt_control_text(item)
+        for item in ignored_interrupt_texts
+    }
+    return normalized_text in normalized_ignored_texts
+
+
+def tts_long_text_with_stt_stop(tts_agent, text, stt_agent, robot, before_text=None, ignored_interrupt_texts=None):
     sentences = re.split(r'[，；。]', text)
 
     tts_stop_event = threading.Event()
@@ -212,6 +229,10 @@ def tts_long_text_with_stt_stop(tts_agent, text, stt_agent, robot, before_text=N
             if _is_valid_interrupt_text(out_text):
                 out_text = out_text.strip()
                 if not is_interrupt_loud_enough(stt_agent):
+                    stt_start_async(stt_agent)
+                    continue
+                if _is_ignored_interrupt_text(out_text, ignored_interrupt_texts):
+                    print("忽略剧本继续确认词：", out_text)
                     stt_start_async(stt_agent)
                     continue
                 print("收到打断输入：", out_text)

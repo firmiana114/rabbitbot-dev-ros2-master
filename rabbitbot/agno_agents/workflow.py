@@ -623,12 +623,37 @@ def create_main_workflow(ctx: Any) -> Workflow:
     )
     general_vlm_openai = create_general_vlm_openai()
 
+    DOCX_SCRIPT_CONTINUE_TEXTS = {
+        "好", "好的", "好啊", "好呀", "嗯", "嗯嗯", "可以", "行", "行的",
+        "继续", "继续吧", "接着讲", "接着说", "往下讲", "往下说",
+        "收到", "知道了", "明白", "明白了", "没问题",
+    }
+
+    def normalize_docx_script_control_text(text):
+        return re.sub(r"[\s，。！？?、,.!；;：:\"'“”‘’（）()\[\]【】]+", "", text or "").lower()
+
+    def is_docx_script_continue_text(text):
+        return normalize_docx_script_control_text(text) in {
+            normalize_docx_script_control_text(item)
+            for item in DOCX_SCRIPT_CONTINUE_TEXTS
+        }
+
+    def docx_script_in_progress():
+        return (
+            _strict_docx_script_enabled()
+            and hasattr(ctx, "docx_script_step_index")
+            and not getattr(ctx, "docx_script_done", False)
+        )
+
     def set_pending_user_text(text):
         global pending_user_text
         if text is None:
             return False
         text = text.strip()
         if text == "":
+            return False
+        if docx_script_in_progress() and is_docx_script_continue_text(text):
+            print(f"忽略剧本继续确认词: {text}")
             return False
         pending_user_text = text
         print(f"设置打断后的下一轮用户输入: {pending_user_text}")
@@ -834,7 +859,12 @@ def create_main_workflow(ctx: Any) -> Workflow:
         guide_text = step.get("guide")
         if guide_text:
             interrupt_text = tts_long_text_with_stt_stop(
-                tts_agent, format_docx_script_text(guide_text), stt_agent, ctx.robot, before_text
+                tts_agent,
+                format_docx_script_text(guide_text),
+                stt_agent,
+                ctx.robot,
+                before_text,
+                ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
             )
             if not _is_empty_stt_text(interrupt_text):
                 return ("interrupt", interrupt_text.strip())
@@ -901,9 +931,19 @@ def create_main_workflow(ctx: Any) -> Workflow:
             text = segment.get("text", "")
             if text:
                 interrupt_text = tts_long_text_with_stt_stop(
-                    tts_agent, format_docx_script_text(text), stt_agent, ctx.robot, before_text
+                    tts_agent,
+                    format_docx_script_text(text),
+                    stt_agent,
+                    ctx.robot,
+                    before_text,
+                    ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
                 )
                 if not _is_empty_stt_text(interrupt_text):
+                    if is_docx_script_continue_text(interrupt_text):
+                        print(f"忽略剧本继续确认词: {interrupt_text}")
+                        segment_index += 1
+                        ctx.docx_script_segment_index = segment_index
+                        continue
                     print(f"DOCX 剧本被用户打断: scene={scene}, segment={segment_index}, text={interrupt_text}")
                     ctx.docx_script_segment_index = segment_index
                     return "interrupt", interrupt_text.strip()
@@ -926,6 +966,10 @@ def create_main_workflow(ctx: Any) -> Workflow:
         ctx.docx_script_segment_index = 0
         ctx.docx_script_nav_done_step = None
         _workflow_log(f"DOCX 剧本步骤完成: scene={scene}, next_index={ctx.docx_script_step_index}")
+        if ctx.docx_script_step_index >= len(DOCX_SCRIPT_STEPS):
+            ctx.docx_script_done = True
+            _workflow_log("DOCX 剧本全部完成")
+            return "done", SCRIPTED_TOUR_FINISHED
         return "done", SCRIPTED_TOUR_STEP_DONE
 
     async def run_scripted_tour_next_step():
@@ -1034,6 +1078,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
         text = "请介绍一下深圳这座城市"
         pending_text = pop_pending_user_text()
+        if pending_text and docx_script_in_progress() and is_docx_script_continue_text(pending_text):
+            print(f"忽略剧本继续确认词: {pending_text}")
+            pending_text = ""
         if pending_text:
             out_text = pending_text
             print(f"使用打断输入作为下一轮用户输入: {out_text}")
@@ -2439,6 +2486,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
     ) -> AsyncIterator[Union[WorkflowRunResponseEvent, StepOutput]]:
         original_task = step_input.message or ''
         previous_steps = step_input.get_all_previous_content()
+
+        if SCRIPTED_TOUR_FINISHED in previous_steps:
+            return StepOutput(content=CompletionCheckModel(task_completed=True))
+        if SCRIPTED_TOUR_STEP_DONE in previous_steps:
+            return StepOutput(content=CompletionCheckModel(task_completed=False))
 
         prompt = dedent("""\
             Task: "{task_description}"
