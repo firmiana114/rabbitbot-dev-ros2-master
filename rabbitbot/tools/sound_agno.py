@@ -267,6 +267,31 @@ def tts_long_text_with_stt_stop(tts_agent, text, stt_agent, robot, before_text=N
     return interrupt_text_holder["text"]
 
 
+def tts_ask_with_early_stt(tts_agent, text, stt_agent, timeout=8, lang="zh"):
+    """在播报问题前启动 STT，避免用户需要等待监听启动后才能回答。"""
+    print(f"audio_input early ask: timeout {timeout}")
+    audio_input_execute(stt_agent, "start_async", "")
+    tts_sound(tts_agent, text, lang)
+
+    time_sec = 0
+    audio_input_text = audio_input_execute(stt_agent, "get_text_async")
+    audio_input_status = audio_input_execute(stt_agent, "get_status_async")
+    while audio_input_text == "" and audio_input_status == "<REC_START>":
+        time.sleep(0.2)
+        time_sec += 0.2
+        if time_sec > timeout:
+            audio_input_text = "<REC_TIMEOUT>"
+            break
+        audio_input_text = audio_input_execute(stt_agent, "get_text_async")
+        audio_input_status = audio_input_execute(stt_agent, "get_status_async")
+
+    audio_input_text = _dedupe_stt_utterance(stt_agent, audio_input_text)
+    if audio_input_status == "<REC_STOP>" and audio_input_text == "":
+        audio_input_text = "<REC_STOP>"
+    audio_input_execute(stt_agent, "stop_async")
+    return audio_input_text
+
+
 def tts_long_text(tts_agent, text, stt_agent, robot, before_text=None):
     sentences = re.split(r'[，；。]', text)
 

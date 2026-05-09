@@ -48,6 +48,7 @@ from rabbitbot.tools.sound_agno import (
     audio_input_execute,
     audio_input_execute_timeout,
     audio_input_execute_timeout_navi,
+    tts_ask_with_early_stt,
     audio_input_yes_or_no,
     audio_input_yes_or_no_ignore_echo,
     audio_input_stop_chat,
@@ -406,10 +407,7 @@ async def guide_opening_speech(ctx: Any):
     await asyncio.sleep(1.0)
     if say("请把话筒给领导。"):
         return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
-    if say("领导，您怎么称呼？"):
-        return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
-
-    raw_name_text = audio_input_execute_timeout(ctx.stt_agent, timeout=8, text="")
+    raw_name_text = tts_ask_with_early_stt(ctx.tts_agent, "领导，您怎么称呼？", ctx.stt_agent, timeout=8)
     if _is_empty_stt_text(raw_name_text):
         leader_calling = "领导"
     else:
@@ -419,15 +417,15 @@ async def guide_opening_speech(ctx: Any):
     if say(f"{leader_calling}，您好。"):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
     await ctx.robot.do_arm_async("打招呼")
-    if say("欢迎您来到我们人形机器人产业园，您是第一次来我们园区吗？"):
-        return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
-
-    raw_visit_text = audio_input_execute_timeout(ctx.stt_agent, timeout=8, text="")
+    raw_visit_text = tts_ask_with_early_stt(
+        ctx.tts_agent,
+        f"{leader_calling}，欢迎您来到我们人形机器人产业园，您是第一次来我们园区吗？",
+        ctx.stt_agent,
+        timeout=8,
+    )
     visit_type = _parse_first_visit_answer(raw_visit_text)
     if visit_type == "unknown":
-        if say("我没听清，您是第一次来我们园区吗？"):
-            return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
-        raw_visit_text_retry = audio_input_execute_timeout(ctx.stt_agent, timeout=8, text="")
+        raw_visit_text_retry = tts_ask_with_early_stt(ctx.tts_agent, "我没听清，您是第一次来我们园区吗？", ctx.stt_agent, timeout=8)
         retry_visit_type = _parse_first_visit_answer(raw_visit_text_retry)
         if retry_visit_type != "unknown":
             raw_visit_text = raw_visit_text_retry
