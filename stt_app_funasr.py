@@ -325,6 +325,14 @@ async def _exec(task, lang, text, timeout):
         else:
             recorder.output_text = ""
             recorder.output_utterance_id = 0
+
+    elif task == "inject_text_async":
+        recorder.utterance_id += 1
+        recorder.output_utterance_id = recorder.utterance_id
+        recorder.output_text = text or ""
+        recorder.has_recognized = True
+        out_text = recorder.output_text
+        utterance_id = recorder.output_utterance_id
             
     else:
         out_text = f"Unsupported task: {task}"
