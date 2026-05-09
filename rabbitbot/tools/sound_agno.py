@@ -213,7 +213,15 @@ def _is_ignored_interrupt_text(text, ignored_interrupt_texts=None):
     return normalized_text in normalized_ignored_texts
 
 
-def tts_long_text_with_stt_stop(tts_agent, text, stt_agent, robot, before_text=None, ignored_interrupt_texts=None):
+def tts_long_text_with_stt_stop(
+    tts_agent,
+    text,
+    stt_agent,
+    robot,
+    before_text=None,
+    ignored_interrupt_texts=None,
+    ignore_unlisted_interrupts=False,
+):
     sentences = re.split(r'[，；。]', text)
 
     tts_stop_event = threading.Event()
@@ -233,6 +241,10 @@ def tts_long_text_with_stt_stop(tts_agent, text, stt_agent, robot, before_text=N
                     continue
                 if _is_ignored_interrupt_text(out_text, ignored_interrupt_texts):
                     print("忽略剧本继续确认词：", out_text)
+                    stt_start_async(stt_agent)
+                    continue
+                if ignore_unlisted_interrupts and not (out_text.startswith("停止") or "停" in out_text):
+                    print("严格演出模式忽略剧本讲解输入：", out_text)
                     stt_start_async(stt_agent)
                     continue
                 print("收到打断输入：", out_text)

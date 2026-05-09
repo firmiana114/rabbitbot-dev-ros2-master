@@ -865,6 +865,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 ctx.robot,
                 before_text,
                 ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
+                ignore_unlisted_interrupts=True,
             )
             if not _is_empty_stt_text(interrupt_text):
                 return ("interrupt", interrupt_text.strip())
@@ -937,6 +938,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     ctx.robot,
                     before_text,
                     ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
+                    ignore_unlisted_interrupts=True,
                 )
                 if not _is_empty_stt_text(interrupt_text):
                     if is_docx_script_continue_text(interrupt_text):
