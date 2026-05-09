@@ -34,6 +34,7 @@ from .prompts import (
     get_inst_plan,
     get_inst_navi_check,
     get_inst_chat,
+    get_inst_post_docx_chat,
     get_inst_search_check,
     get_inst_ctoe_translate
 )
@@ -621,6 +622,15 @@ def create_main_workflow(ctx: Any) -> Workflow:
         add_history_to_messages=True,
         num_history_runs=max_chat_history,
     )
+    post_docx_chat_agent = Agent(
+        name='Post DOCX Chat Agent',
+        role='Assistant',
+        instructions=get_inst_post_docx_chat(),
+        model=model,
+        read_chat_history=False,
+        add_history_to_messages=True,
+        num_history_runs=max_chat_history,
+    )
     general_vlm_openai = create_general_vlm_openai()
 
     DOCX_SCRIPT_CONTINUE_TEXTS = {
@@ -988,6 +998,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         _workflow_log(f"DOCX 剧本步骤完成: scene={scene}, next_index={ctx.docx_script_step_index}")
         if ctx.docx_script_step_index >= len(DOCX_SCRIPT_STEPS):
             ctx.docx_script_done = True
+            ctx.post_docx_chat_mode = True
             _workflow_log("DOCX 剧本全部完成")
             return "done", SCRIPTED_TOUR_FINISHED
         return "done", SCRIPTED_TOUR_STEP_DONE
@@ -1152,6 +1163,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
         if text in {SCRIPTED_TOUR_STEP_DONE, SCRIPTED_TOUR_FINISHED}:
             _workflow_log(f"plan_executor: scripted tour control token {text}, skip planner", verbose=True)
             return StepOutput(content=text)
+        if getattr(ctx, "post_docx_chat_mode", False):
+            _workflow_log("plan_executor: post DOCX chat mode, skip guide planner", verbose=True)
+            return await chat_executor(step_input)
         history_text = chat_queue.build_history()
         text =  history_text
         _workflow_log(f"in_text: {text}", verbose=True)
@@ -1236,15 +1250,16 @@ def create_main_workflow(ctx: Any) -> Workflow:
         tts_wait(tts_agent)
 
         WorkflowTimePoints.CHAT_START = time.time()
+        active_chat_agent = post_docx_chat_agent if getattr(ctx, "post_docx_chat_mode", False) else chat_agent
         if sess_idx is not None:
             _workflow_log(f"chat_agent: session_id {str(sess_idx)}", verbose=True)
             _workflow_log(f"chat_agent: text {text}", verbose=True)
-            response_stream = chat_agent.run(
+            response_stream = active_chat_agent.run(
                 text, stream=True, stream_intermediate_steps=False,
                 session_id=str(sess_idx)
             )
         else:
-            response_stream = chat_agent.run(
+            response_stream = active_chat_agent.run(
                 text, stream=True, stream_intermediate_steps=False,
             )
 
@@ -2507,8 +2522,10 @@ def create_main_workflow(ctx: Any) -> Workflow:
         original_task = step_input.message or ''
         previous_steps = step_input.get_all_previous_content()
 
+        if getattr(ctx, "post_docx_chat_mode", False):
+            return StepOutput(content=CompletionCheckModel(task_completed=False))
         if SCRIPTED_TOUR_FINISHED in previous_steps:
-            return StepOutput(content=CompletionCheckModel(task_completed=True))
+            return StepOutput(content=CompletionCheckModel(task_completed=False))
         if SCRIPTED_TOUR_STEP_DONE in previous_steps:
             return StepOutput(content=CompletionCheckModel(task_completed=False))
 
