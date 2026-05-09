@@ -463,7 +463,9 @@ async def guide_opening_speech(ctx: Any):
     start_point = start_points[0] if start_points else None
     enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
     _workflow_log(f"开场导航配置: enable_navi={enable_navi}", verbose=True)
-    if enable_navi:
+    if _strict_docx_script_enabled():
+        _workflow_log("严格 DOCX 剧本默认从起始板块开始，跳过开场后的起始点导航", verbose=True)
+    elif enable_navi:
         start_navi_status = NavigationStatus.ABORTED
         if start_point is None:
             _workflow_log(f"起始板块缺少可用导航点位: {start_entity}")
