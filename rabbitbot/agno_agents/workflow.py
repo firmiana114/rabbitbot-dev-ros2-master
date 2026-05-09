@@ -838,6 +838,20 @@ def create_main_workflow(ctx: Any) -> Workflow:
         coffee_order = getattr(ctx, "docx_script_answers", {}).get("coffee_order", "")
         return text.format(leader_calling=leader_calling, coffee_order=coffee_order)
 
+    def is_valid_coffee_answer(text):
+        normalized_text = re.sub(r"[\s，。！？?、,.!；;：:\"'“”‘’（）()\[\]【】]+", "", text or "").lower()
+        if normalized_text == "":
+            return False
+
+        coffee_keywords = [
+            "咖啡", "拿铁", "美式", "热拿铁", "冰拿铁", "热美式", "冰美式",
+            "都可以", "随便", "任选", "一样", "都行", "可以",
+        ]
+        no_coffee_keywords = [
+            "不喝", "不用", "不要", "不需要", "免了", "算了", "不用了", "不要了",
+        ]
+        return any(keyword in normalized_text for keyword in coffee_keywords + no_coffee_keywords)
+
     async def navigate_docx_script_step(step, step_index):
         entity_name = step.get("entity")
         if not entity_name:
@@ -955,7 +969,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 listen_timeout = int(segment.get("listen_timeout", 8))
                 answer = audio_input_execute_timeout(stt_agent, timeout=listen_timeout, text="")
                 if not _is_empty_stt_text(answer):
-                    ctx.docx_script_answers[listen_key] = answer.strip()
+                    answer = answer.strip()
+                    if listen_key == "coffee_order" and not is_valid_coffee_answer(answer):
+                        print(f"忽略非咖啡相关回答: {answer}")
+                    else:
+                        ctx.docx_script_answers[listen_key] = answer
 
             pause_seconds = float(segment.get("pause", 0) or 0)
             if pause_seconds > 0:
