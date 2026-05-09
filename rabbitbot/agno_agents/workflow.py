@@ -106,6 +106,10 @@ def _workflow_non_integration_enabled():
     return _env_enabled("RABBITBOT_WORKFLOW_NON_INTEGRATION", "0")
 
 
+def _strict_docx_script_enabled():
+    return _env_enabled("RABBITBOT_STRICT_DOCX_SCRIPT", "1")
+
+
 def _workflow_log(message, verbose=False):
     if verbose and not _workflow_verbose_enabled():
         return
@@ -411,8 +415,10 @@ async def guide_opening_speech(ctx: Any):
     else:
         leader_calling = _extract_leader_calling(raw_name_text)
 
+    await ctx.robot.do_arm_async("握手")
     if say(f"{leader_calling}，您好。"):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
+    await ctx.robot.do_arm_async("打招呼")
     if say("欢迎您来到我们人形机器人产业园，您是第一次来我们园区吗？"):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
 
@@ -451,7 +457,7 @@ async def guide_opening_speech(ctx: Any):
         if start_node is not None:
             start_description = start_node.attributes.get("description", "") or start_node.attributes.get("describtion", "") or start_node.summary or ""
 
-    if say("好的，我们现在去" + start_entity_name):
+    if not _strict_docx_script_enabled() and say("好的，我们现在去" + start_entity_name):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": start_entity_name}
 
     start_navi_status = NavigationStatus.SUCCEEDED
@@ -481,7 +487,7 @@ async def guide_opening_speech(ctx: Any):
     ctx.current_entity_name = start_entity_name
     if start_entity_name in getattr(ctx, "entity_lst", []):
         ctx.current_entity_index = ctx.entity_lst.index(start_entity_name)
-    if start_navi_status == NavigationStatus.SUCCEEDED and start_description:
+    if start_navi_status == NavigationStatus.SUCCEEDED and start_description and not _strict_docx_script_enabled():
         interrupt_text = tts_long_text_with_stt_stop(ctx.tts_agent, start_description, ctx.stt_agent, ctx.robot, before_text)
         set_opening_pending_text(interrupt_text)
     elif start_navi_status != NavigationStatus.SUCCEEDED:
@@ -683,6 +689,86 @@ def create_main_workflow(ctx: Any) -> Workflow:
         "智慧园区板块": "right_hand_pointing",
         "合影板块": "再见",
     }
+    DOCX_SCRIPT_POINT_ENTITY = {
+        "point_2": "多功能展示区",
+        "point_3": "园区历史板块",
+        "point_4": "园区布局板块",
+        "point_5": "合影板块",
+    }
+    DOCX_SCRIPT_STEPS = [
+        {
+            "scene": "跟随步行",
+            "entity": DOCX_SCRIPT_POINT_ENTITY["point_2"],
+            "guide": "{leader_calling}、各位，请随我来。",
+            "segments": [
+                {
+                    "text": "对了，{leader_calling}、各位，我们这里有咖啡，拿铁、美式，您看您各位需要什么？",
+                    "listen_key": "coffee_order",
+                    "listen_timeout": 8,
+                },
+                {"action": "OK手势", "text": "好的，我来给各位安排。"},
+            ],
+        },
+        {
+            "scene": "初步介绍",
+            "entity": DOCX_SCRIPT_POINT_ENTITY["point_3"],
+            "segments": [
+                {
+                    "text": "我们产业园2025年12月开园后，我们紧扣人形机器人核心赛道，做了大量工作，除了提升园区的软件和硬件水平外，我们还不断加大产业项目招引，目前，签约共创实验室平台1个，签约机器人产研项目20余个，成果十分显著。"
+                },
+            ],
+        },
+        {
+            "scene": "机器狗表演",
+            "entity": DOCX_SCRIPT_POINT_ENTITY["point_3"],
+            "skip_navigation_if_current": True,
+            "segments": [
+                {
+                    "action": "right_hand_pointing",
+                    "text": "{leader_calling}，您的到来我和我的小伙伴们都非常高兴，他们说要给您表演个节目，您看咱们看个节目，顺便等下咖啡？",
+                },
+                {"text": "小伙伴们动起来吧！"},
+                {
+                    "text": "那我再给您讲讲我们园区的规划情况：近期我们园区也取得了一些成绩，但是我们正在以“专业化、智能化、生态化”为目标，正在系统推进市级特色园区的创建工作。未来我们园区将继续围绕人形机器人这个产业核心赛道，持续创新、加快项目招引力度、完善产业生态、提升运营服务、做强特色，全力将我们园区打造为长三角具有影响力的人形机器人产业高地。"
+                },
+            ],
+        },
+        {
+            "scene": "拿取咖啡",
+            "entity": DOCX_SCRIPT_POINT_ENTITY["point_3"],
+            "skip_navigation_if_current": True,
+            "segments": [
+                {"text": "跳的真好，谢谢小伙伴！"},
+                {"text": "大概就是这些了。"},
+                {
+                    "action": "right_hand_pointing",
+                    "text": "{leader_calling}，咖啡已经到了，请各位领导自取。",
+                },
+            ],
+        },
+        {
+            "scene": "观看沙盘",
+            "entity": DOCX_SCRIPT_POINT_ENTITY["point_4"],
+            "segments": [
+                {
+                    "action": "right_hand_pointing",
+                    "text": "各位领导跟我来，园区占地约217亩，总建筑面积32.8万平方米，总投资12.6亿元，园区采用“两轴四片”设计，以东西生活轴、南北生产轴划分四大产业组团，尤其值得一提的是，我们通力合作，将建设周期从24个月压缩至21个月，提前3个月全面竣工，体现了“滨湖速度”。这个是我们整个园区的布局沙盘。",
+                },
+            ],
+        },
+        {
+            "scene": "告别并指引小巴方向",
+            "entity": DOCX_SCRIPT_POINT_ENTITY["point_5"],
+            "segments": [
+                {"text": "各位领导，眼见为实，为了让各位领导可以更多的了解我们的园区。"},
+                {
+                    "action": "right_hand_pointing",
+                    "text": "我们安排了无人驾驶小巴，也是我的小伙伴，小紫，带各位领导更加深入的了解我们园区。",
+                },
+                {"action": "再见", "text": "各位领导再会！"},
+            ],
+        },
+    ]
 
     def scripted_tour_enabled():
         value = os.getenv("RABBITBOT_SCRIPTED_TOUR", "1").strip().lower()
@@ -711,11 +797,144 @@ def create_main_workflow(ctx: Any) -> Workflow:
             return f"{leader_calling}，请各位移步合影区。"
         return f"{leader_calling}，下面请随我来到{entity_name}。"
 
+    def init_docx_script_state():
+        if hasattr(ctx, "docx_script_step_index"):
+            return
+        ctx.docx_script_step_index = 0
+        ctx.docx_script_segment_index = 0
+        ctx.docx_script_nav_done_step = None
+        ctx.docx_script_done = False
+        ctx.docx_script_answers = {}
+        _workflow_log("初始化 DOCX 剧本演出状态", verbose=True)
+
+    def format_docx_script_text(text):
+        leader_info = getattr(ctx, "leader_info", {}) or {}
+        leader_calling = leader_info.get("leader_calling") or "各位领导"
+        coffee_order = getattr(ctx, "docx_script_answers", {}).get("coffee_order", "")
+        return text.format(leader_calling=leader_calling, coffee_order=coffee_order)
+
+    async def navigate_docx_script_step(step, step_index):
+        entity_name = step.get("entity")
+        if not entity_name:
+            return NavigationStatus.SUCCEEDED
+
+        if step.get("skip_navigation_if_current") and getattr(ctx, "current_entity_name", None) == entity_name:
+            return NavigationStatus.SUCCEEDED
+
+        entity = _load_json_entity(entity_name)
+        if entity is None:
+            print(f"DOCX 剧本展点不存在: {entity_name}")
+            return NavigationStatus.ABORTED
+
+        location_points = _extract_location_points(entity)
+        if not location_points:
+            print(f"DOCX 剧本展点缺少可用导航点位: {entity_name}")
+            return NavigationStatus.ABORTED
+
+        guide_text = step.get("guide")
+        if guide_text:
+            interrupt_text = tts_long_text_with_stt_stop(
+                tts_agent, format_docx_script_text(guide_text), stt_agent, ctx.robot, before_text
+            )
+            if not _is_empty_stt_text(interrupt_text):
+                return ("interrupt", interrupt_text.strip())
+
+        enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
+        navi_status = NavigationStatus.SUCCEEDED
+        if enable_navi:
+            if _wait_manual_navigation_success(entity_name):
+                navi_status = NavigationStatus.SUCCEEDED
+            else:
+                navi_query = NavigationQuery()
+                x, y, ox, oy, oz, ow = location_points[0]
+                await navi_tools.go_to_async(
+                    x, y, ox, oy, oz, ow, navi_query,
+                    waypoints=location_points if len(location_points) > 1 else None,
+                )
+                while await is_navigating(navi_tools):
+                    await asyncio.sleep(0.5)
+                navi_status = await navi_tools.go_to_status()
+                await navi_tools.reset_go_to_status()
+
+        if navi_status == NavigationStatus.SUCCEEDED:
+            set_current_entity_name(entity_name)
+            ctx.docx_script_nav_done_step = step_index
+        return navi_status
+
+    async def run_docx_scripted_tour_next_step():
+        if pending_user_text:
+            return None, None
+
+        init_docx_script_state()
+        if getattr(ctx, "docx_script_done", False):
+            return None, None
+
+        step_index = getattr(ctx, "docx_script_step_index", 0)
+        if step_index >= len(DOCX_SCRIPT_STEPS):
+            ctx.docx_script_done = True
+            return "done", SCRIPTED_TOUR_FINISHED
+
+        step = DOCX_SCRIPT_STEPS[step_index]
+        scene = step.get("scene", f"步骤{step_index + 1}")
+        _workflow_log(f"DOCX 剧本步骤开始: index={step_index}, scene={scene}")
+
+        if getattr(ctx, "docx_script_nav_done_step", None) != step_index:
+            nav_result = await navigate_docx_script_step(step, step_index)
+            if isinstance(nav_result, tuple) and nav_result[0] == "interrupt":
+                return nav_result
+            if nav_result != NavigationStatus.SUCCEEDED:
+                tts_sound(tts_agent, f"{before_text}很抱歉，我暂时无法到达{step.get('entity', scene)}。", "zh")
+                tts_wait(tts_agent)
+                ctx.docx_script_step_index = step_index + 1
+                ctx.docx_script_segment_index = 0
+                ctx.docx_script_nav_done_step = None
+                return "done", SCRIPTED_TOUR_STEP_DONE
+
+        segments = step.get("segments", [])
+        segment_index = getattr(ctx, "docx_script_segment_index", 0)
+        while segment_index < len(segments):
+            segment = segments[segment_index]
+            action_name = segment.get("action")
+            if action_name:
+                await ctx.robot.do_arm_async(action_name)
+
+            text = segment.get("text", "")
+            if text:
+                interrupt_text = tts_long_text_with_stt_stop(
+                    tts_agent, format_docx_script_text(text), stt_agent, ctx.robot, before_text
+                )
+                if not _is_empty_stt_text(interrupt_text):
+                    print(f"DOCX 剧本被用户打断: scene={scene}, segment={segment_index}, text={interrupt_text}")
+                    ctx.docx_script_segment_index = segment_index
+                    return "interrupt", interrupt_text.strip()
+
+            listen_key = segment.get("listen_key")
+            if listen_key:
+                listen_timeout = int(segment.get("listen_timeout", 8))
+                answer = audio_input_execute_timeout(stt_agent, timeout=listen_timeout, text="")
+                if not _is_empty_stt_text(answer):
+                    ctx.docx_script_answers[listen_key] = answer.strip()
+
+            pause_seconds = float(segment.get("pause", 0) or 0)
+            if pause_seconds > 0:
+                await asyncio.sleep(pause_seconds)
+
+            segment_index += 1
+            ctx.docx_script_segment_index = segment_index
+
+        ctx.docx_script_step_index = step_index + 1
+        ctx.docx_script_segment_index = 0
+        ctx.docx_script_nav_done_step = None
+        _workflow_log(f"DOCX 剧本步骤完成: scene={scene}, next_index={ctx.docx_script_step_index}")
+        return "done", SCRIPTED_TOUR_STEP_DONE
+
     async def run_scripted_tour_next_step():
         if not scripted_tour_enabled():
             return None, None
         if pending_user_text:
             return None, None
+        if _strict_docx_script_enabled():
+            return await run_docx_scripted_tour_next_step()
 
         init_scripted_tour_state()
         if getattr(ctx, "scripted_tour_done", False):
