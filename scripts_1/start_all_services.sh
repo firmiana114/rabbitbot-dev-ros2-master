@@ -57,6 +57,9 @@ AUTO_START_WORKFLOW="${AUTO_START_WORKFLOW:-1}"
 RESTART_EXISTING="${RESTART_EXISTING:-0}"
 WAIT_DEFAULT_SECONDS="${WAIT_DEFAULT_SECONDS:-180}"
 WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS:-600}"
+RABBITBOT_WORKFLOW_NON_INTEGRATION="${RABBITBOT_WORKFLOW_NON_INTEGRATION:-0}"
+RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE:-0}"
+RABBITBOT_SCRIPTED_TOUR="${RABBITBOT_SCRIPTED_TOUR:-}"
 
 mkdir -p "${LOG_DIR}"
 
@@ -312,7 +315,20 @@ start_workflow() {
 
     log_info "前台启动 Workflow，后续输出会直接显示在当前终端"
     log_info "按 Ctrl+C 可停止前台 workflow"
-    docker exec -it "${WORKFLOW_CONTAINER}" bash -lc '
+    local docker_env=(
+        -e "RABBITBOT_WORKFLOW_NON_INTEGRATION=${RABBITBOT_WORKFLOW_NON_INTEGRATION}"
+        -e "RABBITBOT_WORKFLOW_VERBOSE=${RABBITBOT_WORKFLOW_VERBOSE}"
+    )
+
+    if [ -n "${RABBITBOT_SCRIPTED_TOUR}" ]; then
+        docker_env+=(-e "RABBITBOT_SCRIPTED_TOUR=${RABBITBOT_SCRIPTED_TOUR}")
+    fi
+
+    if [ "${RABBITBOT_WORKFLOW_NON_INTEGRATION}" = "1" ]; then
+        log_info "Workflow 非联调模式已开启，导航点位将由终端按键确认"
+    fi
+
+    docker exec -it "${docker_env[@]}" "${WORKFLOW_CONTAINER}" bash -lc '
         cd /data/rabbitbot-dev-ros2-master
         bash scripts/start_kuavo_agno_workflow.bash
     '
