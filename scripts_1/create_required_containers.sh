@@ -11,9 +11,9 @@
 # 前置条件：
 #   1. Docker 已安装并可用。
 #   2. 下列镜像已导入新 Orin：
-#        - foxy-ros-cam-orb-ubuntu20:latest
-#        - navid-rabbitbot:stt-tts-audio-ct2cuda-20260427
-#        - dustynv/vllm:0.9.2-r36.4-cu128-24.04
+#        - foxy-ros-cam-orb-ubuntu20:rabbitbot-20260511
+#        - navid-rabbitbot:stt-tts-audio-ct2cuda-20260511
+#        - rabbitbot-vllm:20260511
 #        - neo4j:5.26-community
 #      如需 VLN，再导入：
 #        - air_vln:1.0
@@ -52,9 +52,9 @@ WORKFLOW_CONTAINER="kuavo-agno-projects-only-test"
 NEO4J_CONTAINER="neo4j-community"
 VLN_CONTAINER="air-vln"
 
-VLM_IMAGE="dustynv/vllm:0.9.2-r36.4-cu128-24.04"
-AUDIO_IMAGE="navid-rabbitbot:stt-tts-audio-ct2cuda-20260427"
-WORKFLOW_IMAGE="foxy-ros-cam-orb-ubuntu20:latest"
+VLM_IMAGE="rabbitbot-vllm:20260511"
+AUDIO_IMAGE="navid-rabbitbot:stt-tts-audio-ct2cuda-20260511"
+WORKFLOW_IMAGE="foxy-ros-cam-orb-ubuntu20:rabbitbot-20260511"
 NEO4J_IMAGE="neo4j:5.26-community"
 VLN_IMAGE="air_vln:1.0"
 
