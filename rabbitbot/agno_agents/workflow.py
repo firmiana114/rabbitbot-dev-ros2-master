@@ -389,6 +389,10 @@ async def guide_opening_speech(ctx: Any):
         return True
 
     def say(text, interruptible=True):
+        if _strict_docx_script_enabled() and interruptible:
+            tts_sound(ctx.tts_agent, text, "zh")
+            tts_wait(ctx.tts_agent)
+            return False
         if interruptible:
             interrupt_text = tts_long_text_with_stt_stop(ctx.tts_agent, text, ctx.stt_agent, ctx.robot, before_text=None)
             return set_opening_pending_text(interrupt_text)
