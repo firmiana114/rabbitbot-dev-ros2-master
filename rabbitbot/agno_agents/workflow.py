@@ -119,6 +119,7 @@ def _workflow_log(message, verbose=False):
 
 
 ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"握手", "打招呼", "OK手势", "再见"}
+ARM_ACTIONS_NEED_RELEASE_AFTER_SPEECH = {"right_hand_pointing"}
 ARM_RELEASE_ACTION = "release"
 ARM_BEFORE_RELEASE_DELAYS = {
     "握手": 3.0,
@@ -190,6 +191,15 @@ def _env_float(name, default):
         return float(default)
 
 
+async def _send_release_arm(robot):
+    release_result = await robot.do_arm_async(ARM_RELEASE_ACTION)
+    if isinstance(release_result, dict) and not release_result.get("success", True):
+        print(f"收回动作回执失败: action={ARM_RELEASE_ACTION}, result={release_result}")
+    release_wait_seconds = _env_float("RABBITBOT_ARM_RELEASE_WAIT_SECONDS", 0.5)
+    if release_wait_seconds > 0:
+        await asyncio.sleep(release_wait_seconds)
+
+
 async def _do_arm_before_speech(robot, action_name):
     action_result = await robot.do_arm_async(action_name)
     if isinstance(action_result, dict) and not action_result.get("success", True):
@@ -205,14 +215,18 @@ async def _do_arm_before_speech(robot, action_name):
         ARM_BEFORE_RELEASE_DELAY_ENV.get(action_name, "RABBITBOT_ARM_BEFORE_RELEASE_DELAY"),
         default_before_release_delay,
     )
-    release_wait_seconds = _env_float("RABBITBOT_ARM_RELEASE_WAIT_SECONDS", 0.5)
     if before_release_delay > 0:
         await asyncio.sleep(before_release_delay)
-    release_result = await robot.do_arm_async(ARM_RELEASE_ACTION)
-    if isinstance(release_result, dict) and not release_result.get("success", True):
-        print(f"收回动作回执失败: action={ARM_RELEASE_ACTION}, result={release_result}")
-    if release_wait_seconds > 0:
-        await asyncio.sleep(release_wait_seconds)
+    await _send_release_arm(robot)
+
+
+async def _release_arm_after_speech(robot, action_name):
+    if action_name not in ARM_ACTIONS_NEED_RELEASE_AFTER_SPEECH:
+        return
+    after_speech_delay = _env_float("RABBITBOT_ARM_AFTER_SPEECH_RELEASE_DELAY", 0.2)
+    if after_speech_delay > 0:
+        await asyncio.sleep(after_speech_delay)
+    await _send_release_arm(robot)
 
 
 async def _ensure_start_position(ctx, start_entity_name="点位1"):
@@ -938,8 +952,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
             "entity": DOCX_SCRIPT_POINT_ENTITY["point_4"],
             "segments": [
                 {
+                    "text": "各位领导跟我来，园区占地约217亩，总建筑面积32.8万平方米，总投资12.6亿元，园区采用“两轴四片”设计，以东西生活轴、南北生产轴划分四大产业组团，尤其值得一提的是，我们通力合作，将建设周期从24个月压缩至21个月，提前3个月全面竣工，体现了“滨湖速度”。",
+                },
+                {
                     "action": "right_hand_pointing",
-                    "text": "各位领导跟我来，园区占地约217亩，总建筑面积32.8万平方米，总投资12.6亿元，园区采用“两轴四片”设计，以东西生活轴、南北生产轴划分四大产业组团，尤其值得一提的是，我们通力合作，将建设周期从24个月压缩至21个月，提前3个月全面竣工，体现了“滨湖速度”。这个是我们整个园区的布局沙盘。",
+                    "text": "这个是我们整个园区的布局沙盘。",
                 },
             ],
         },
@@ -1051,6 +1068,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 await _do_arm_before_speech(ctx.robot, action_name)
 
             text = segment.get("text", "")
+            interrupt_text = None
             if text:
                 interrupt_text = tts_long_text_with_stt_stop(
                     tts_agent,
@@ -1061,13 +1079,15 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
                     ignore_unlisted_interrupts=True,
                 )
-                if not _is_empty_stt_text(interrupt_text):
-                    if is_docx_script_continue_text(interrupt_text):
-                        print(f"忽略剧本继续确认词: {interrupt_text}")
-                    else:
-                        print(f"DOCX 剧本被用户打断: scene={scene}, segment={segment_index}, text={interrupt_text}")
-                        ctx.docx_script_segment_index = segment_index
-                        return "interrupt", interrupt_text.strip()
+
+            await _release_arm_after_speech(ctx.robot, action_name)
+            if not _is_empty_stt_text(interrupt_text):
+                if is_docx_script_continue_text(interrupt_text):
+                    print(f"忽略剧本继续确认词: {interrupt_text}")
+                else:
+                    print(f"DOCX 剧本被用户打断: scene={scene}, segment={segment_index}, text={interrupt_text}")
+                    ctx.docx_script_segment_index = segment_index
+                    return "interrupt", interrupt_text.strip()
 
             pause_seconds = float(segment.get("pause", 0) or 0)
             if pause_seconds > 0:
@@ -1176,6 +1196,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 await _do_arm_before_speech(ctx.robot, action_name)
 
             text = segment.get("text", "")
+            interrupt_text = None
             if text:
                 interrupt_text = tts_long_text_with_stt_stop(
                     tts_agent,
@@ -1186,15 +1207,17 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
                     ignore_unlisted_interrupts=True,
                 )
-                if not _is_empty_stt_text(interrupt_text):
-                    if is_docx_script_continue_text(interrupt_text):
-                        print(f"忽略剧本继续确认词: {interrupt_text}")
-                        segment_index += 1
-                        ctx.docx_script_segment_index = segment_index
-                        continue
-                    print(f"DOCX 剧本被用户打断: scene={scene}, segment={segment_index}, text={interrupt_text}")
+
+            await _release_arm_after_speech(ctx.robot, action_name)
+            if not _is_empty_stt_text(interrupt_text):
+                if is_docx_script_continue_text(interrupt_text):
+                    print(f"忽略剧本继续确认词: {interrupt_text}")
+                    segment_index += 1
                     ctx.docx_script_segment_index = segment_index
-                    return "interrupt", interrupt_text.strip()
+                    continue
+                print(f"DOCX 剧本被用户打断: scene={scene}, segment={segment_index}, text={interrupt_text}")
+                ctx.docx_script_segment_index = segment_index
+                return "interrupt", interrupt_text.strip()
 
             listen_key = segment.get("listen_key")
             if listen_key:
@@ -1302,14 +1325,17 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
         action_name = SCRIPTED_TOUR_ACTIONS.get(entity_name)
         if action_name:
-            await ctx.robot.do_arm_async(action_name)
+            await _do_arm_before_speech(ctx.robot, action_name)
 
+        interrupt_text = None
         description = entity.get("description", "")
         if description:
             interrupt_text = tts_long_text_with_stt_stop(tts_agent, description, stt_agent, ctx.robot, before_text)
-            if not _is_empty_stt_text(interrupt_text):
-                print(f"剧本导览被用户打断: entity={entity_name}, text={interrupt_text}")
-                return "interrupt", interrupt_text.strip()
+
+        await _release_arm_after_speech(ctx.robot, action_name)
+        if not _is_empty_stt_text(interrupt_text):
+            print(f"剧本导览被用户打断: entity={entity_name}, text={interrupt_text}")
+            return "interrupt", interrupt_text.strip()
 
         ctx.scripted_tour_index = index + 1
         ctx.scripted_tour_arrived_index = None
