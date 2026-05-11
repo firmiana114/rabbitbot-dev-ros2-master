@@ -284,7 +284,7 @@ DOCX 剧本全部完成后，workflow 不再直接退出，而是进入剧本后
 当前动作：
 
 - `right_hand_pointing`：对应手指向北门门口、小巴方向。
-- `再见`：对应挥手告别。
+- `再见`：对应挥手告别。执行后会追加 `release arm` 收回胳膊，并等待收回后再继续讲话。
 
 当前不会真实联动小巴开门或接人。
 
@@ -320,7 +320,7 @@ release arm
 
 当前明确不使用 body 不支持的 `指尖轻点`。
 
-其中 `release arm` 不是 DOCX 独立动作，而是 workflow 在 `打招呼` 和 `OK手势` 后自动追加的收回动作。默认时序为：先等待 `1.2s` 让原动作展开，再发送 `release arm`，再等待 `1.2s` 后开始对应台词。现场可通过环境变量 `RABBITBOT_ARM_BEFORE_RELEASE_DELAY` 和 `RABBITBOT_ARM_RELEASE_WAIT_SECONDS` 微调。
+其中 `release arm` 不是 DOCX 独立动作，而是 workflow 在 `打招呼`、`OK手势` 和 `再见` 后自动追加的收回动作。默认时序为：先等待 `1.2s` 让原动作展开，再发送 `release arm`，再等待 `1.2s` 后开始对应台词。现场可通过环境变量 `RABBITBOT_ARM_BEFORE_RELEASE_DELAY` 和 `RABBITBOT_ARM_RELEASE_WAIT_SECONDS` 微调。
 
 ## 当前动作编排
 
@@ -335,7 +335,7 @@ release arm
 | 点位3 / 拿取咖啡 | 提醒咖啡已到、请领导自取前 | `right_hand_pointing` | 手指向送咖啡机器人方向 |
 | 点位4 / 观看沙盘 | 沙盘介绍前 | `right_hand_pointing` | 手指向沙盘方向 |
 | 点位5 / 告别并指引小巴方向 | 介绍无人驾驶小巴前 | `right_hand_pointing` | 手指向北门门口、小巴方向 |
-| 点位5 / 告别并指引小巴方向 | 说“各位领导再会”前 | `再见` | 挥手告别 |
+| 点位5 / 告别并指引小巴方向 | 说“各位领导再会”前 | `再见` -> `release arm` | 挥手告别，然后收回胳膊 |
 
 RobotAgent 日志中如果出现以下序列，说明动作已经从 workflow 发到 RobotAgent 并进入 body action client：
 

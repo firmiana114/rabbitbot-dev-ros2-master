@@ -118,7 +118,7 @@ def _workflow_log(message, verbose=False):
     print(message)
 
 
-ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"打招呼", "OK手势"}
+ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"打招呼", "OK手势", "再见"}
 ARM_RELEASE_ACTION = "release arm"
 
 
