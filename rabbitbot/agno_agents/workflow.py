@@ -854,6 +854,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
         {
             "scene": "初步介绍",
             "entity": DOCX_SCRIPT_POINT_ENTITY["point_3"],
+            "speak_during_navigation": True,
+            "speak_during_navigation_segments": 1,
             "segments": [
                 {
                     "text": "我们产业园2025年12月开园后，我们紧扣人形机器人核心赛道，做了大量工作，除了提升园区的软件和硬件水平外，我们还不断加大产业项目招引，目前，签约共创实验室平台1个，签约机器人产研项目20余个，成果十分显著。"
@@ -1009,6 +1011,47 @@ def create_main_workflow(ctx: Any) -> Workflow:
         entity["location"] = [source_points[point_index]]
         return entity
 
+    async def speak_docx_script_navigation_segments(step, scene):
+        if not step.get("speak_during_navigation"):
+            return None
+
+        segments = step.get("segments", [])
+        segment_index = getattr(ctx, "docx_script_segment_index", 0)
+        segment_count = int(step.get("speak_during_navigation_segments", 0) or 0)
+        end_index = min(segment_index + segment_count, len(segments))
+        while segment_index < end_index:
+            segment = segments[segment_index]
+            action_name = segment.get("action")
+            if action_name:
+                await _do_arm_before_speech(ctx.robot, action_name)
+
+            text = segment.get("text", "")
+            if text:
+                interrupt_text = tts_long_text_with_stt_stop(
+                    tts_agent,
+                    format_docx_script_text(text),
+                    stt_agent,
+                    ctx.robot,
+                    before_text,
+                    ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
+                    ignore_unlisted_interrupts=True,
+                )
+                if not _is_empty_stt_text(interrupt_text):
+                    if is_docx_script_continue_text(interrupt_text):
+                        print(f"忽略剧本继续确认词: {interrupt_text}")
+                    else:
+                        print(f"DOCX 剧本被用户打断: scene={scene}, segment={segment_index}, text={interrupt_text}")
+                        ctx.docx_script_segment_index = segment_index
+                        return "interrupt", interrupt_text.strip()
+
+            pause_seconds = float(segment.get("pause", 0) or 0)
+            if pause_seconds > 0:
+                await asyncio.sleep(pause_seconds)
+
+            segment_index += 1
+            ctx.docx_script_segment_index = segment_index
+        return None
+
     async def navigate_docx_script_step(step, step_index):
         entity_name = step.get("entity")
         if not entity_name:
@@ -1044,8 +1087,12 @@ def create_main_workflow(ctx: Any) -> Workflow:
         enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
         navi_status = NavigationStatus.SUCCEEDED
         if enable_navi:
-            if _wait_manual_navigation_success(entity_name):
-                navi_status = NavigationStatus.SUCCEEDED
+            if _workflow_non_integration_enabled():
+                speech_result = await speak_docx_script_navigation_segments(step, step.get("scene", entity_name))
+                if speech_result:
+                    return speech_result
+                if _wait_manual_navigation_success(entity_name):
+                    navi_status = NavigationStatus.SUCCEEDED
             else:
                 navi_query = NavigationQuery()
                 x, y, ox, oy, oz, ow = location_points[0]
@@ -1053,6 +1100,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     x, y, ox, oy, oz, ow, navi_query,
                     waypoints=location_points if len(location_points) > 1 else None,
                 )
+                speech_result = await speak_docx_script_navigation_segments(step, step.get("scene", entity_name))
+                if speech_result:
+                    return speech_result
                 while await is_navigating(navi_tools):
                     await asyncio.sleep(0.5)
                 navi_status = await navi_tools.go_to_status()
