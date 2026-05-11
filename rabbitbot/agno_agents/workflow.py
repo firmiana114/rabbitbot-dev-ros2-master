@@ -158,6 +158,46 @@ async def _do_arm_before_speech(robot, action_name):
         await asyncio.sleep(release_wait_seconds)
 
 
+async def _ensure_start_position(ctx, start_entity_name="起始板块"):
+    if getattr(ctx, "start_position_confirmed", False):
+        return NavigationStatus.SUCCEEDED
+
+    start_entity = _load_json_entity(start_entity_name)
+    start_points = _extract_location_points(start_entity)
+    if not start_points:
+        print(f"起始板块缺少可用导航点位: {start_entity}")
+        return NavigationStatus.ABORTED
+
+    enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
+    if not enable_navi:
+        ctx.start_position_confirmed = True
+        return NavigationStatus.SUCCEEDED
+
+    if _wait_manual_navigation_success(start_entity_name):
+        start_navi_status = NavigationStatus.SUCCEEDED
+    else:
+        navi_tools = NavigationToolkit(ctx)
+        navi_query = NavigationQuery()
+        x, y, ox, oy, oz, ow = start_points[0]
+        await navi_tools.go_to_async(
+            x, y, ox, oy, oz, ow, navi_query,
+            waypoints=start_points if len(start_points) > 1 else None,
+        )
+        while await is_navigating(navi_tools):
+            await asyncio.sleep(0.5)
+        start_navi_status = await navi_tools.go_to_status()
+        await navi_tools.reset_go_to_status()
+
+    if start_navi_status == NavigationStatus.SUCCEEDED:
+        ctx.start_position_confirmed = True
+        ctx.current_entity_name = start_entity_name
+        entity_order = getattr(ctx, 'json_entity_order', None) or JSON_ENTITY_ORDER or getattr(ctx, 'entity_lst', [])
+        if start_entity_name in entity_order:
+            ctx.current_entity_index = entity_order.index(start_entity_name)
+
+    return start_navi_status
+
+
 def _wait_manual_navigation_success(location_name):
     if not _workflow_non_integration_enabled():
         return False
@@ -413,6 +453,13 @@ async def guide_opening_speech(ctx: Any):
         tts_wait(ctx.tts_agent)
         return False
 
+    if _strict_docx_script_enabled():
+        start_navi_status = await _ensure_start_position(ctx, "起始板块")
+        if start_navi_status != NavigationStatus.SUCCEEDED:
+            tts_sound(ctx.tts_agent, "很抱歉，我暂时无法到达起始板块，请检查导航状态后重新开始。", "zh")
+            tts_wait(ctx.tts_agent)
+            raise RuntimeError(f"起始板块导航未完成: {start_navi_status}")
+
     opening_mode = os.getenv("RABBITBOT_OPENING_MODE", "full").strip().lower()
     if opening_mode in {"0", "false", "no", "off", "skip"}:
         print(f"跳过导览开场: RABBITBOT_OPENING_MODE={opening_mode}")
@@ -509,7 +556,7 @@ async def guide_opening_speech(ctx: Any):
     enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
     _workflow_log(f"开场导航配置: enable_navi={enable_navi}", verbose=True)
     if _strict_docx_script_enabled():
-        _workflow_log("严格 DOCX 剧本默认从起始板块开始，跳过开场后的起始点导航", verbose=True)
+        _workflow_log("严格 DOCX 剧本已在开场前确认起始板块，跳过重复起始点导航", verbose=True)
     elif enable_navi:
         start_navi_status = NavigationStatus.ABORTED
         if start_point is None:
