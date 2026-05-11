@@ -1,6 +1,7 @@
 
 import time
 import threading
+import os
 
 import rclpy
 from rclpy.action import ActionClient
@@ -150,19 +151,48 @@ class NaviArmActionClient(Node):
         super().__init__('navi_arm_action_client')
         self._action_client = ActionClient(self, NaviArm, 'navi_arm')
 
+    def _wait_future_done(self, future, timeout_sec):
+        start_time = time.time()
+        while not future.done():
+            if timeout_sec is not None and time.time() - start_time > timeout_sec:
+                return False
+            time.sleep(0.02)
+        return True
+
     def send_goal(self, action_name, spin=True):
         goal_msg = NaviArm.Goal()
         print(f"NaviArmActionClient: action_name {action_name}")
         goal_msg.action_name = str(action_name)
 
-        self._action_client.wait_for_server()
+        server_timeout = float(os.getenv("RABBITBOT_ARM_ACTION_SERVER_TIMEOUT", "5"))
+        result_timeout = float(os.getenv("RABBITBOT_ARM_ACTION_RESULT_TIMEOUT", "30"))
+        if not self._action_client.wait_for_server(timeout_sec=server_timeout):
+            self.get_logger().error(f"NaviArm action server not available for '{action_name}'")
+            return {"success": False, "message": "action server not available"}
 
         self._send_goal_future = self._action_client.send_goal_async(goal_msg, feedback_callback=self.feedback_callback)
 
         if spin:
-            rclpy.spin_until_future_complete(self, self._send_goal_future)
+            if not self._wait_future_done(self._send_goal_future, result_timeout):
+                self.get_logger().error(f"NaviArm goal response timeout for '{action_name}'")
+                return {"success": False, "message": "goal response timeout"}
+            goal_handle = self._send_goal_future.result()
+            if not goal_handle.accepted:
+                self.get_logger().info("Goal rejected :(")
+                return {"success": False, "message": "goal rejected"}
+            self.get_logger().info("Goal accepted :)")
+            self._get_result_future = goal_handle.get_result_async()
+            if not self._wait_future_done(self._get_result_future, result_timeout):
+                self.get_logger().error(f"NaviArm result timeout for '{action_name}'")
+                return {"success": False, "message": "result timeout"}
+            result = self._get_result_future.result().result
+            success = bool(getattr(result, "success", True))
+            message = getattr(result, "message", "")
+            self.get_logger().info(f"NaviArm action result: success={success}, message={message}")
+            return {"success": success, "message": message}
         else:
             self._send_goal_future.add_done_callback(self.goal_response_callback)
+            return {"success": True, "message": "goal sent"}
 
     def goal_response_callback(self, future):
         goal_handle = future.result()

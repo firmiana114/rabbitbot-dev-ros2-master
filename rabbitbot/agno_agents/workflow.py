@@ -138,22 +138,26 @@ def _env_float(name, default):
 
 
 async def _do_arm_before_speech(robot, action_name):
-    await robot.do_arm_async(action_name)
+    action_result = await robot.do_arm_async(action_name)
+    if isinstance(action_result, dict) and not action_result.get("success", True):
+        print(f"动作回执失败: action={action_name}, result={action_result}")
     if action_name not in ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH:
         return
 
     default_before_release_delay = ARM_BEFORE_RELEASE_DELAYS.get(
         action_name,
-        _env_float("RABBITBOT_ARM_BEFORE_RELEASE_DELAY", 1.2),
+        _env_float("RABBITBOT_ARM_BEFORE_RELEASE_DELAY", 0.5),
     )
     before_release_delay = _env_float(
         ARM_BEFORE_RELEASE_DELAY_ENV.get(action_name, "RABBITBOT_ARM_BEFORE_RELEASE_DELAY"),
         default_before_release_delay,
     )
-    release_wait_seconds = _env_float("RABBITBOT_ARM_RELEASE_WAIT_SECONDS", 1.2)
+    release_wait_seconds = _env_float("RABBITBOT_ARM_RELEASE_WAIT_SECONDS", 0.5)
     if before_release_delay > 0:
         await asyncio.sleep(before_release_delay)
-    await robot.do_arm_async(ARM_RELEASE_ACTION)
+    release_result = await robot.do_arm_async(ARM_RELEASE_ACTION)
+    if isinstance(release_result, dict) and not release_result.get("success", True):
+        print(f"收回动作回执失败: action={ARM_RELEASE_ACTION}, result={release_result}")
     if release_wait_seconds > 0:
         await asyncio.sleep(release_wait_seconds)
 

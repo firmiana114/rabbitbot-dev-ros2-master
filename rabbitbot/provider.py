@@ -546,9 +546,14 @@ class RobotAgent:
         data = {'task': action_name}
         print(f"Task: do arm {action_name}")
         try:
-            resp = requests.post(urljoin(self.host_url, 'do_arm_async'), data=data, timeout=10)
+            resp = requests.post(urljoin(self.host_url, 'do_arm_async'), data=data, timeout=45)
+            try:
+                return resp.json()
+            except Exception:
+                return {"success": resp.ok, "message": resp.text}
         except (Timeout, RequestException) as e:
             print(f'do_arm: request failed: {e}')
+            return {"success": False, "message": str(e)}
 
     async def do_arm_async(self, action_name):
         if not provider_configs['enable_remote_robot_agent']:
@@ -556,9 +561,14 @@ class RobotAgent:
         data = {'task': action_name}
         print(f"Task: do arm {action_name}")
         try:
-            resp = requests.post(urljoin(self.host_url, 'do_arm_async'), data=data, timeout=10)
+            resp = requests.post(urljoin(self.host_url, 'do_arm_async'), data=data, timeout=45)
+            try:
+                return resp.json()
+            except Exception:
+                return {"success": resp.ok, "message": resp.text}
         except (Timeout, RequestException) as e:
             print(f'do_arm_async: request failed: {e}')
+            return {"success": False, "message": str(e)}
 
     async def do_head_async(self, yaw, pitch):
         if not provider_configs['enable_remote_robot_agent']:

@@ -236,7 +236,7 @@ DOCX 剧本全部完成后，workflow 不再直接退出，而是进入剧本后
 
 当前动作：
 
-- `握手`：对应剧本“伸手-握手-收手”。执行后等待 `3s`，再追加 `release arm` 收回胳膊，并等待收回后再继续讲话。
+- `握手`：对应剧本“伸手-握手-收手”。收到动作回执后等待 `3s`，再追加 `release arm` 收回胳膊，并等待收回回执后再继续讲话。
 - `打招呼`：对应剧本“手部轻微挥手/欢迎”。执行后会追加 `release arm` 收回胳膊，并等待收回后再继续讲话。
 
 当前不再默认机器人已经站在点位1，而是必须先确认到达起始板块。
@@ -331,7 +331,7 @@ release arm
 
 当前明确不使用 body 不支持的 `指尖轻点`。
 
-其中 `release arm` 不是 DOCX 独立动作，而是 workflow 在 `握手`、`打招呼`、`OK手势` 和 `再见` 后自动追加的收回动作。默认时序为：先等待一段时间让原动作展开，再发送 `release arm`，再等待 `1.2s` 后开始对应台词。`握手` 的展开等待默认是 `3s`，其他动作默认是 `1.2s`。现场可通过环境变量 `RABBITBOT_HANDSHAKE_BEFORE_RELEASE_DELAY`、`RABBITBOT_ARM_BEFORE_RELEASE_DELAY` 和 `RABBITBOT_ARM_RELEASE_WAIT_SECONDS` 微调。
+其中 `release arm` 不是 DOCX 独立动作，而是 workflow 在 `握手`、`打招呼`、`OK手势` 和 `再见` 后自动追加的收回动作。默认时序为：先等待原动作回执，再等待一段固定时间，然后发送 `release arm`，等待收回动作回执，再等待 `0.5s` 后开始对应台词。`握手` 的固定等待默认是 `3s`，其他动作默认是 `0.5s`。现场可通过环境变量 `RABBITBOT_HANDSHAKE_BEFORE_RELEASE_DELAY`、`RABBITBOT_ARM_BEFORE_RELEASE_DELAY` 和 `RABBITBOT_ARM_RELEASE_WAIT_SECONDS` 微调。
 
 ## 当前动作编排
 
@@ -357,7 +357,7 @@ NaviArmActionClient: action_name 动作名
 POST /do_arm_async HTTP/1.1" 200 OK
 ```
 
-注意：`200 OK` 代表 RobotAgent 接收并发送 action 请求成功，不等价于物理动作一定已经完整执行完。若需要确认实体动作完成，需要继续查看 body action server 的完成回执或现场观察。
+注意：当前 RobotAgent 会等待 `/navi_arm` action result 后再返回给 workflow；这是否等价于物理动作完整执行完，取决于 body 侧 `/navi_arm` action server 是否在实体动作完成后才返回 result。
 
 ## 已知未覆盖项
 

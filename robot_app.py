@@ -180,7 +180,10 @@ async def do_arm_async_api(task: str = Form(...)):
         print(task)
         action_name = task
         print(f"Do arm: {action_name}")
-        robot.do_arm(action_name)
+        result = robot.do_arm(action_name)
+        if result is None:
+            result = {"success": True, "message": ""}
+        return JSONResponse(content=result)
 
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)

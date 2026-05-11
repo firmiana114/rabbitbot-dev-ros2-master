@@ -990,11 +990,11 @@ class KuavoAutonomyBot(AutonomyBot):
 
     def _do_arm(self, action_name: str):
         if self.arm_client is not None:
-            self.arm_client.send_goal(action_name)
+            return self.arm_client.send_goal(action_name)
+        return {"success": False, "message": "arm client is not available"}
 
     def do_arm(self, action_name: str):
-        self.do_arm_thread = threading.Thread(target=self._do_arm, args=(action_name,))
-        self.do_arm_thread.start()
+        return self._do_arm(action_name)
 
     def do_head(self, yaw: float, pitch: float):
         if self.head_client is not None:
