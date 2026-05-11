@@ -820,10 +820,22 @@ def create_main_workflow(ctx: Any) -> Workflow:
         "合影板块": "再见",
     }
     DOCX_SCRIPT_POINT_ENTITY = {
-        "point_2": "多功能展示区",
-        "point_3": "园区历史板块",
+        "point_2": "问咖啡点",
+        "point_3": "多功能展示区",
         "point_4": "园区布局板块",
         "point_5": "合影板块",
+    }
+    DOCX_SCRIPT_POINT_OVERRIDES = {
+        "问咖啡点": {
+            "source_entity": "多功能展示区",
+            "point_index": 0,
+            "summary": "问咖啡点",
+            "description": "点位2用于跟随步行后询问咖啡，不作为多功能展示区正式讲解点。",
+        },
+        "多功能展示区": {
+            "source_entity": "多功能展示区",
+            "point_index": 1,
+        },
     }
     DOCX_SCRIPT_STEPS = [
         {
@@ -978,6 +990,25 @@ def create_main_workflow(ctx: Any) -> Workflow:
         ]
         return any(keyword in normalized_text for keyword in positive_keywords)
 
+    def load_docx_script_entity(entity_name):
+        override = DOCX_SCRIPT_POINT_OVERRIDES.get(entity_name)
+        if not override:
+            return _load_json_entity(entity_name)
+
+        source_entity_name = override.get("source_entity", entity_name)
+        source_entity = _load_json_entity(source_entity_name)
+        source_points = _extract_location_points(source_entity)
+        point_index = override.get("point_index", 0)
+        if point_index >= len(source_points):
+            return None
+
+        entity = dict(source_entity or {})
+        entity["name"] = entity_name
+        entity["summary"] = override.get("summary") or entity.get("summary") or entity_name
+        entity["description"] = override.get("description") or entity.get("description") or ""
+        entity["location"] = [source_points[point_index]]
+        return entity
+
     async def navigate_docx_script_step(step, step_index):
         entity_name = step.get("entity")
         if not entity_name:
@@ -986,9 +1017,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
         if step.get("skip_navigation_if_current") and getattr(ctx, "current_entity_name", None) == entity_name:
             return NavigationStatus.SUCCEEDED
 
-        entity = _load_json_entity(entity_name)
+        entity = load_docx_script_entity(entity_name)
         if entity is None:
-            print(f"DOCX 剧本展点不存在: {entity_name}")
+            print(f"DOCX 剧本展点不存在或缺少点位配置: {entity_name}")
             return NavigationStatus.ABORTED
 
         location_points = _extract_location_points(entity)
