@@ -761,6 +761,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 {
                     "action": "right_hand_pointing",
                     "text": "{leader_calling}，您的到来我和我的小伙伴们都非常高兴，他们说要给您表演个节目，您看咱们看个节目，顺便等下咖啡？",
+                    "listen_key": "dog_show_confirmation",
+                    "listen_timeout": 8,
                 },
                 {"text": "小伙伴们动起来吧！"},
                 {
@@ -861,6 +863,25 @@ def create_main_workflow(ctx: Any) -> Workflow:
             "不喝", "不用", "不要", "不需要", "免了", "算了", "不用了", "不要了",
         ]
         return any(keyword in normalized_text for keyword in coffee_keywords + no_coffee_keywords)
+
+    def is_valid_dog_show_confirmation(text):
+        normalized_text = normalize_docx_script_control_text(text)
+        if normalized_text == "":
+            return False
+
+        negative_keywords = [
+            "不看", "不用", "不要", "不需要", "算了", "别", "先不", "不等",
+            "不表演", "不用表演", "别表演", "不可以", "不行", "不是",
+        ]
+        if any(keyword in normalized_text for keyword in negative_keywords):
+            return False
+
+        positive_keywords = [
+            "是", "是的", "对", "对的", "好", "好的", "好啊", "好呀",
+            "可以", "行", "行的", "没问题", "看", "看看", "看吧",
+            "看个节目", "表演", "动起来", "开始吧", "来吧",
+        ]
+        return any(keyword in normalized_text for keyword in positive_keywords)
 
     async def navigate_docx_script_step(step, step_index):
         entity_name = step.get("entity")
@@ -982,6 +1003,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     answer = answer.strip()
                     if listen_key == "coffee_order" and not is_valid_coffee_answer(answer):
                         print(f"忽略非咖啡相关回答: {answer}")
+                    elif listen_key == "dog_show_confirmation" and not is_valid_dog_show_confirmation(answer):
+                        print(f"忽略非机器狗表演确认回答: {answer}")
                     else:
                         ctx.docx_script_answers[listen_key] = answer
 
