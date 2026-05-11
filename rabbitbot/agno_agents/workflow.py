@@ -119,7 +119,7 @@ def _workflow_log(message, verbose=False):
 
 
 ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"握手", "打招呼", "OK手势", "再见"}
-ARM_RELEASE_ACTION = "release arm"
+ARM_RELEASE_ACTION = "release"
 ARM_BEFORE_RELEASE_DELAYS = {
     "握手": 3.0,
 }
