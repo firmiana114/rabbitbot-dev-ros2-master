@@ -1,0 +1,14 @@
+# 点位1
+docker exec kuavo-agno-projects-only-test curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string 'task=(1.3389, 0.3998, -0.1057, 0.0831, -0.7143, 0.6868)'
+
+# 点位2（含 1->2 过渡）
+docker exec kuavo-agno-projects-only-test curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string 'task=[(2.9386, -4.9274, 0.0172, 0.1449, 0.0868, 0.9855), (5.3256, -4.6490, 0.1129, 0.1708, 0.5304, 0.8227)]'
+
+# 点位3
+docker exec kuavo-agno-projects-only-test curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string 'task=(8.1353, -3.8156, -0.1109, -0.0711, -0.8146, -0.5648)'
+
+# 点位4
+docker exec kuavo-agno-projects-only-test curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string 'task=(14.4666, 1.0340, 0.1240, 0.0325, 0.9539, 0.2715)'
+
+# 点位5（含 4->5 过渡）
+docker exec kuavo-agno-projects-only-test curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string 'task=[(16.8283, 7.5128, 0.0497, 0.1393, 0.3146, 0.9376), (20.7253, 9.1918, -0.1366, -0.0006, -0.9906, 0.0073)]'

@@ -128,6 +128,59 @@ ARM_BEFORE_RELEASE_DELAY_ENV = {
 }
 
 
+DOCX_SCRIPT_POINTS = {
+    "点位1": {
+        "summary": "点位1",
+        "description": "DOCX 剧本起始点位。",
+        "location": [
+            {"x": 1.3389, "y": 0.3998, "z": -0.0224, "ox": -0.1057, "oy": 0.0831, "oz": -0.7143, "ow": 0.6868, "mode": 1},
+        ],
+    },
+    "点位2": {
+        "summary": "点位2",
+        "description": "DOCX 剧本问咖啡点位。",
+        "location": [
+            {"x": 2.9386, "y": -4.9274, "z": -0.0452, "ox": 0.0172, "oy": 0.1449, "oz": 0.0868, "ow": 0.9855, "mode": 1},
+            {"x": 5.3256, "y": -4.6490, "z": -0.0752, "ox": 0.1129, "oy": 0.1708, "oz": 0.5304, "ow": 0.8227, "mode": 1},
+        ],
+    },
+    "点位3": {
+        "summary": "点位3",
+        "description": "DOCX 剧本多功能展示点位。",
+        "location": [
+            {"x": 8.1353, "y": -3.8156, "z": -0.1273, "ox": -0.1109, "oy": -0.0711, "oz": -0.8146, "ow": -0.5648, "mode": 1},
+        ],
+    },
+    "点位4": {
+        "summary": "点位4",
+        "description": "DOCX 剧本沙盘点位。",
+        "location": [
+            {"x": 14.4666, "y": 1.0340, "z": -0.2044, "ox": 0.1240, "oy": 0.0325, "oz": 0.9539, "ow": 0.2715, "mode": 1},
+        ],
+    },
+    "点位5": {
+        "summary": "点位5",
+        "description": "DOCX 剧本告别点位。",
+        "location": [
+            {"x": 16.8283, "y": 7.5128, "z": -0.2521, "ox": 0.0497, "oy": 0.1393, "oz": 0.3146, "ow": 0.9376, "mode": 1},
+            {"x": 20.7253, "y": 9.1918, "z": -0.3139, "ox": -0.1366, "oy": -0.0006, "oz": -0.9906, "ow": 0.0073, "mode": 1},
+        ],
+    },
+}
+
+
+def _load_docx_point_entity(name):
+    point = DOCX_SCRIPT_POINTS.get(name)
+    if not point:
+        return None
+    return {
+        "name": name,
+        "summary": point.get("summary", name),
+        "description": point.get("description", ""),
+        "location": point.get("location", []),
+    }
+
+
 def _env_float(name, default):
     raw_value = os.getenv(name, str(default))
     try:
@@ -162,14 +215,14 @@ async def _do_arm_before_speech(robot, action_name):
         await asyncio.sleep(release_wait_seconds)
 
 
-async def _ensure_start_position(ctx, start_entity_name="起始板块"):
+async def _ensure_start_position(ctx, start_entity_name="点位1"):
     if getattr(ctx, "start_position_confirmed", False):
         return NavigationStatus.SUCCEEDED
 
-    start_entity = _load_json_entity(start_entity_name)
+    start_entity = _load_docx_point_entity(start_entity_name) or _load_json_entity(start_entity_name)
     start_points = _extract_location_points(start_entity)
     if not start_points:
-        print(f"起始板块缺少可用导航点位: {start_entity}")
+        print(f"{start_entity_name}缺少可用导航点位: {start_entity}")
         return NavigationStatus.ABORTED
 
     enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
@@ -458,11 +511,11 @@ async def guide_opening_speech(ctx: Any):
         return False
 
     if _strict_docx_script_enabled():
-        start_navi_status = await _ensure_start_position(ctx, "起始板块")
+        start_navi_status = await _ensure_start_position(ctx, "点位1")
         if start_navi_status != NavigationStatus.SUCCEEDED:
-            tts_sound(ctx.tts_agent, "很抱歉，我暂时无法到达起始板块，请检查导航状态后重新开始。", "zh")
+            tts_sound(ctx.tts_agent, "很抱歉，我暂时无法到达点位1，请检查导航状态后重新开始。", "zh")
             tts_wait(ctx.tts_agent)
-            raise RuntimeError(f"起始板块导航未完成: {start_navi_status}")
+            raise RuntimeError(f"点位1导航未完成: {start_navi_status}")
 
     opening_mode = os.getenv("RABBITBOT_OPENING_MODE", "full").strip().lower()
     if opening_mode in {"0", "false", "no", "off", "skip"}:
@@ -820,22 +873,10 @@ def create_main_workflow(ctx: Any) -> Workflow:
         "合影板块": "再见",
     }
     DOCX_SCRIPT_POINT_ENTITY = {
-        "point_2": "问咖啡点",
-        "point_3": "多功能展示区",
-        "point_4": "园区布局板块",
-        "point_5": "合影板块",
-    }
-    DOCX_SCRIPT_POINT_OVERRIDES = {
-        "问咖啡点": {
-            "source_entity": "多功能展示区",
-            "point_index": 0,
-            "summary": "问咖啡点",
-            "description": "点位2用于跟随步行后询问咖啡，不作为多功能展示区正式讲解点。",
-        },
-        "多功能展示区": {
-            "source_entity": "多功能展示区",
-            "point_index": 1,
-        },
+        "point_2": "点位2",
+        "point_3": "点位3",
+        "point_4": "点位4",
+        "point_5": "点位5",
     }
     DOCX_SCRIPT_STEPS = [
         {
@@ -993,23 +1034,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         return any(keyword in normalized_text for keyword in positive_keywords)
 
     def load_docx_script_entity(entity_name):
-        override = DOCX_SCRIPT_POINT_OVERRIDES.get(entity_name)
-        if not override:
-            return _load_json_entity(entity_name)
-
-        source_entity_name = override.get("source_entity", entity_name)
-        source_entity = _load_json_entity(source_entity_name)
-        source_points = _extract_location_points(source_entity)
-        point_index = override.get("point_index", 0)
-        if point_index >= len(source_points):
-            return None
-
-        entity = dict(source_entity or {})
-        entity["name"] = entity_name
-        entity["summary"] = override.get("summary") or entity.get("summary") or entity_name
-        entity["description"] = override.get("description") or entity.get("description") or ""
-        entity["location"] = [source_points[point_index]]
-        return entity
+        return _load_docx_point_entity(entity_name) or _load_json_entity(entity_name)
 
     async def speak_docx_script_navigation_segments(step, scene):
         if not step.get("speak_during_navigation"):
