@@ -228,7 +228,7 @@ DOCX 剧本全部完成后，workflow 不再直接退出，而是进入剧本后
 
 当前动作：
 
-- `握手`：对应剧本“伸手-握手-收手”。
+- `握手`：对应剧本“伸手-握手-收手”。执行后等待 `3s`，再追加 `release arm` 收回胳膊，并等待收回后再继续讲话。
 - `打招呼`：对应剧本“手部轻微挥手/欢迎”。执行后会追加 `release arm` 收回胳膊，并等待收回后再继续讲话。
 
 当前不会导航到起始板块。严格 DOCX 剧本默认机器人已经站在点位1。
@@ -323,7 +323,7 @@ release arm
 
 当前明确不使用 body 不支持的 `指尖轻点`。
 
-其中 `release arm` 不是 DOCX 独立动作，而是 workflow 在 `打招呼`、`OK手势` 和 `再见` 后自动追加的收回动作。默认时序为：先等待 `1.2s` 让原动作展开，再发送 `release arm`，再等待 `1.2s` 后开始对应台词。现场可通过环境变量 `RABBITBOT_ARM_BEFORE_RELEASE_DELAY` 和 `RABBITBOT_ARM_RELEASE_WAIT_SECONDS` 微调。
+其中 `release arm` 不是 DOCX 独立动作，而是 workflow 在 `握手`、`打招呼`、`OK手势` 和 `再见` 后自动追加的收回动作。默认时序为：先等待一段时间让原动作展开，再发送 `release arm`，再等待 `1.2s` 后开始对应台词。`握手` 的展开等待默认是 `3s`，其他动作默认是 `1.2s`。现场可通过环境变量 `RABBITBOT_HANDSHAKE_BEFORE_RELEASE_DELAY`、`RABBITBOT_ARM_BEFORE_RELEASE_DELAY` 和 `RABBITBOT_ARM_RELEASE_WAIT_SECONDS` 微调。
 
 ## 当前动作编排
 
@@ -331,7 +331,7 @@ release arm
 
 | 剧本位置 | 触发时机 | workflow 动作指令 | 对应 DOCX 动作 |
 | --- | --- | --- | --- |
-| 点位1 / 开场问答 | 询问称呼后，向领导问好前 | `握手` | 伸手、握手、收手 |
+| 点位1 / 开场问答 | 询问称呼后，向领导问好前 | `握手` -> `release arm` | 伸手、握手、收手，然后收回胳膊 |
 | 点位1 / 开场问答 | 欢迎领导来园区前 | `打招呼` -> `release arm` | 手部轻微挥手、欢迎，然后收回胳膊 |
 | 点位2 / 点咖啡 | 说“好的，我来给各位安排”前 | `OK手势` -> `release arm` | 单手伸出，手势为 OK，然后收回胳膊 |
 | 点位3 / 机器狗表演 | 邀请观看机器狗表演前 | `right_hand_pointing` | 手指向机器狗方向 |

@@ -118,8 +118,14 @@ def _workflow_log(message, verbose=False):
     print(message)
 
 
-ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"打招呼", "OK手势", "再见"}
+ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"握手", "打招呼", "OK手势", "再见"}
 ARM_RELEASE_ACTION = "release arm"
+ARM_BEFORE_RELEASE_DELAYS = {
+    "握手": 3.0,
+}
+ARM_BEFORE_RELEASE_DELAY_ENV = {
+    "握手": "RABBITBOT_HANDSHAKE_BEFORE_RELEASE_DELAY",
+}
 
 
 def _env_float(name, default):
@@ -136,7 +142,14 @@ async def _do_arm_before_speech(robot, action_name):
     if action_name not in ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH:
         return
 
-    before_release_delay = _env_float("RABBITBOT_ARM_BEFORE_RELEASE_DELAY", 1.2)
+    default_before_release_delay = ARM_BEFORE_RELEASE_DELAYS.get(
+        action_name,
+        _env_float("RABBITBOT_ARM_BEFORE_RELEASE_DELAY", 1.2),
+    )
+    before_release_delay = _env_float(
+        ARM_BEFORE_RELEASE_DELAY_ENV.get(action_name, "RABBITBOT_ARM_BEFORE_RELEASE_DELAY"),
+        default_before_release_delay,
+    )
     release_wait_seconds = _env_float("RABBITBOT_ARM_RELEASE_WAIT_SECONDS", 1.2)
     if before_release_delay > 0:
         await asyncio.sleep(before_release_delay)
@@ -445,7 +458,7 @@ async def guide_opening_speech(ctx: Any):
     else:
         leader_calling = _extract_leader_calling(raw_name_text)
 
-    await ctx.robot.do_arm_async("握手")
+    await _do_arm_before_speech(ctx.robot, "握手")
     if say(f"{leader_calling}，您好。"):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
     await _do_arm_before_speech(ctx.robot, "打招呼")
