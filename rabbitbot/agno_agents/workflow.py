@@ -118,6 +118,33 @@ def _workflow_log(message, verbose=False):
     print(message)
 
 
+ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"打招呼", "OK手势"}
+ARM_RELEASE_ACTION = "release arm"
+
+
+def _env_float(name, default):
+    raw_value = os.getenv(name, str(default))
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        print(f"Invalid {name}={raw_value}, use {default}")
+        return float(default)
+
+
+async def _do_arm_before_speech(robot, action_name):
+    await robot.do_arm_async(action_name)
+    if action_name not in ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH:
+        return
+
+    before_release_delay = _env_float("RABBITBOT_ARM_BEFORE_RELEASE_DELAY", 1.2)
+    release_wait_seconds = _env_float("RABBITBOT_ARM_RELEASE_WAIT_SECONDS", 1.2)
+    if before_release_delay > 0:
+        await asyncio.sleep(before_release_delay)
+    await robot.do_arm_async(ARM_RELEASE_ACTION)
+    if release_wait_seconds > 0:
+        await asyncio.sleep(release_wait_seconds)
+
+
 def _wait_manual_navigation_success(location_name):
     if not _workflow_non_integration_enabled():
         return False
@@ -417,7 +444,7 @@ async def guide_opening_speech(ctx: Any):
     await ctx.robot.do_arm_async("握手")
     if say(f"{leader_calling}，您好。"):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
-    await ctx.robot.do_arm_async("打招呼")
+    await _do_arm_before_speech(ctx.robot, "打招呼")
     raw_visit_text = tts_ask_with_early_stt(
         ctx.tts_agent,
         f"{leader_calling}，欢迎您来到我们人形机器人产业园，您是第一次来我们园区吗？",
@@ -972,7 +999,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             segment = segments[segment_index]
             action_name = segment.get("action")
             if action_name:
-                await ctx.robot.do_arm_async(action_name)
+                await _do_arm_before_speech(ctx.robot, action_name)
 
             text = segment.get("text", "")
             if text:
