@@ -83,9 +83,10 @@ if in_device_id is None:
     recorder = NoInputRecorder()
 else:
     print("Initilize RealtimeSTT ...")
+    default_models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
     local_model = os.environ.get(
         "STT_MODEL_PATH",
-        "/data/models/faster-whisper/Systran/faster-whisper-base"
+        os.path.join(default_models_dir, "faster-whisper", "Systran", "faster-whisper-base")
     )
     model = local_model if os.path.exists(local_model) else "base"
     print(f"stt_model: {model}")

@@ -11,8 +11,8 @@
 #   4. 默认非交互启动 workflow，适合断电重启后直接执行。
 #
 # 使用方法：
-#   cd /mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master
-#   bash scripts/start_all_services.sh
+#   cd rabbitbot-dev-ros2-master
+#   bash scripts_1/start_all_services.sh
 #
 # 可选环境变量：
 #   AUTO_START_WORKFLOW=0      只启动基础服务，不启动 workflow
@@ -28,10 +28,13 @@ set -u
 # 配置区域
 # -----------------------------------------------------------------------------
 
-PROJECT_DIR="/mnt/ssd/navgation/projects"
-RABBITBOT_DIR="${PROJECT_DIR}/rabbitbot-dev-ros2-master"
-MODELS_DIR="${PROJECT_DIR}/models"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RABBITBOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PROJECT_DIR="$(cd "${RABBITBOT_DIR}/.." && pwd)"
+MODELS_DIR="${RABBITBOT_MODELS_DIR:-${PROJECT_DIR}/models}"
 LOG_DIR="${PROJECT_DIR}/logs"
+CONTAINER_PROJECT_ROOT="${RABBITBOT_CONTAINER_PROJECT_ROOT:-/data}"
+CONTAINER_PROJECT_DIR="${RABBITBOT_CONTAINER_PROJECT_DIR:-${CONTAINER_PROJECT_ROOT}/$(basename "${RABBITBOT_DIR}")}"
 
 VLM_CONTAINER="vlm"
 AUDIO_CONTAINER="navid-vllm-cuda-mic-audio"
@@ -259,7 +262,7 @@ start_tts() {
     fi
 
     log_info "通过 scripts/start_tts_app.bash 启动 TTS"
-    exec_detached "${AUDIO_CONTAINER}" "cd /data/rabbitbot-dev-ros2-master && export TTS_DEVICE_NAME='${TTS_DEVICE_NAME}' && bash scripts/start_tts_app.bash > /tmp/rabbitbot_tts.log 2>&1"
+    exec_detached "${AUDIO_CONTAINER}" "cd '${CONTAINER_PROJECT_DIR}' && export TTS_DEVICE_NAME='${TTS_DEVICE_NAME}' && bash scripts/start_tts_app.bash > /tmp/rabbitbot_tts.log 2>&1"
     wait_until "TTS 服务 (${TTS_PORT})" "${WAIT_DEFAULT_SECONDS}" tts_ready
 }
 
@@ -270,7 +273,7 @@ start_stt() {
     fi
 
     log_info "通过 scripts/start_stt_funasr_app.bash 启动 STT"
-    exec_detached "${AUDIO_CONTAINER}" "cd /data/rabbitbot-dev-ros2-master && export STT_DEVICE_NAME='${STT_DEVICE_NAME}' && bash scripts/start_stt_funasr_app.bash > /tmp/rabbitbot_stt.log 2>&1"
+    exec_detached "${AUDIO_CONTAINER}" "cd '${CONTAINER_PROJECT_DIR}' && export STT_DEVICE_NAME='${STT_DEVICE_NAME}' && bash scripts/start_stt_funasr_app.bash > /tmp/rabbitbot_stt.log 2>&1"
     wait_until "STT 服务 (${STT_PORT})" "${WAIT_DEFAULT_SECONDS}" stt_ready
 }
 
@@ -292,7 +295,7 @@ start_memory_agent() {
     fi
 
     log_info "通过 scripts/start_memory_agent.sh 启动 Memory Agent"
-    exec_detached "${WORKFLOW_CONTAINER}" 'cd /data/rabbitbot-dev-ros2-master && bash scripts/start_memory_agent.sh > /tmp/memory_agent.log 2>&1'
+    exec_detached "${WORKFLOW_CONTAINER}" "cd '${CONTAINER_PROJECT_DIR}' && bash scripts/start_memory_agent.sh > /tmp/memory_agent.log 2>&1"
     wait_until "Memory Agent 服务 (${MEMORY_AGENT_PORT})" "${WAIT_DEFAULT_SECONDS}" memory_ready
 }
 
@@ -303,7 +306,7 @@ start_robot_agent() {
     fi
 
     log_info "通过 scripts/start_robot_app.bash 启动 Robot Agent，camera=${ROBOT_CAMERA_MODE}"
-    exec_detached "${WORKFLOW_CONTAINER}" "cd /data/rabbitbot-dev-ros2-master && export RABBITBOT_ROBOT_CAMERA='${ROBOT_CAMERA_MODE}' && bash scripts/start_robot_app.bash > /tmp/robot_agent.log 2>&1"
+    exec_detached "${WORKFLOW_CONTAINER}" "cd '${CONTAINER_PROJECT_DIR}' && export RABBITBOT_ROBOT_CAMERA='${ROBOT_CAMERA_MODE}' && bash scripts/start_robot_app.bash > /tmp/robot_agent.log 2>&1"
     wait_until "Robot Agent 服务 (${ROBOT_AGENT_PORT})" "${WAIT_DEFAULT_SECONDS}" robot_agent_ready
 }
 
@@ -328,10 +331,7 @@ start_workflow() {
         log_info "Workflow 非联调模式已开启，导航点位将由终端按键确认"
     fi
 
-    docker exec -it "${docker_env[@]}" "${WORKFLOW_CONTAINER}" bash -lc '
-        cd /data/rabbitbot-dev-ros2-master
-        bash scripts/start_kuavo_agno_workflow.bash
-    '
+    docker exec -it "${docker_env[@]}" "${WORKFLOW_CONTAINER}" bash -lc "cd '${CONTAINER_PROJECT_DIR}' && bash scripts/start_kuavo_agno_workflow.bash"
 }
 
 print_status() {

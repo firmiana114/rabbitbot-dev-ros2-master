@@ -1,5 +1,8 @@
 #!/bin/bash
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "${SCRIPT_DIR}/path_env.sh"
+
 source py38/bin/activate
 
 #export PATH=${HOME}/workspace/rabbitbot/.venv/bin:${PATH}
@@ -11,11 +14,11 @@ export ROS_HOSTNAME=${ROS_IP}
 source /opt/ros/noetic/setup.bash
 source /opt/ros/foxy/setup.bash
 
-source /datanvme/fuchengjia/projects/vln/ros2_ws/install/setup.bash
+source "${RABBITBOT_VLN_WS_DIR}/install/setup.bash"
 
 export CUR_DIR=$(pwd)
 
-cd /datanvme/fuchengjia/projects/pyorbbecsdk
+cd "${RABBITBOT_PYORBBEC_LEGACY_DIR}"
 
 export PYTHONPATH=$PYTHONPATH:$(pwd)/install/lib/
 

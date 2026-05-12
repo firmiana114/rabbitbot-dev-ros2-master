@@ -132,7 +132,13 @@ class EspnetTTS(object):
                                     }
                 self.orig_sr = self.text2speech[self.lang].fs
             elif self.tts_engine_type == "kokoro":
-                kokoro_model_dir = os.environ.get("KOKORO_MODEL_DIR", "/data/models/kokoro/Kokoro-82M")
+                default_models_dir = os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), "..", "..", "..", "models")
+                )
+                kokoro_model_dir = os.environ.get(
+                    "KOKORO_MODEL_DIR",
+                    os.path.join(default_models_dir, "kokoro", "Kokoro-82M"),
+                )
                 kokoro_config_path = os.path.join(kokoro_model_dir, "config.json")
                 kokoro_model_path = os.path.join(kokoro_model_dir, "kokoro-v1_0.pth")
                 kokoro_voice_path = os.path.join(kokoro_model_dir, "voices", "zm_yunxi.pt")

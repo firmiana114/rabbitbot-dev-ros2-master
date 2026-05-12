@@ -13,7 +13,10 @@ print("PyTorch 版本:", torch.__version__)
 print("CUDA 版本:", torch.version.cuda)
 print("cuDNN 版本:", torch.backends.cudnn.version())
 
-YOLO_DIR = "/datanvme/fuchengjia/projects/yolo-detect"
+YOLO_DIR = os.environ.get(
+    "RABBITBOT_YOLO_DIR",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "yolo-detect")),
+)
 model = YOLO(os.path.join(YOLO_DIR, "yolov8n.pt"))
 model.to('cuda')
 print("YOLO 模型当前设备:", next(model.model.parameters()).device)

@@ -132,15 +132,16 @@ class BaseCamera(ABC):
         with self._recording_lock:
             if self._recording:
                 return
-            video_path = '/datanvme/fuchengjia/projects/rabbitbot-dev-ros2-dev/examples/video_data'
-            print(f'task{task_count}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.mp4')
+            video_dir = os.environ.get("RABBITBOT_VIDEO_DIR", os.path.join(self.image_dir, "video_data"))
+            os.makedirs(video_dir, exist_ok=True)
+            video_name = f'task{task_count}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.mp4'
+            print(video_name)
             self._video_writer = cv2.VideoWriter(
-                filename=os.path.join(f'task{task_count}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.mp4'),
+                filename=os.path.join(video_dir, video_name),
                 fourcc=cv2.VideoWriter_fourcc(*'mp4v'),
                 fps=self.fps,
                 frameSize=self.record_frame_size,
             )
-            # print(f"BaseCamera: start_record to {os.path.join('/datanvme/fuchengjia/projects/rabbitbot-dev-ros2-dev/examples/video_data', f'task{task_count}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4')}")
             self._recording = True
 
     def stop_record(self):

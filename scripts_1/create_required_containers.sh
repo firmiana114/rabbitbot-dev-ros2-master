@@ -18,16 +18,16 @@
 #      如需 VLN，再导入：
 #        - air_vln:1.0
 #   3. 项目和模型目录已存在：
-#        - /mnt/ssd/navgation/projects
-#        - /mnt/ssd/navgation/projects/models
+#        - 项目根目录（包含 rabbitbot 仓库、models 等目录）
+#        - 项目根目录/models
 #
 # 常用用法：
 #   bash scripts_1/create_required_containers.sh
 #   START_AFTER_CREATE=1 bash scripts_1/create_required_containers.sh
 #
 # 可选环境变量：
-#   PROJECT_DIR=/mnt/ssd/navgation/projects        项目根挂载目录
-#   MODELS_DIR=/mnt/ssd/navgation/projects/models  VLM/Embedding 模型目录
+#   PROJECT_DIR=/path/to/projects        项目根挂载目录
+#   MODELS_DIR=/path/to/projects/models  VLM/Embedding 模型目录
 #   START_AFTER_CREATE=1                           创建后立即 docker start
 #   RECREATE_CONTAINERS=1                          删除同名旧容器后重建
 #   CREATE_VLN=1                                   同时创建当前默认跳过的 air-vln 容器
@@ -39,7 +39,9 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/mnt/ssd/navgation/projects}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PROJECT_DIR="${PROJECT_DIR:-$(cd "${REPO_DIR}/.." && pwd)}"
 MODELS_DIR="${MODELS_DIR:-${PROJECT_DIR}/models}"
 START_AFTER_CREATE="${START_AFTER_CREATE:-0}"
 RECREATE_CONTAINERS="${RECREATE_CONTAINERS:-0}"
@@ -197,7 +199,6 @@ create_workflow_container() {
         -e NVIDIA_VISIBLE_DEVICES=all \
         -e NVIDIA_DRIVER_CAPABILITIES=all \
         -v "${PROJECT_DIR}:/data" \
-        -v "${PROJECT_DIR}:/datanvme/fuchengjia/projects" \
         "${WORKFLOW_IMAGE}" \
         tail -f /dev/null >/dev/null
     log_success "容器 ${WORKFLOW_CONTAINER} 创建完成"

@@ -11,7 +11,7 @@
 #      在终端按任意键即可视为到达成功，随后继续剧本流程。
 #
 # 使用方法：
-#   cd /mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master
+#   cd rabbitbot-dev-ros2-master
 #   bash scripts_1/start_non_integration_workflow.sh
 #
 # 可选环境变量：

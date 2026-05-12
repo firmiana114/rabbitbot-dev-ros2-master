@@ -1,5 +1,8 @@
 #!/bin/bash
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "${SCRIPT_DIR}/path_env.sh"
+
 #source py38/bin/activate
 source py310/bin/activate
 
@@ -12,11 +15,11 @@ export ROS_HOSTNAME=${ROS_IP}
 # source /opt/ros/noetic/setup.bash
 source /opt/ros/foxy/setup.bash
 
-source /data/vln/ros2_ws/install/setup.bash
+source "${RABBITBOT_VLN_WS_DIR}/install/setup.bash"
 
 export CUR_DIR=$(pwd)
 
-cd /data/pyorbbecsdk-v2-py310
+cd "${RABBITBOT_PYORBBEC_DIR}"
 
 export PYTHONPATH=$PYTHONPATH:$(pwd)/install/lib/
 

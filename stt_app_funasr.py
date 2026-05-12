@@ -46,13 +46,14 @@ in_device_id = int(in_device_id) if in_device_id and in_device_id.strip() else N
 print(f"in_device_id: {in_device_id}")
 
 # ===== 模型路径配置 =====
+DEFAULT_MODELS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
 SENSEVOICE_MODEL_PATH = os.environ.get(
     "STT_MODEL_PATH",
-    "/data/models/SenseVoiceSmall"
+    os.path.join(DEFAULT_MODELS_DIR, "SenseVoiceSmall")
 )
 VAD_MODEL_PATH = os.environ.get(
     "VAD_MODEL_PATH",
-    "/data/models/fsmn_vad"
+    os.path.join(DEFAULT_MODELS_DIR, "fsmn_vad")
 )
 STT_DEVICE = os.environ.get("STT_DEVICE", "cuda")
 

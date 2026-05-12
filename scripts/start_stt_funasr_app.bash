@@ -4,6 +4,7 @@
 # 设置环境变量
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_DIR=$(cd "${SCRIPT_DIR}/.." && pwd)
+source "${SCRIPT_DIR}/path_env.sh"
 
 if [ -f /opt/venv/bin/activate ]; then
     source /opt/venv/bin/activate
@@ -16,8 +17,8 @@ fi
 export STT_DEVICE=${STT_DEVICE:-cuda}
 export STT_COMPUTE_TYPE=${STT_COMPUTE_TYPE:-float16}
 export STT_PORT=${STT_PORT:-28184}
-export STT_MODEL_PATH=${STT_MODEL_PATH:-/data/models/SenseVoiceSmall}
-export VAD_MODEL_PATH=${VAD_MODEL_PATH:-/data/models/fsmn_vad}
+export STT_MODEL_PATH=${STT_MODEL_PATH:-${RABBITBOT_MODELS_DIR}/SenseVoiceSmall}
+export VAD_MODEL_PATH=${VAD_MODEL_PATH:-${RABBITBOT_MODELS_DIR}/fsmn_vad}
 
 # STT_DEVICE_NAME 只在明确指定时作为最高优先级；默认自动选择外接麦克风。
 DEVICE_NAME="${STT_DEVICE_NAME:-}"
