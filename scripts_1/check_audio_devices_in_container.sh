@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# 在音频 Docker 容器中枚举 PyAudio 可见的输入/输出设备。
-# 用途：确认 TTS 输出设备 BT67、STT 输入设备 Wireless Mic 是否已经被容器识别。
+# 在音频 Docker 容器中枚举 ALSA 和 PyAudio 可见的输入/输出设备。
+# 用途：确认 TTS 输出设备、STT 输入设备是否已经被容器识别。
 
 set -e
 
@@ -10,10 +10,27 @@ set -e
 AUDIO_CONTAINER="${AUDIO_CONTAINER:-navid-vllm-cuda-mic-audio}"
 
 echo "正在检查容器 ${AUDIO_CONTAINER} 内的音频设备..."
-echo "重点关注设备名是否包含：BT67 / Wireless Mic"
+echo "重点关注是否能看到外接输出设备和外接输入设备，例如 BT67、REDMI Speaker、Wireless Mic。"
 echo ""
 
 docker exec -it "${AUDIO_CONTAINER}" bash -lc '
+echo "===== /dev/snd ====="
+ls -l /dev/snd 2>/dev/null || true
+echo ""
+
+echo "===== /proc/asound/cards ====="
+cat /proc/asound/cards 2>/dev/null || true
+echo ""
+
+echo "===== aplay -l ====="
+aplay -l 2>/dev/null || true
+echo ""
+
+echo "===== arecord -l ====="
+arecord -l 2>/dev/null || true
+echo ""
+
+echo "===== PyAudio ====="
 source /opt/venv/bin/activate
 python - <<'"'"'PY'"'"'
 import pyaudio
@@ -36,5 +53,5 @@ PY
 '
 
 echo ""
-echo "如果列表中能看到 BT67，说明 TTS 输出设备可见。"
-echo "如果列表中能看到 Wireless Mic，说明 STT 输入设备可见。"
+echo "如果输出设备出现在 aplay/PyAudio 的 out 通道中，说明 TTS 输出设备可见。"
+echo "如果输入设备出现在 arecord/PyAudio 的 in 通道中，说明 STT 输入设备可见。"

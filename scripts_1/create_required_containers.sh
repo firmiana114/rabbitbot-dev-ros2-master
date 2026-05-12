@@ -164,10 +164,19 @@ create_audio_container() {
     remove_container_if_requested "${AUDIO_CONTAINER}" || return 0
     log_info "创建容器 ${AUDIO_CONTAINER}"
     local runtime_args=()
-    local device_args=()
+    local audio_args=()
     mapfile -t runtime_args < <(nvidia_runtime_args)
     if [ -e /dev/snd ]; then
-        device_args+=(--device /dev/snd)
+        # 使用 bind mount + cgroup 规则，而不是 --device /dev/snd。
+        # 这样 USB/蓝牙声卡热插拔后新增的 /dev/snd 节点也能被容器看到。
+        audio_args+=(
+            -v /dev/snd:/dev/snd
+            --device-cgroup-rule 'c 116:* rwm'
+        )
+        if [ -d /proc/asound ]; then
+            # Docker 默认会 mask /proc/asound，导致 ALSA/PyAudio 看不到真实声卡名。
+            audio_args+=(-v /proc/asound:/proc/asound:ro)
+        fi
     else
         log_warn "宿主机没有 /dev/snd，音频容器仍会创建，但 STT/TTS 现场音频可能不可用"
     fi
@@ -176,7 +185,7 @@ create_audio_container() {
         --network host \
         --ipc host \
         "${runtime_args[@]}" \
-        "${device_args[@]}" \
+        "${audio_args[@]}" \
         -v "${PROJECT_DIR}:/data" \
         "${AUDIO_IMAGE}" \
         tail -f /dev/null >/dev/null
