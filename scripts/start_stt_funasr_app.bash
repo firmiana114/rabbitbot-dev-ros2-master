@@ -19,36 +19,70 @@ export STT_PORT=${STT_PORT:-28184}
 export STT_MODEL_PATH=${STT_MODEL_PATH:-/data/models/SenseVoiceSmall}
 export VAD_MODEL_PATH=${VAD_MODEL_PATH:-/data/models/fsmn_vad}
 
-# 设备名称
-DEVICE_NAME="${STT_DEVICE_NAME:-DJI MIC MINI}"
+# STT_DEVICE_NAME 只在明确指定时作为最高优先级；默认自动选择外接麦克风。
+DEVICE_NAME="${STT_DEVICE_NAME:-}"
 
 # 查找输入设备。必须在激活虚拟环境后执行，否则默认 python 可能没有 sounddevice。
-echo "查找输入设备: ${DEVICE_NAME}"
+echo "查找输入设备，指定名称: ${DEVICE_NAME:-未指定}"
 DEVICE_INFO=$(python - <<'PYDEV'
 import os
 import sys
 
-preferred_name = os.environ.get("STT_DEVICE_NAME", "DJI MIC MINI")
+preferred_name = os.environ.get("STT_DEVICE_NAME", "").strip().lower()
+builtin_keywords = (
+    "orin",
+    "jetson",
+    "tegra",
+    "nvidia",
+    "hda",
+    "ape",
+    "admaif",
+    "tegrasnd",
+)
+
+def is_builtin_audio(name):
+    normalized = name.lower()
+    return any(keyword in normalized for keyword in builtin_keywords)
+
 try:
     import sounddevice as sd
 except Exception as exc:
     print(f"sounddevice 不可用，无法按名称查找输入设备: {exc}", file=sys.stderr)
     sys.exit(0)
 
+preferred = None
+external = None
+builtin = None
+
 for idx, dev in enumerate(sd.query_devices()):
-    if preferred_name in dev.get("name", "") and dev.get("max_input_channels", 0) > 0:
-        print(idx)
-        break
+    input_channels = int(dev.get("max_input_channels", 0))
+    if input_channels <= 0:
+        continue
+
+    name = dev.get("name", "")
+    device_info = f"{idx}|{name}|{input_channels}"
+    if preferred_name and preferred_name in name.lower() and preferred is None:
+        preferred = device_info
+    elif not is_builtin_audio(name) and external is None:
+        external = device_info
+    elif builtin is None:
+        builtin = device_info
+
+selected = preferred or external or builtin
+if selected is not None:
+    print(selected)
 PYDEV
 )
 
 if [ -n "${DEVICE_INFO}" ]; then
-    export INPUT_DEVICE_INDEX="${DEVICE_INFO}"
-    echo "使用设备: ${DEVICE_NAME} (index=${DEVICE_INFO})"
+    DEVICE_INDEX=$(echo "${DEVICE_INFO}" | cut -d'|' -f1)
+    DEVICE_FOUND_NAME=$(echo "${DEVICE_INFO}" | cut -d'|' -f2)
+    export INPUT_DEVICE_INDEX="${DEVICE_INDEX}"
+    echo "使用输入音频设备 ${DEVICE_FOUND_NAME}，index=${INPUT_DEVICE_INDEX}"
 elif [ -n "${INPUT_DEVICE_INDEX}" ]; then
-    echo "未按名称找到设备 ${DEVICE_NAME}，使用已设置的 INPUT_DEVICE_INDEX=${INPUT_DEVICE_INDEX}"
+    echo "未自动找到输入设备，使用已设置的 INPUT_DEVICE_INDEX=${INPUT_DEVICE_INDEX}"
 else
-    echo "未找到输入设备 ${DEVICE_NAME}，将以无输入设备模式启动"
+    echo "未找到可用输入设备，将以无输入设备模式启动"
     unset INPUT_DEVICE_INDEX
 fi
 

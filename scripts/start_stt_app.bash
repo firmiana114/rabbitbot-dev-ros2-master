@@ -45,8 +45,8 @@ else:
     print("RealtimeSTT 麦克风 48000Hz 兼容补丁已存在")
 PY
 
-# 使用 PyAudio 名称匹配自动检测设备（优先 DJI MIC MINI）
-DEVICE_NAME="${STT_DEVICE_NAME:-DJI MIC MINI}"
+# STT_DEVICE_NAME 只在明确指定时作为最高优先级；默认自动选择外接麦克风。
+DEVICE_NAME="${STT_DEVICE_NAME:-}"
 
 DEVICE_INDEX=""
 DEVICE_FOUND_NAME=""
@@ -55,9 +55,26 @@ DEVICE_INFO=$(python - <<'PY' 2>/tmp/rabbitbot_stt_pyaudio.err
 import os
 import pyaudio
 
-preferred_name = os.environ.get("STT_DEVICE_NAME", "DJI MIC MINI")
+preferred_name = os.environ.get("STT_DEVICE_NAME", "").strip().lower()
+builtin_keywords = (
+    "orin",
+    "jetson",
+    "tegra",
+    "nvidia",
+    "hda",
+    "ape",
+    "admaif",
+    "tegrasnd",
+)
+
+def is_builtin_audio(name):
+    normalized = name.lower()
+    return any(keyword in normalized for keyword in builtin_keywords)
+
 p = pyaudio.PyAudio()
-fallback = None
+preferred = None
+external = None
+builtin = None
 
 for index in range(p.get_device_count()):
     info = p.get_device_info_by_index(index)
@@ -67,15 +84,16 @@ for index in range(p.get_device_count()):
     
     name = info.get("name", "")
     device_info = f"{index}|{name}|{input_channels}"
-    if preferred_name and preferred_name in name:
-        print(device_info)
-        p.terminate()
-        exit(0)
-    if fallback is None:
-        fallback = device_info
+    if preferred_name and preferred_name in name.lower() and preferred is None:
+        preferred = device_info
+    elif not is_builtin_audio(name) and external is None:
+        external = device_info
+    elif builtin is None:
+        builtin = device_info
 
-if fallback:
-    print(fallback)
+selected = preferred or external or builtin
+if selected:
+    print(selected)
 p.terminate()
 PY
 )
@@ -87,7 +105,7 @@ if [ -n "$DEVICE_INFO" ]; then
     echo "使用输入音频设备 ${DEVICE_FOUND_NAME}，index=${INPUT_DEVICE_INDEX}"
 else
     unset INPUT_DEVICE_INDEX
-    echo "未找到输入音频设备 ${DEVICE_NAME}，将以无输入设备模式启动 STT"
+    echo "未找到可用输入音频设备，将以无输入设备模式启动 STT"
 fi
 
 export TORCH_HUB_DISABLE_NETWORK=1

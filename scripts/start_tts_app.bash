@@ -11,16 +11,33 @@ export HF_ENDPOINT=https://hf-mirror.com
 
 source /opt/venv/bin/activate
 
-#DEVICE_NAME="USB Audio Device"
-DEVICE_NAME="${TTS_DEVICE_NAME:-BT67}"
+# TTS_DEVICE_NAME 只在明确指定时作为最高优先级；默认自动选择外接声卡。
+DEVICE_NAME="${TTS_DEVICE_NAME:-}"
 if [ -d /dev/snd ]; then
     DEVICE_INFO=$(python - <<'PY' 2>/tmp/rabbitbot_tts_pyaudio.err
 import os
 import pyaudio
 
-preferred_name = os.environ.get("TTS_DEVICE_NAME", "BT67")
+preferred_name = os.environ.get("TTS_DEVICE_NAME", "").strip().lower()
+builtin_keywords = (
+    "orin",
+    "jetson",
+    "tegra",
+    "nvidia",
+    "hda",
+    "ape",
+    "admaif",
+    "tegrasnd",
+)
+
+def is_builtin_audio(name):
+    normalized = name.lower()
+    return any(keyword in normalized for keyword in builtin_keywords)
+
 p = pyaudio.PyAudio()
-fallback = None
+preferred = None
+external = None
+builtin = None
 
 try:
     for index in range(p.get_device_count()):
@@ -31,14 +48,16 @@ try:
 
         name = info.get("name", "")
         device_info = f"{index}|{name}|{output_channels}"
-        if preferred_name and preferred_name in name:
-            print(device_info)
-            break
-        if fallback is None:
-            fallback = device_info
+        if preferred_name and preferred_name in name.lower() and preferred is None:
+            preferred = device_info
+        elif not is_builtin_audio(name) and external is None:
+            external = device_info
+        elif builtin is None:
+            builtin = device_info
     else:
-        if fallback is not None:
-            print(fallback)
+        selected = preferred or external or builtin
+        if selected is not None:
+            print(selected)
 finally:
     p.terminate()
 PY
@@ -55,7 +74,7 @@ if [ -n "$DEVICE_INDEX" ]; then
     echo "使用输出音频设备 ${DEVICE_FOUND_NAME}，index=${OUTPUT_DEVICE_INDEX}"
 else
     unset OUTPUT_DEVICE_INDEX
-    echo "未找到输出音频设备 ${DEVICE_NAME}，将以无输出设备模式启动 TTS"
+    echo "未找到可用输出音频设备，将以无输出设备模式启动 TTS"
 fi
 
 uvicorn tts_app:app --host 0.0.0.0 --port 28185 --log-level debug --workers 1
