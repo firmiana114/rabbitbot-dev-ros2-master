@@ -116,9 +116,12 @@ class NaviWayPointActionClient(Node):
         goal_msg.orientation_z = float(oz)
         goal_msg.orientation_w = float(ow)
 
+        print(f"[DEBUG] NaviWayPointActionClient: Waiting for server...")
         self._action_client.wait_for_server()
+        print(f"[DEBUG] NaviWayPointActionClient: Server ready, sending goal: x={x}, y={y}")
 
         self._send_goal_future = self._action_client.send_goal_async(goal_msg, feedback_callback=self.feedback_callback)
+        print(f"[DEBUG] NaviWayPointActionClient: Goal sent, waiting for response...")
 
         if spin:
             rclpy.spin_until_future_complete(self, self._send_goal_future)
@@ -128,9 +131,11 @@ class NaviWayPointActionClient(Node):
     def goal_response_callback(self, future):
         goal_handle = future.result()
         if not goal_handle.accepted:
+            print("[DEBUG] NaviWayPointActionClient: Goal REJECTED by server!")
             self.get_logger().info('Goal rejected :(')
             return
 
+        print("[DEBUG] NaviWayPointActionClient: Goal ACCEPTED by server!")
         self.get_logger().info('Goal accepted :)')
 
         self._get_result_future = goal_handle.get_result_async()
@@ -138,10 +143,12 @@ class NaviWayPointActionClient(Node):
 
     def get_result_callback(self, future):
         result = future.result().result
+        print(f"[DEBUG] NaviWayPointActionClient: Got result - x_delta={result.x_delta:.3f}, y_delta={result.y_delta:.3f}")
         self.get_logger().info('Result: ({0},{1})'.format(result.x_delta, result.y_delta))
 
     def feedback_callback(self, feedback_msg):
         feedback = feedback_msg.feedback
+        print(f"[DEBUG] NaviWayPointActionClient: Feedback - x_remaining={feedback.x_remaining:.3f}, y_remaining={feedback.y_remaining:.3f}")
         self.get_logger().info('Received feedback: ({0},{1})'.format(feedback.x_remaining, feedback.y_remaining))
 
 

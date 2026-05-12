@@ -216,7 +216,7 @@ class GoalReachTopicV2(Node):
     def __init__(self):
         super().__init__('goal_reach')
         self.cur_status = -1
-        self.debug = False
+        self.debug = True  # 开启调试日志
 
     def start(self):
         self.topic = "/kuavo_navigation_state"
@@ -225,22 +225,23 @@ class GoalReachTopicV2(Node):
         self.subscription = self.create_subscription(
             UInt8, self.topic, self.move_status_callback, 10
         )
-        print(f'GoalReachTopic: Started')
+        print(f'[DEBUG] GoalReachTopicV2: Started, subscribing to {self.topic}')
 
     def stop(self):
         self.destroy_subscription(self.subscription)
-        print(f'GoalReachTopic: Stopped')
+        print(f'[DEBUG] GoalReachTopicV2: Stopped')
 
     def move_status_callback(self, msg: UInt8) -> None:
+        old_status = self.cur_status
+        self.cur_status = int(msg.data)
+        if self.debug or old_status != self.cur_status:
+            print(f"[DEBUG] GoalReachTopicV2: Status changed {old_status} -> {self.cur_status}")
         if self.debug:
             print(f"msg {msg}")
-        self.cur_status = int(msg.data)
-        if self.debug:
-            print(f"GoalReachTopic: Set status (status={self.cur_status})")
 
     def get_status(self):
         if self.debug:
-            print(f"GoalReachTopic: Get status")
+            print(f"[DEBUG] GoalReachTopicV2: get_status() returning {self.cur_status}")
         return self.cur_status
 
 
@@ -820,14 +821,19 @@ class KuavoAutonomyBot(AutonomyBot):
 
     def _send_waypoint(self, index):
         if self.way_point_client is None:
+            print("[DEBUG] _send_waypoint: way_point_client is None, cannot send!")
             return False
         with self._waypoint_lock:
             if index < 0 or index >= len(self._waypoints):
+                print(f"[DEBUG] _send_waypoint: index {index} out of range!")
                 return False
             self._waypoint_index = index
             x, y, ox, oy, oz, ow = self._waypoints[index]
-        print(f"KuavoAutonomyBot: Send waypoint {index + 1}/{len(self._waypoints)} {(x, y, ox, oy, oz, ow)}")
+        print(f"[DEBUG] _send_waypoint: Sending waypoint {index + 1}/{len(self._waypoints)} to navi_way_point action")
+        print(f"[DEBUG] _send_waypoint: Position: x={x:.4f}, y={y:.4f}")
+        print(f"[DEBUG] _send_waypoint: Orientation: ox={ox:.4f}, oy={oy:.4f}, oz={oz:.4f}, ow={ow:.4f}")
         self.way_point_client.send_goal(x, y, ox, oy, oz, ow, spin=False)
+        print("[DEBUG] _send_waypoint: send_goal() called")
         return True
 
     def _handle_navigation_arrival_transition(self, next_status):
@@ -910,13 +916,14 @@ class KuavoAutonomyBot(AutonomyBot):
         query = None
     ):
         if self.way_point_client is None:
+            print("[DEBUG] _go_to: way_point_client is None, using fake navigation")
             return self._go_to_fake(location, point, query)
 
-        print(f"KuavoAutonomyBot: Go to (point={point})")
+        print(f"[DEBUG] _go_to: Starting navigation to point={point}")
         query.set_status(NavigationStatus.ACTIVE)
         waypoints = self._normalize_waypoints(point)
         if not waypoints:
-            print(f"KuavoAutonomyBot: no valid waypoint from {point}")
+            print(f"[DEBUG] _go_to: no valid waypoint from {point}, aborting!")
             query.set_status(NavigationStatus.ABORTED)
             return
         with self._waypoint_lock:
@@ -928,19 +935,22 @@ class KuavoAutonomyBot(AutonomyBot):
             self._pending_arrival_transition = False
             self._nav_status_final_arrived = False
             self._nav_status_arm_ready = False
+        print(f"[DEBUG] _go_to: waypoints normalized, count={len(waypoints)}")
         self._send_waypoint(0)
+        print("[DEBUG] _go_to: Waiting for navigation to complete...")
         time.sleep(5)
         is_completed = False
         last_status = self.goal_reach.get_status() if self.goal_reach is not None else -1
+        print(f"[DEBUG] _go_to: Initial goal_reach status = {last_status}")
+        loop_count = 0
         while not is_completed:
-            #cur_pose = self.get_pose()
-            #target_pose = (x, y, 0, 0)
-            #print(f"cur_poes {cur_pose}, target_pose {target_pose}")
-            #is_completed = self.is_go_to_complete(cur_pose, target_pose)
+            loop_count += 1
             is_completed, last_status = self.is_go_to_complete_v2(last_status)
+            if loop_count % 10 == 0:  # 每5秒打印一次
+                debug_status = self.get_navigation_debug_status()
+                print(f"[DEBUG] _go_to: loop={loop_count}, is_completed={is_completed}, status={debug_status}")
             time.sleep(0.5)
-            print(f"KuavoAutonomyBot: is_completed {is_completed}")
-        print(f"KuavoAutonomyBot: Set navi status to SUCCEEDED")
+        print(f"[DEBUG] _go_to: Navigation completed! Setting status to SUCCEEDED")
         query.set_status(NavigationStatus.SUCCEEDED)
 
     async def go_to(
@@ -981,11 +991,13 @@ class KuavoAutonomyBot(AutonomyBot):
         point: tuple = None,
         query = None
     ):
-        print("Create go to (fake) thread")
+        print(f"[DEBUG] go_to_async called: location={location}, point={point}")
+        print(f"[DEBUG] go_to_async: way_point_client = {self.way_point_client}")
+        print("[DEBUG] go_to_async: Creating navigation thread")
         self._go_to_thread = threading.Thread(target=self._go_to, args=(location, point, query))
-        #self._go_to_thread = threading.Thread(target=self._go_to_fake, args=(location, point, query))
-        print("Start go to (fake) thread")
+        print("[DEBUG] go_to_async: Thread created, starting thread")
         self._go_to_thread.start()
+        print("[DEBUG] go_to_async: Thread started")
         return True
 
     def _do_arm(self, action_name: str):
