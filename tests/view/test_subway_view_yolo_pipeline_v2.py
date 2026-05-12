@@ -27,14 +27,28 @@ from torchvision import transforms
 import traceback
 
 
-DATA_DIR = "/datanvme/fuchengjia/downloads/agi-robot-subway-v2/agi_data_small"
+REPO_DIR = Path(__file__).resolve().parents[2]
+PROJECTS_DIR = REPO_DIR.parent
+TEST_DATA_ROOT = Path(os.environ.get("RABBITBOT_TEST_DATA_ROOT", PROJECTS_DIR / "downloads"))
+DATA_DIR = str(Path(os.environ.get("RABBITBOT_SUBWAY_DATA_DIR", TEST_DATA_ROOT / "agi-robot-subway-v2" / "agi_data_small")))
+REID_MODEL_PATH = Path(os.environ.get(
+    "RABBITBOT_REID_MODEL_PATH",
+    PROJECTS_DIR / "models" / "deep-person-reid" / "osnet_x1_0_market_256x128_amsgrad_ep150_stp60_lr0.0015_b64_fb10_softmax_labelsmooth_flip.pth"
+))
+VISION_WORKSPACE_DIR = Path(os.environ.get(
+    "RABBITBOT_VISION_WORKSPACE_DIR",
+    REPO_DIR / "workspace" / "tools" / "vision_tools"
+))
+PIXEL_POINTS_PATH = Path(os.environ.get(
+    "RABBITBOT_PIXEL_POINTS_PATH",
+    REPO_DIR / "tests" / "view" / "pixel_points.json"
+))
 # 这里加载torchreid的模型
 model = torchreid.models.build_model(name='osnet_x1_0', num_classes=751, pretrained=False)
-torchreid.utils.load_pretrained_weights(model,
-    "/datanvme/fuchengjia/models/deep-person-reid/osnet_x1_0_market_256x128_amsgrad_ep150_stp60_lr0.0015_b64_fb10_softmax_labelsmooth_flip.pth")
+torchreid.utils.load_pretrained_weights(model, str(REID_MODEL_PATH))
 model = model.to("cuda")
 model.eval()
-json_path="/datanvme/fuchengjia/projects/rabbitbot-dev-ros2-dev/tests/view/pixel_points.json"
+json_path = str(PIXEL_POINTS_PATH)
 
 def create_view_agent(ctx, instructions):
     model = ctx.agno_model
@@ -804,7 +818,7 @@ async def test_retrograde():
         view_agent = create_view_agent(ctx, inst)
         view_tool = VisionToolkit(ctx, frame_size=(640, 480))
         video_path = f"{DATA_DIR}/逆行.mp4"
-        save_dir = "/datanvme/fuchengjia/projects/rabbitbot-dev-ros2-dev/workspace/tools/vision_tools"
+        save_dir = str(VISION_WORKSPACE_DIR)
         video_fps = get_fps(video_path)
         print(f"视频帧数：{video_fps}")
         frame_idx_list = [90, 120, 150]

@@ -1,8 +1,10 @@
 
+import os
 import cv2
 import time
 import asyncio
 import argparse
+from pathlib import Path
 from textwrap import dedent
 from agno.agent import Agent
 from rabbitbot.context import AppContext
@@ -13,7 +15,10 @@ from rabbitbot.robots.constants import MoveType
 from utils import read_frame, get_fps
 
 
-DATA_DIR = "/datanvme/fuchengjia/downloads/agi-robot-subway"
+REPO_DIR = Path(__file__).resolve().parents[2]
+PROJECTS_DIR = REPO_DIR.parent
+TEST_DATA_ROOT = Path(os.environ.get("RABBITBOT_TEST_DATA_ROOT", PROJECTS_DIR / "downloads"))
+DATA_DIR = str(Path(os.environ.get("RABBITBOT_SUBWAY_DATA_DIR", TEST_DATA_ROOT / "agi-robot-subway")))
 
 
 def create_view_agent(ctx, instructions):

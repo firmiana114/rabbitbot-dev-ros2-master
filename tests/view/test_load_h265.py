@@ -1,8 +1,14 @@
 
 import os
 import cv2
+from pathlib import Path
 
 from utils import load_h265
+
+
+REPO_DIR = Path(__file__).resolve().parents[2]
+PROJECTS_DIR = REPO_DIR.parent
+TEST_DATA_ROOT = Path(os.environ.get("RABBITBOT_TEST_DATA_ROOT", PROJECTS_DIR / "downloads"))
 
 
 def test_load_h265():
@@ -117,19 +123,19 @@ def test_load_h265():
     print("=" * 60)
 
     # 请修改为你的实际文件路径进行测试
-    DATA_DIR = "/datanvme/fuchengjia/downloads/agi-robot-subway-v2"
-    test_file = f"{DATA_DIR}/agi_data_small/94149/9bf125ab-e3ff-43ac-aa11-ba4e4eca3831/camera/head_stereo_right/head_stereo_right.h265"  # 修改为你的 H.265 文件路径
+    DATA_DIR = Path(os.environ.get("RABBITBOT_SUBWAY_V2_DATA_DIR", TEST_DATA_ROOT / "agi-robot-subway-v2"))
+    test_file = DATA_DIR / "agi_data_small" / "94149" / "9bf125ab-e3ff-43ac-aa11-ba4e4eca3831" / "camera" / "head_stereo_right" / "head_stereo_right.h265"
 
-    if os.path.exists(test_file):
+    if test_file.exists():
         try:
             # 先获取信息
-            cap = cv2.VideoCapture(test_file)
+            cap = cv2.VideoCapture(str(test_file))
             total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             cap.release()
             print(f"✓ 找到测试文件，总帧数: {total}")
 
             # 读取第一帧
-            success, frame = load_h265(test_file, 0)
+            success, frame = load_h265(str(test_file), 0)
             print(f"✓ 成功读取第0帧，形状: {frame.shape}")
             if success:
                 OUTPUT_DIR = "workspace/tools/vision_tools"
@@ -138,7 +144,7 @@ def test_load_h265():
 
             # 尝试读取超出范围的帧
             try:
-                load_h265(test_file, total + 100)
+                load_h265(str(test_file), total + 100)
             except ValueError as e:
                 print(f"✓ 正确捕获超出范围异常: {e}")
 

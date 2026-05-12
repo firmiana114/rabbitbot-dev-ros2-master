@@ -18,7 +18,14 @@ from yolo_agent import YoloAgent
 from utils import read_frame, get_fps
 
 
-DATA_DIR = "/datanvme/fuchengjia/downloads/agi-robot-subway"
+REPO_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+PROJECTS_DIR = os.path.abspath(os.path.join(REPO_DIR, ".."))
+TEST_DATA_ROOT = os.environ.get("RABBITBOT_TEST_DATA_ROOT", os.path.join(PROJECTS_DIR, "downloads"))
+DATA_DIR = os.environ.get("RABBITBOT_SUBWAY_DATA_DIR", os.path.join(TEST_DATA_ROOT, "agi-robot-subway"))
+VISION_WORKSPACE_DIR = os.environ.get(
+    "RABBITBOT_VISION_WORKSPACE_DIR",
+    os.path.join(REPO_DIR, "workspace", "tools", "vision_tools")
+)
 
 
 def create_view_agent(ctx, instructions):
@@ -314,7 +321,7 @@ async def test_retrograde():
         view_agent = create_view_agent(ctx, inst)
         view_tool = VisionToolkit(ctx, frame_size=(640, 480))
         video_path = f"{DATA_DIR}/逆行.mp4"
-        save_dir = "/datanvme/fuchengjia/projects/rabbitbot-dev-ros2-dev/workspace/tools/vision_tools"
+        save_dir = VISION_WORKSPACE_DIR
         video_fps = get_fps(video_path)
         print(f"视频帧数：{video_fps}")
         frame_idx_list = [90, 120, 150]

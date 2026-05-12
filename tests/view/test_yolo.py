@@ -1,13 +1,19 @@
 
 import os
 import json
+from pathlib import Path
 
 from utils import draw_bboxes
 from yolo_agent import YoloAgent
 
 
+REPO_DIR = Path(__file__).resolve().parents[2]
+PROJECTS_DIR = REPO_DIR.parent
+TEST_DATA_ROOT = Path(os.environ.get("RABBITBOT_TEST_DATA_ROOT", PROJECTS_DIR / "downloads"))
+
+
 def main():
-    DATA_DIR = "/datanvme/fuchengjia/downloads/agi-robot-subway"
+    DATA_DIR = str(Path(os.environ.get("RABBITBOT_SUBWAY_DATA_DIR", TEST_DATA_ROOT / "agi-robot-subway")))
     image_path = os.path.join(DATA_DIR, "无包识别.png")
     yolo_agent = YoloAgent("127.0.0.1", 28190)
     bbox_str = yolo_agent.detect(image_path)
