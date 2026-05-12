@@ -19,7 +19,6 @@ import numpy as np
 from qwen_agent.log import logger
 
 from .utils import transform_360_image_to_2d, frame_to_bgr_image
-from pyorbbecsdk import *
 from openai import OpenAI
 from datetime import datetime
 import base64
@@ -577,10 +576,18 @@ class GeminiCamera(BaseCamera):
     def _start_pipeline(self):
         """Start the Genimi camera pipeline for both color and depth frames."""
         try:
-            context = Context()
-            context.set_logger_level(OBLogLevel.NONE)
+            from pyorbbecsdk import Context, OBLogLevel, Pipeline, Config
+            from pyorbbecsdk import OBSensorType, OBFormat, OBStreamType
+            from pyorbbecsdk import AlignFilter, PointCloudFilter, OBError, OBPointCloudFrame
         except ImportError:
             logger.error("pyorbbecsdk library not found. Please install pyorbbecsdk.")
+            return
+
+        try:
+            context = Context()
+            context.set_logger_level(OBLogLevel.NONE)
+        except Exception as e:
+            logger.error(f"Failed to initialize Orbbec SDK context: {e}")
             return
 
         self._pipeline = Pipeline()
@@ -1064,23 +1071,28 @@ class GeminiCamera(BaseCamera):
     def _start_pipeline_old(self):
         """Start the Genimi camera pipeline for both color and depth frames."""
         try:
-            context = Context()
-            context.set_logger_level(OBLogLevel.NONE)
-            class TemporalFilter:
-                def __init__(self, alpha):
-                    self.alpha = alpha
-                    self.previous_frame = None
-
-                def process(self, frame):
-                    if self.previous_frame is None:
-                        result = frame
-                    else:
-                        result = cv2.addWeighted(frame, self.alpha, self.previous_frame, 1 - self.alpha, 0)
-                    self.previous_frame = result
-                    return result
+            from pyorbbecsdk import Context, OBLogLevel, Pipeline, Config
+            from pyorbbecsdk import OBSensorType, OBFormat, OBStreamType, AlignFilter
         except ImportError:
             logger.error("pyorbbecsdk library not found. Please install pyorbbecsdk.")
             return
+
+        context = Context()
+        context.set_logger_level(OBLogLevel.NONE)
+
+        class TemporalFilter:
+            def __init__(self, alpha):
+                self.alpha = alpha
+                self.previous_frame = None
+
+            def process(self, frame):
+                if self.previous_frame is None:
+                    result = frame
+                else:
+                    result = cv2.addWeighted(frame, self.alpha, self.previous_frame, 1 - self.alpha, 0)
+                self.previous_frame = result
+                return result
+
         self._pipeline = Pipeline()
         config = Config()
         try:
