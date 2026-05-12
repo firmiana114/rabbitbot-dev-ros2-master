@@ -173,10 +173,6 @@ create_audio_container() {
             -v /dev/snd:/dev/snd
             --device-cgroup-rule 'c 116:* rwm'
         )
-        if [ -d /proc/asound ]; then
-            # Docker 默认会 mask /proc/asound，导致 ALSA/PyAudio 看不到真实声卡名。
-            audio_args+=(-v /proc/asound:/proc/asound:ro)
-        fi
     else
         log_warn "宿主机没有 /dev/snd，音频容器仍会创建，但 STT/TTS 现场音频可能不可用"
     fi

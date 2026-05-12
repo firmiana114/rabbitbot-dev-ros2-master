@@ -13,7 +13,12 @@ echo "正在检查容器 ${AUDIO_CONTAINER} 内的音频设备..."
 echo "重点关注是否能看到外接输出设备和外接输入设备，例如 BT67、REDMI Speaker、Wireless Mic。"
 echo ""
 
-docker exec -it "${AUDIO_CONTAINER}" bash -lc '
+DOCKER_EXEC_ARGS=()
+if [ -t 0 ] && [ -t 1 ]; then
+    DOCKER_EXEC_ARGS=(-it)
+fi
+
+docker exec "${DOCKER_EXEC_ARGS[@]}" "${AUDIO_CONTAINER}" bash -lc '
 echo "===== /dev/snd ====="
 ls -l /dev/snd 2>/dev/null || true
 echo ""
