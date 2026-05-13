@@ -282,8 +282,8 @@ DOCX 剧本全部完成后，workflow 不再直接退出，而是进入剧本后
 
 当前动作：
 
-- `right_hand_pointing`：对应右臂指向机器狗方向。台词播完后自动追加 `release`。
-- `right_hand_pointing`：对应右臂指向送咖啡机器人方向。台词播完后自动追加 `release`。
+- `right_wrist_outside`：对应右臂指向机器狗方向。台词播完后自动追加 `release`。
+- `right_wrist_outside`：对应右臂指向送咖啡机器人方向。台词播完后自动追加 `release`。
 
 当前不会真实联动机器狗表演，也不会真实联动送餐机器人送咖啡。
 
@@ -298,7 +298,7 @@ DOCX 剧本全部完成后，workflow 不再直接退出，而是进入剧本后
 
 当前动作：
 
-- `right_hand_pointing`：对应右臂指向沙盘方向。当前会先讲完园区数据和布局，再在“这个是我们整个园区的布局沙盘”前伸手指向沙盘，台词播完后自动追加 `release`。
+- `right_wrist_outside`：对应右臂指向沙盘方向。当前会先讲完园区数据和布局，再在“这个是我们整个园区的布局沙盘”前伸手指向沙盘，台词播完后自动追加 `release`。
 
 ### 点位5
 
@@ -311,7 +311,7 @@ DOCX 剧本全部完成后，workflow 不再直接退出，而是进入剧本后
 
 当前动作：
 
-- `right_hand_pointing`：对应右臂指向北门门口、小巴方向。台词播完后自动追加 `release`。
+- `right_wrist_outside`：对应右臂指向北门门口、小巴方向。台词播完后自动追加 `release`。
 - `再见`：对应挥手告别。执行后会追加 `release` 收回胳膊，并等待收回后再继续讲话。
 
 当前不会真实联动小巴开门或接人。
@@ -341,14 +341,14 @@ POST /do_arm_async HTTP/1.1" 200 OK
 握手
 打招呼
 right_hand_handshake_wrist
-right_hand_pointing
+right_wrist_outside
 再见
 release
 ```
 
 当前明确不使用 body 不支持的 `指尖轻点`。
 
-其中 `release` 不是 DOCX 独立动作，而是 workflow 自动追加的收回动作。`握手`、`打招呼` 和 `right_hand_handshake_wrist` 在指定剧本段落中会与台词并发执行，动作完成后再发送 `release`。`right_hand_handshake_wrist` 在 workflow 中会先发布灵巧手命令，再调用 Robot Agent 发送手臂 action。其他需要前置收回的动作会先等待原动作回执，默认不再额外等待，然后发送 `release`，等待收回动作回执，再默认等待 `0.2s` 后开始对应台词。`right_hand_pointing` 的时序不同：先伸手指向，再播本段台词，台词播完后默认不再额外等待，直接发送 `release`。`握手` 和其他前置收手动作的固定等待默认都是 `0s`。现场可通过环境变量 `RABBITBOT_HANDSHAKE_BEFORE_RELEASE_DELAY`、`RABBITBOT_ARM_BEFORE_RELEASE_DELAY`、`RABBITBOT_ARM_AFTER_SPEECH_RELEASE_DELAY`、`RABBITBOT_ARM_CONCURRENT_RELEASE_DELAY` 和 `RABBITBOT_ARM_RELEASE_WAIT_SECONDS` 微调。
+其中 `release` 不是 DOCX 独立动作，而是 workflow 自动追加的收回动作。`握手`、`打招呼` 和 `right_hand_handshake_wrist` 在指定剧本段落中会与台词并发执行，动作完成后再发送 `release`。`right_hand_handshake_wrist` 在 workflow 中会先发布灵巧手命令，再调用 Robot Agent 发送手臂 action。其他需要前置收回的动作会先等待原动作回执，默认不再额外等待，然后发送 `release`，等待收回动作回执，再默认等待 `0.2s` 后开始对应台词。`right_wrist_outside` 的时序不同：先伸手指向，再播本段台词，台词播完后默认不再额外等待，直接发送 `release`。`握手` 和其他前置收手动作的固定等待默认都是 `0s`。现场可通过环境变量 `RABBITBOT_HANDSHAKE_BEFORE_RELEASE_DELAY`、`RABBITBOT_ARM_BEFORE_RELEASE_DELAY`、`RABBITBOT_ARM_AFTER_SPEECH_RELEASE_DELAY`、`RABBITBOT_ARM_CONCURRENT_RELEASE_DELAY` 和 `RABBITBOT_ARM_RELEASE_WAIT_SECONDS` 微调。
 
 ## 当前动作编排
 
@@ -359,10 +359,10 @@ release
 | 点位1 / 开场问答 | 询问称呼后，向领导问好前 | `握手` -> `release` | 伸手、握手、收手，然后收回胳膊 |
 | 点位1 / 开场问答 | 欢迎领导来园区前 | `打招呼` -> `release` | 手部轻微挥手、欢迎，然后收回胳膊 |
 | 点位2 / 点咖啡 | 说“好的，我来给各位安排”时 | `right_hand_handshake_wrist` + `ok right 800 2000` -> `release` | OK 手臂动作与灵巧手 OK 手势、台词并发，然后收回胳膊 |
-| 点位3 / 机器狗表演 | 邀请观看机器狗表演前 | `right_hand_pointing` -> `release` | 右手指向机器狗方向，台词播完后收回 |
-| 点位3 / 拿取咖啡 | 提醒咖啡已到、请领导自取前 | `right_hand_pointing` -> `release` | 右手指向送咖啡机器人方向，台词播完后收回 |
-| 点位4 / 观看沙盘 | 从点位3前往点位4途中讲解，抵达后说“这个是我们整个园区的布局沙盘”前 | `right_hand_pointing` -> `release` | 右手指向沙盘方向，台词播完后收回 |
-| 点位5 / 告别并指引小巴方向 | 介绍无人驾驶小巴前 | `right_hand_pointing` -> `release` | 右手指向北门门口、小巴方向，台词播完后收回 |
+| 点位3 / 机器狗表演 | 邀请观看机器狗表演前 | `right_wrist_outside` -> `release` | 右手指向机器狗方向，台词播完后收回 |
+| 点位3 / 拿取咖啡 | 提醒咖啡已到、请领导自取前 | `right_wrist_outside` -> `release` | 右手指向送咖啡机器人方向，台词播完后收回 |
+| 点位4 / 观看沙盘 | 从点位3前往点位4途中讲解，抵达后说“这个是我们整个园区的布局沙盘”前 | `right_wrist_outside` -> `release` | 右手指向沙盘方向，台词播完后收回 |
+| 点位5 / 告别并指引小巴方向 | 介绍无人驾驶小巴前 | `right_wrist_outside` -> `release` | 右手指向北门门口、小巴方向，台词播完后收回 |
 | 点位5 / 告别并指引小巴方向 | 前往点位5途中说“各位领导再会”时 | `再见` -> `release` | 挥手告别与台词并发，然后收回胳膊 |
 
 RobotAgent 日志中如果出现以下序列，说明动作已经从 workflow 发到 RobotAgent 并进入 body action client：
