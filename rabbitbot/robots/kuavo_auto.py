@@ -86,21 +86,6 @@ class KuavoNavigator(object):
             self.rotate_client.send_goal(-self.rotate_step)
 
 
-class HandGesturePublisher(Node):
-    def __init__(self):
-        super().__init__('hand_gesture_publisher')
-        topic = os.getenv("RABBITBOT_HAND_GESTURE_TOPIC", "/gesture_cmd")
-        self._publisher = self.create_publisher(String, topic, 10)
-        self._topic = topic
-
-    def publish_command(self, command: str):
-        if not command:
-            return
-        msg = String()
-        msg.data = command
-        self._publisher.publish(msg)
-        self.get_logger().info(f"Publish hand gesture: topic={self._topic}, data={command}")
-
 
 class TfOdomBaseLink(Node):
     def __init__(self):
@@ -596,7 +581,6 @@ class KuavoAutonomyBot(AutonomyBot):
             self.handshake_client = NaviHandshakeActionClient()
             self.grab_client = NaviGrabClient()
             self.grab_cancel_client = NaviGrabCancelClient()
-            self.hand_gesture_publisher = HandGesturePublisher()
             self._navigator = KuavoNavigator(
                 forward_client=self.forward_client,
                 rotate_client=self.rotate_client,
@@ -637,7 +621,6 @@ class KuavoAutonomyBot(AutonomyBot):
             self._executor.add_node(self.handshake_client)
             self._executor.add_node(self.grab_client)
             self._executor.add_node(self.grab_cancel_client)
-            self._executor.add_node(self.hand_gesture_publisher)
             # for i in range(len(self._cameras)):
             #     self._executor.add_node(self._cameras[i])
             # self._executor.add_node(self.tf_odom_base_link)
@@ -659,7 +642,6 @@ class KuavoAutonomyBot(AutonomyBot):
             self.handshake_client = None
             self.grab_client = None
             self.grab_cancel_client = None
-            self.hand_gesture_publisher = None
             self._navigator = None
             self.tf_odom_base_link = None
             self.lio_pose = None
@@ -1020,7 +1002,6 @@ class KuavoAutonomyBot(AutonomyBot):
         return True
 
     def _do_arm(self, action_name: str):
-        self._publish_hand_gesture_for_arm_action(action_name)
         if self.arm_client is not None:
             return self.arm_client.send_goal(action_name)
         return {"success": False, "message": "arm client is not available"}
@@ -1028,23 +1009,6 @@ class KuavoAutonomyBot(AutonomyBot):
     def do_arm(self, action_name: str):
         return self._do_arm(action_name)
 
-    def _get_hand_gesture_command(self, action_name: str):
-        default_commands = {
-            "right_hand_handshake_wrist": "ok right 800 2000",
-            "right_hand_pointing": "point right 800 2000",
-        }
-        env_name = f"RABBITBOT_HAND_GESTURE_{action_name.upper()}".replace("-", "_")
-        command = os.getenv(env_name, default_commands.get(action_name, ""))
-        return command.strip()
-
-    def _publish_hand_gesture_for_arm_action(self, action_name: str):
-        command = self._get_hand_gesture_command(action_name)
-        if not command:
-            return
-        if self.hand_gesture_publisher is None:
-            print(f"手指动作发布器不可用: action={action_name}, command={command}")
-            return
-        self.hand_gesture_publisher.publish_command(command)
 
     def do_head(self, yaw: float, pitch: float):
         if self.head_client is not None:

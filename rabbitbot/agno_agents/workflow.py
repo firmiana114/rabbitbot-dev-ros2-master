@@ -5,6 +5,7 @@ import random
 import asyncio
 import threading
 import os
+import subprocess
 from pathlib import Path
 import difflib
 import re
@@ -127,6 +128,41 @@ ARM_BEFORE_RELEASE_DELAYS = {
 ARM_BEFORE_RELEASE_DELAY_ENV = {
     "握手": "RABBITBOT_HANDSHAKE_BEFORE_RELEASE_DELAY",
 }
+HAND_GESTURE_COMMANDS = {
+    "right_hand_handshake_wrist": "ok right 800 2000",
+}
+
+
+def _get_hand_gesture_command(action_name):
+    if not action_name:
+        return ""
+    env_name = f"RABBITBOT_HAND_GESTURE_{action_name.upper()}".replace("-", "_")
+    command = os.getenv(env_name, HAND_GESTURE_COMMANDS.get(action_name, ""))
+    return command.strip()
+
+
+def _publish_hand_gesture_for_arm_action(action_name):
+    command = _get_hand_gesture_command(action_name)
+    if not command:
+        return
+
+    topic = os.getenv("RABBITBOT_HAND_GESTURE_TOPIC", "/gesture_cmd")
+    timeout = _env_float("RABBITBOT_HAND_GESTURE_PUB_TIMEOUT", 3.0)
+    message = f"{{data: '{command}'}}"
+    try:
+        subprocess.run(
+            ["ros2", "topic", "pub", "--once", topic, "std_msgs/msg/String", message],
+            check=True,
+            timeout=timeout,
+        )
+        print(f"已发布灵巧手动作: topic={topic}, data={command}")
+    except FileNotFoundError:
+        print("发布灵巧手动作失败: 未找到 ros2 命令")
+    except subprocess.TimeoutExpired:
+        print(f"发布灵巧手动作超时: topic={topic}, data={command}, timeout={timeout}")
+    except subprocess.CalledProcessError as exc:
+        print(f"发布灵巧手动作失败: topic={topic}, data={command}, returncode={exc.returncode}")
+
 
 
 DOCX_SCRIPT_POINTS = {
@@ -201,6 +237,7 @@ async def _send_release_arm(robot):
 
 
 async def _do_arm_before_speech(robot, action_name):
+    _publish_hand_gesture_for_arm_action(action_name)
     action_result = await robot.do_arm_async(action_name)
     if isinstance(action_result, dict) and not action_result.get("success", True):
         print(f"动作回执失败: action={action_name}, result={action_result}")
@@ -235,6 +272,7 @@ async def _do_arm_during_speech(robot, action_name, speech_func):
     def run_action():
         nonlocal action_result, action_error
         try:
+            _publish_hand_gesture_for_arm_action(action_name)
             action_result = _do_arm_sync(robot, action_name)
         except Exception as exc:
             action_error = exc
