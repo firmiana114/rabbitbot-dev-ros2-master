@@ -220,6 +220,54 @@ async def _do_arm_before_speech(robot, action_name):
     await _send_release_arm(robot)
 
 
+def _do_arm_sync(robot, action_name):
+    do_arm = getattr(robot, "do_arm", None)
+    if callable(do_arm):
+        return do_arm(action_name)
+    raise RuntimeError("robot 不支持同步 do_arm 调用")
+
+
+async def _do_arm_during_speech(robot, action_name, speech_func):
+    action_thread = None
+    action_result = None
+    action_error = None
+
+    def run_action():
+        nonlocal action_result, action_error
+        try:
+            action_result = _do_arm_sync(robot, action_name)
+        except Exception as exc:
+            action_error = exc
+
+    if action_name:
+        action_thread = threading.Thread(target=run_action, daemon=True)
+        action_thread.start()
+
+    speech_result = speech_func()
+
+    if action_thread is None:
+        return speech_result
+
+    await asyncio.to_thread(action_thread.join)
+    if action_error is not None:
+        print(f"动作执行异常: action={action_name}, error={action_error}")
+    else:
+        if isinstance(action_result, dict) and not action_result.get("success", True):
+            print(f"动作回执失败: action={action_name}, result={action_result}")
+
+    await _release_arm_after_concurrent_speech(robot, action_name)
+    return speech_result
+
+
+async def _release_arm_after_concurrent_speech(robot, action_name):
+    if action_name not in ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH | ARM_ACTIONS_NEED_RELEASE_AFTER_SPEECH:
+        return
+    release_delay = _env_float("RABBITBOT_ARM_CONCURRENT_RELEASE_DELAY", 0.2)
+    if release_delay > 0:
+        await asyncio.sleep(release_delay)
+    await _send_release_arm(robot)
+
+
 async def _release_arm_after_speech(robot, action_name):
     if action_name not in ARM_ACTIONS_NEED_RELEASE_AFTER_SPEECH:
         return
@@ -576,15 +624,17 @@ async def guide_opening_speech(ctx: Any):
     else:
         leader_calling = _extract_leader_calling(raw_name_text)
 
-    await _do_arm_before_speech(ctx.robot, "握手")
-    if say(f"{leader_calling}，您好。"):
+    if await _do_arm_during_speech(ctx.robot, "握手", lambda: say(f"{leader_calling}，您好。")):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
-    await _do_arm_before_speech(ctx.robot, "打招呼")
-    raw_visit_text = tts_ask_with_early_stt(
-        ctx.tts_agent,
-        f"{leader_calling}，欢迎您来到我们人形机器人产业园，您是第一次来我们园区吗？",
-        ctx.stt_agent,
-        timeout=8,
+    raw_visit_text = await _do_arm_during_speech(
+        ctx.robot,
+        "打招呼",
+        lambda: tts_ask_with_early_stt(
+            ctx.tts_agent,
+            f"{leader_calling}，欢迎您来到我们人形机器人产业园，您是第一次来我们园区吗？",
+            ctx.stt_agent,
+            timeout=8,
+        ),
     )
     visit_type = _parse_first_visit_answer(raw_visit_text)
     if visit_type == "unknown":
@@ -903,7 +953,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     "listen_key": "coffee_order",
                     "listen_timeout": 8,
                 },
-                {"action": "OK手势", "text": "好的，我来给各位安排。"},
+                {"action": "OK手势", "text": "好的，我来给各位安排。", "speak_with_action": True},
             ],
         },
         {
@@ -1064,23 +1114,31 @@ def create_main_workflow(ctx: Any) -> Workflow:
         while segment_index < end_index:
             segment = segments[segment_index]
             action_name = segment.get("action")
-            if action_name:
+            speak_with_action = bool(segment.get("speak_with_action")) and action_name
+            if action_name and not speak_with_action:
                 await _do_arm_before_speech(ctx.robot, action_name)
 
             text = segment.get("text", "")
             interrupt_text = None
             if text:
-                interrupt_text = tts_long_text_with_stt_stop(
-                    tts_agent,
-                    format_docx_script_text(text),
-                    stt_agent,
-                    ctx.robot,
-                    before_text,
-                    ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
-                    ignore_unlisted_interrupts=True,
-                )
+                def speak_segment():
+                    return tts_long_text_with_stt_stop(
+                        tts_agent,
+                        format_docx_script_text(text),
+                        stt_agent,
+                        ctx.robot,
+                        before_text,
+                        ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
+                        ignore_unlisted_interrupts=True,
+                    )
 
-            await _release_arm_after_speech(ctx.robot, action_name)
+                if speak_with_action:
+                    interrupt_text = await _do_arm_during_speech(ctx.robot, action_name, speak_segment)
+                else:
+                    interrupt_text = speak_segment()
+
+            if not speak_with_action:
+                await _release_arm_after_speech(ctx.robot, action_name)
             if not _is_empty_stt_text(interrupt_text):
                 if is_docx_script_continue_text(interrupt_text):
                     print(f"忽略剧本继续确认词: {interrupt_text}")
@@ -1192,23 +1250,31 @@ def create_main_workflow(ctx: Any) -> Workflow:
         while segment_index < len(segments):
             segment = segments[segment_index]
             action_name = segment.get("action")
-            if action_name:
+            speak_with_action = bool(segment.get("speak_with_action")) and action_name
+            if action_name and not speak_with_action:
                 await _do_arm_before_speech(ctx.robot, action_name)
 
             text = segment.get("text", "")
             interrupt_text = None
             if text:
-                interrupt_text = tts_long_text_with_stt_stop(
-                    tts_agent,
-                    format_docx_script_text(text),
-                    stt_agent,
-                    ctx.robot,
-                    before_text,
-                    ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
-                    ignore_unlisted_interrupts=True,
-                )
+                def speak_segment():
+                    return tts_long_text_with_stt_stop(
+                        tts_agent,
+                        format_docx_script_text(text),
+                        stt_agent,
+                        ctx.robot,
+                        before_text,
+                        ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
+                        ignore_unlisted_interrupts=True,
+                    )
 
-            await _release_arm_after_speech(ctx.robot, action_name)
+                if speak_with_action:
+                    interrupt_text = await _do_arm_during_speech(ctx.robot, action_name, speak_segment)
+                else:
+                    interrupt_text = speak_segment()
+
+            if not speak_with_action:
+                await _release_arm_after_speech(ctx.robot, action_name)
             if not _is_empty_stt_text(interrupt_text):
                 if is_docx_script_continue_text(interrupt_text):
                     print(f"忽略剧本继续确认词: {interrupt_text}")
