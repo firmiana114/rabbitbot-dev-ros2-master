@@ -118,7 +118,7 @@ def _workflow_log(message, verbose=False):
     print(message)
 
 
-ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"握手", "打招呼", "left_hand_handshake_wrist", "再见"}
+ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"握手", "打招呼", "right_hand_handshake_wrist", "再见"}
 ARM_ACTIONS_NEED_RELEASE_AFTER_SPEECH = {"left_hand_pointing"}
 ARM_RELEASE_ACTION = "release"
 ARM_BEFORE_RELEASE_DELAYS = {
@@ -953,7 +953,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     "listen_key": "coffee_order",
                     "listen_timeout": 8,
                 },
-                {"action": "left_hand_handshake_wrist", "text": "好的，我来给各位安排。", "speak_with_action": True},
+                {"action": "right_hand_handshake_wrist", "text": "好的，我来给各位安排。", "speak_with_action": True},
             ],
         },
         {
