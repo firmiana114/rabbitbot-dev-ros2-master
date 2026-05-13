@@ -227,8 +227,43 @@ def _env_float(name, default):
         return float(default)
 
 
+def _format_arm_action_success(result):
+    if isinstance(result, dict):
+        return result.get("success", "未知")
+    if result is None:
+        return "无返回"
+    return "未知"
+
+
+def _log_arm_action_latency(action_name, elapsed_seconds, result=None, error=None, call_type="async"):
+    if error is not None:
+        print(
+            f"手臂动作body回执耗时: action={action_name}, success=异常, "
+            f"elapsed={elapsed_seconds:.3f}s, mode={call_type}, error={error}"
+        )
+        return
+    success = _format_arm_action_success(result)
+    print(
+        f"手臂动作body回执耗时: action={action_name}, success={success}, "
+        f"elapsed={elapsed_seconds:.3f}s, mode={call_type}"
+    )
+
+
+async def _do_arm_async_timed(robot, action_name):
+    start_time = time.perf_counter()
+    try:
+        result = await robot.do_arm_async(action_name)
+    except Exception as exc:
+        elapsed_seconds = time.perf_counter() - start_time
+        _log_arm_action_latency(action_name, elapsed_seconds, error=exc, call_type="async")
+        raise
+    elapsed_seconds = time.perf_counter() - start_time
+    _log_arm_action_latency(action_name, elapsed_seconds, result=result, call_type="async")
+    return result
+
+
 async def _send_release_arm(robot):
-    release_result = await robot.do_arm_async(ARM_RELEASE_ACTION)
+    release_result = await _do_arm_async_timed(robot, ARM_RELEASE_ACTION)
     if isinstance(release_result, dict) and not release_result.get("success", True):
         print(f"收回动作回执失败: action={ARM_RELEASE_ACTION}, result={release_result}")
     release_wait_seconds = _env_float("RABBITBOT_ARM_RELEASE_WAIT_SECONDS", 0.2)
@@ -238,7 +273,7 @@ async def _send_release_arm(robot):
 
 async def _do_arm_before_speech(robot, action_name):
     _publish_hand_gesture_for_arm_action(action_name)
-    action_result = await robot.do_arm_async(action_name)
+    action_result = await _do_arm_async_timed(robot, action_name)
     if isinstance(action_result, dict) and not action_result.get("success", True):
         print(f"动作回执失败: action={action_name}, result={action_result}")
     if action_name not in ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH:
@@ -260,7 +295,16 @@ async def _do_arm_before_speech(robot, action_name):
 def _do_arm_sync(robot, action_name):
     do_arm = getattr(robot, "do_arm", None)
     if callable(do_arm):
-        return do_arm(action_name)
+        start_time = time.perf_counter()
+        try:
+            result = do_arm(action_name)
+        except Exception as exc:
+            elapsed_seconds = time.perf_counter() - start_time
+            _log_arm_action_latency(action_name, elapsed_seconds, error=exc, call_type="sync")
+            raise
+        elapsed_seconds = time.perf_counter() - start_time
+        _log_arm_action_latency(action_name, elapsed_seconds, result=result, call_type="sync")
+        return result
     raise RuntimeError("robot 不支持同步 do_arm 调用")
 
 
@@ -1374,7 +1418,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         index = getattr(ctx, "scripted_tour_index", 0)
         if index >= len(entity_order):
             ctx.scripted_tour_done = True
-            await ctx.robot.do_arm_async("再见")
+            await _do_arm_async_timed(ctx.robot, "再见")
             tts_sound(tts_agent, f"{before_text}各位领导再会，欢迎您再次来到我们人形机器人产业园。", "zh")
             tts_wait(tts_agent)
             return "done", SCRIPTED_TOUR_FINISHED
@@ -1795,7 +1839,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             if go_to_status == NavigationStatus.PENDING or go_to_status == NavigationStatus.SUCCEEDED:
                 if "自我介绍" in text or "你好" in text or "您好" in text:
                     time.sleep(0.6)
-                    await ctx.robot.do_arm_async("打招呼")
+                    await _do_arm_async_timed(ctx.robot, "打招呼")
 
         #out_text = run_response.content
         chat_queue.put(last_chat_text, "机器人")
@@ -1989,7 +2033,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         arm_lst = ["否定拒绝", "双手平摊开掌心向上"]
         n = len(arm_lst)
         rand_n = random.randint(0, n-1)
-        await ctx.robot.do_arm_async(arm_lst[rand_n])
+        await _do_arm_async_timed(ctx.robot, arm_lst[rand_n])
         tts_fast(tts_agent, "unknown")
         out_text = "<WORKFLOW_UNKOWN>"
         return StepOutput(content=f"{out_text}")
@@ -2821,7 +2865,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
     async def thank_chat_execute(ctx):
         input("请按回车键夸奖用户")
-        await ctx.robot.do_arm_async("比耶")
+        await _do_arm_async_timed(ctx.robot, "比耶")
         tts_sound(tts_agent, f"{before_text}感谢你的夸奖！很高兴能为你导览。", "zh")
         tts_sound(tts_agent, f"{before_text}您今天的青色衣服也太帅了！", "zh")
 
