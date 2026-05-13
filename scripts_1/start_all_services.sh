@@ -316,7 +316,12 @@ start_workflow() {
         return 0
     fi
 
+    local workflow_log_path="${LOG_DIR}/rabbitbot_workflow_$(date +%Y%m%d_%H%M%S).log"
+    local workflow_latest_log="${LOG_DIR}/rabbitbot_workflow_latest.log"
+    ln -sf "${workflow_log_path}" "${workflow_latest_log}"
+
     log_info "前台启动 Workflow，后续输出会直接显示在当前终端"
+    log_info "Workflow 输出会同时保存到本机 ${workflow_latest_log}"
     log_info "Workflow 输出会同时保存到容器 ${WORKFLOW_CONTAINER}:/tmp/rabbitbot_workflow_latest.log"
     log_info "按 Ctrl+C 可停止前台 workflow"
     local docker_env=(
@@ -332,7 +337,9 @@ start_workflow() {
         log_info "Workflow 非联调模式已开启，导航点位将由终端按键确认"
     fi
 
-    docker exec -it "${docker_env[@]}" "${WORKFLOW_CONTAINER}" bash -lc "mkdir -p /tmp/rabbitbot_logs && log_path=/tmp/rabbitbot_logs/rabbitbot_workflow_\$(date +%Y%m%d_%H%M%S).log && ln -sf \${log_path} /tmp/rabbitbot_workflow_latest.log && echo Workflow日志: \${log_path} && cd '${CONTAINER_PROJECT_DIR}' && PYTHONUNBUFFERED=1 bash scripts/start_kuavo_agno_workflow.bash 2>&1 | tee -a \${log_path}"
+    docker exec -it "${docker_env[@]}" "${WORKFLOW_CONTAINER}" bash -lc "mkdir -p /tmp/rabbitbot_logs && log_path=/tmp/rabbitbot_logs/rabbitbot_workflow_\$(date +%Y%m%d_%H%M%S).log && ln -sf \${log_path} /tmp/rabbitbot_workflow_latest.log && echo Workflow容器日志: \${log_path} && cd '${CONTAINER_PROJECT_DIR}' && PYTHONUNBUFFERED=1 bash scripts/start_kuavo_agno_workflow.bash 2>&1 | tee -a \${log_path}" 2>&1 | tee -a "${workflow_log_path}"
+    local workflow_status=${PIPESTATUS[0]}
+    return "${workflow_status}"
 }
 
 print_status() {
@@ -361,7 +368,7 @@ print_status() {
     echo "  VLN:        当前已跳过，不启动 ${VLN_CONTAINER}"
     echo "  Memory:     容器 ${WORKFLOW_CONTAINER}:/tmp/memory_agent.log"
     echo "  Robot:      容器 ${WORKFLOW_CONTAINER}:/tmp/robot_agent.log"
-    echo "  Workflow:   前台输出到当前终端，并保存到容器 ${WORKFLOW_CONTAINER}:/tmp/rabbitbot_workflow_latest.log"
+    echo "  Workflow:   前台输出到当前终端，并保存到本机 ${LOG_DIR}/rabbitbot_workflow_latest.log 和容器 ${WORKFLOW_CONTAINER}:/tmp/rabbitbot_workflow_latest.log"
 }
 
 # -----------------------------------------------------------------------------
