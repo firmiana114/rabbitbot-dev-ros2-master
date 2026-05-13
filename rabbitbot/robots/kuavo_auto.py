@@ -1031,7 +1031,7 @@ class KuavoAutonomyBot(AutonomyBot):
     def _get_hand_gesture_command(self, action_name: str):
         default_commands = {
             "right_hand_handshake_wrist": "ok right 800 2000",
-            "left_hand_pointing": "point left 800 2000",
+            "right_hand_pointing": "point right 800 2000",
         }
         env_name = f"RABBITBOT_HAND_GESTURE_{action_name.upper()}".replace("-", "_")
         command = os.getenv(env_name, default_commands.get(action_name, ""))

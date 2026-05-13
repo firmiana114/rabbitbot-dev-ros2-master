@@ -119,7 +119,7 @@ def _workflow_log(message, verbose=False):
 
 
 ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"握手", "打招呼", "right_hand_handshake_wrist", "再见"}
-ARM_ACTIONS_NEED_RELEASE_AFTER_SPEECH = {"left_hand_pointing"}
+ARM_ACTIONS_NEED_RELEASE_AFTER_SPEECH = {"right_hand_pointing"}
 ARM_RELEASE_ACTION = "release"
 ARM_BEFORE_RELEASE_DELAYS = {
     "握手": 3.0,
@@ -927,13 +927,13 @@ def create_main_workflow(ctx: Any) -> Workflow:
     ]
     SCRIPTED_TOUR_ACTIONS = {
         "起始板块": "打招呼",
-        "多功能展示区": "left_hand_pointing",
-        "园区历史板块": "left_hand_pointing",
-        "复星集团板块": "left_hand_pointing",
-        "园区布局板块": "left_hand_pointing",
-        "园区介绍板块": "left_hand_pointing",
-        "园区企业介绍板块": "left_hand_pointing",
-        "智慧园区板块": "left_hand_pointing",
+        "多功能展示区": "right_hand_pointing",
+        "园区历史板块": "right_hand_pointing",
+        "复星集团板块": "right_hand_pointing",
+        "园区布局板块": "right_hand_pointing",
+        "园区介绍板块": "right_hand_pointing",
+        "园区企业介绍板块": "right_hand_pointing",
+        "智慧园区板块": "right_hand_pointing",
         "合影板块": "再见",
     }
     DOCX_SCRIPT_POINT_ENTITY = {
@@ -973,7 +973,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             "skip_navigation_if_current": True,
             "segments": [
                 {
-                    "action": "left_hand_pointing",
+                    "action": "right_hand_pointing",
                     "text": "{leader_calling}，您的到来我和我的小伙伴们都非常高兴，他们说要给您表演个节目，您看咱们看个节目，顺便等下咖啡？",
                     "listen_key": "dog_show_confirmation",
                     "listen_timeout": 8,
@@ -992,7 +992,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 {"text": "跳的真好，谢谢小伙伴！"},
                 {"text": "大概就是这些了。"},
                 {
-                    "action": "left_hand_pointing",
+                    "action": "right_hand_pointing",
                     "text": "{leader_calling}，咖啡已经到了，请各位领导自取。",
                 },
             ],
@@ -1000,12 +1000,14 @@ def create_main_workflow(ctx: Any) -> Workflow:
         {
             "scene": "观看沙盘",
             "entity": DOCX_SCRIPT_POINT_ENTITY["point_4"],
+            "speak_during_navigation": True,
+            "speak_during_navigation_segments": 1,
             "segments": [
                 {
                     "text": "各位领导跟我来，园区占地约217亩，总建筑面积32.8万平方米，总投资12.6亿元，园区采用“两轴四片”设计，以东西生活轴、南北生产轴划分四大产业组团，尤其值得一提的是，我们通力合作，将建设周期从24个月压缩至21个月，提前3个月全面竣工，体现了“滨湖速度”。",
                 },
                 {
-                    "action": "left_hand_pointing",
+                    "action": "right_hand_pointing",
                     "text": "这个是我们整个园区的布局沙盘。",
                 },
             ],
@@ -1013,13 +1015,15 @@ def create_main_workflow(ctx: Any) -> Workflow:
         {
             "scene": "告别并指引小巴方向",
             "entity": DOCX_SCRIPT_POINT_ENTITY["point_5"],
+            "speak_during_navigation": True,
+            "speak_during_navigation_segments": 3,
             "segments": [
                 {"text": "各位领导，眼见为实，为了让各位领导可以更多的了解我们的园区。"},
                 {
-                    "action": "left_hand_pointing",
+                    "action": "right_hand_pointing",
                     "text": "我们安排了无人驾驶小巴，也是我的小伙伴，小紫，带各位领导更加深入的了解我们园区。",
                 },
-                {"action": "再见", "text": "各位领导再会！"},
+                {"action": "再见", "text": "各位领导再会！", "speak_with_action": True},
             ],
         },
     ]
