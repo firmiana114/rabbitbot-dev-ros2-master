@@ -694,10 +694,10 @@ async def guide_opening_speech(ctx: Any):
 
     if say("各位领导都到齐了吗？"):
         return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
-    await asyncio.sleep(1.0)
+    await asyncio.sleep(0.1)
     if say("请问哪位是领导？"):
         return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
-    await asyncio.sleep(1.0)
+    await asyncio.sleep(0.1)
     if say("请把话筒给领导。"):
         return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
     raw_name_text = tts_ask_with_early_stt(ctx.tts_agent, "领导，您怎么称呼？", ctx.stt_agent, timeout=8)
