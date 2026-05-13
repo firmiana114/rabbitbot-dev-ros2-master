@@ -123,7 +123,7 @@ ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"握手", "打招呼", "right_hand_han
 ARM_ACTIONS_NEED_RELEASE_AFTER_SPEECH = {"right_hand_pointing"}
 ARM_RELEASE_ACTION = "release"
 ARM_BEFORE_RELEASE_DELAYS = {
-    "握手": 3.0,
+    "握手": 0.0,
 }
 ARM_BEFORE_RELEASE_DELAY_ENV = {
     "握手": "RABBITBOT_HANDSHAKE_BEFORE_RELEASE_DELAY",
@@ -231,7 +231,7 @@ async def _send_release_arm(robot):
     release_result = await robot.do_arm_async(ARM_RELEASE_ACTION)
     if isinstance(release_result, dict) and not release_result.get("success", True):
         print(f"收回动作回执失败: action={ARM_RELEASE_ACTION}, result={release_result}")
-    release_wait_seconds = _env_float("RABBITBOT_ARM_RELEASE_WAIT_SECONDS", 0.5)
+    release_wait_seconds = _env_float("RABBITBOT_ARM_RELEASE_WAIT_SECONDS", 0.2)
     if release_wait_seconds > 0:
         await asyncio.sleep(release_wait_seconds)
 
@@ -246,7 +246,7 @@ async def _do_arm_before_speech(robot, action_name):
 
     default_before_release_delay = ARM_BEFORE_RELEASE_DELAYS.get(
         action_name,
-        _env_float("RABBITBOT_ARM_BEFORE_RELEASE_DELAY", 0.5),
+        _env_float("RABBITBOT_ARM_BEFORE_RELEASE_DELAY", 0.0),
     )
     before_release_delay = _env_float(
         ARM_BEFORE_RELEASE_DELAY_ENV.get(action_name, "RABBITBOT_ARM_BEFORE_RELEASE_DELAY"),
@@ -300,7 +300,7 @@ async def _do_arm_during_speech(robot, action_name, speech_func):
 async def _release_arm_after_concurrent_speech(robot, action_name):
     if action_name not in ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH | ARM_ACTIONS_NEED_RELEASE_AFTER_SPEECH:
         return
-    release_delay = _env_float("RABBITBOT_ARM_CONCURRENT_RELEASE_DELAY", 0.2)
+    release_delay = _env_float("RABBITBOT_ARM_CONCURRENT_RELEASE_DELAY", 0.0)
     if release_delay > 0:
         await asyncio.sleep(release_delay)
     await _send_release_arm(robot)
@@ -309,7 +309,7 @@ async def _release_arm_after_concurrent_speech(robot, action_name):
 async def _release_arm_after_speech(robot, action_name):
     if action_name not in ARM_ACTIONS_NEED_RELEASE_AFTER_SPEECH:
         return
-    after_speech_delay = _env_float("RABBITBOT_ARM_AFTER_SPEECH_RELEASE_DELAY", 0.2)
+    after_speech_delay = _env_float("RABBITBOT_ARM_AFTER_SPEECH_RELEASE_DELAY", 0.0)
     if after_speech_delay > 0:
         await asyncio.sleep(after_speech_delay)
     await _send_release_arm(robot)

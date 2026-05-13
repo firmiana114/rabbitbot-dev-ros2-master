@@ -348,7 +348,7 @@ release
 
 当前明确不使用 body 不支持的 `指尖轻点`。
 
-其中 `release` 不是 DOCX 独立动作，而是 workflow 自动追加的收回动作。`握手`、`打招呼` 和 `right_hand_handshake_wrist` 在指定剧本段落中会与台词并发执行，动作完成后再发送 `release`。`right_hand_handshake_wrist` 在 workflow 中会先发布灵巧手命令，再调用 Robot Agent 发送手臂 action。其他需要前置收回的动作会先等待原动作回执，再等待一段固定时间，然后发送 `release`，等待收回动作回执，再等待 `0.5s` 后开始对应台词。`right_hand_pointing` 的时序不同：先伸手指向，再播本段台词，台词播完后等待 `0.2s` 并发送 `release`。`握手` 的固定等待默认是 `3s`，其他前置收手动作默认是 `0.5s`。现场可通过环境变量 `RABBITBOT_HANDSHAKE_BEFORE_RELEASE_DELAY`、`RABBITBOT_ARM_BEFORE_RELEASE_DELAY`、`RABBITBOT_ARM_AFTER_SPEECH_RELEASE_DELAY`、`RABBITBOT_ARM_CONCURRENT_RELEASE_DELAY` 和 `RABBITBOT_ARM_RELEASE_WAIT_SECONDS` 微调。
+其中 `release` 不是 DOCX 独立动作，而是 workflow 自动追加的收回动作。`握手`、`打招呼` 和 `right_hand_handshake_wrist` 在指定剧本段落中会与台词并发执行，动作完成后再发送 `release`。`right_hand_handshake_wrist` 在 workflow 中会先发布灵巧手命令，再调用 Robot Agent 发送手臂 action。其他需要前置收回的动作会先等待原动作回执，默认不再额外等待，然后发送 `release`，等待收回动作回执，再默认等待 `0.2s` 后开始对应台词。`right_hand_pointing` 的时序不同：先伸手指向，再播本段台词，台词播完后默认不再额外等待，直接发送 `release`。`握手` 和其他前置收手动作的固定等待默认都是 `0s`。现场可通过环境变量 `RABBITBOT_HANDSHAKE_BEFORE_RELEASE_DELAY`、`RABBITBOT_ARM_BEFORE_RELEASE_DELAY`、`RABBITBOT_ARM_AFTER_SPEECH_RELEASE_DELAY`、`RABBITBOT_ARM_CONCURRENT_RELEASE_DELAY` 和 `RABBITBOT_ARM_RELEASE_WAIT_SECONDS` 微调。
 
 ## 当前动作编排
 
