@@ -317,6 +317,7 @@ start_workflow() {
     fi
 
     log_info "前台启动 Workflow，后续输出会直接显示在当前终端"
+    log_info "Workflow 输出会同时保存到容器 ${WORKFLOW_CONTAINER}:/tmp/rabbitbot_workflow_latest.log"
     log_info "按 Ctrl+C 可停止前台 workflow"
     local docker_env=(
         -e "RABBITBOT_WORKFLOW_NON_INTEGRATION=${RABBITBOT_WORKFLOW_NON_INTEGRATION}"
@@ -331,7 +332,7 @@ start_workflow() {
         log_info "Workflow 非联调模式已开启，导航点位将由终端按键确认"
     fi
 
-    docker exec -it "${docker_env[@]}" "${WORKFLOW_CONTAINER}" bash -lc "cd '${CONTAINER_PROJECT_DIR}' && bash scripts/start_kuavo_agno_workflow.bash"
+    docker exec -it "${docker_env[@]}" "${WORKFLOW_CONTAINER}" bash -lc "mkdir -p /tmp/rabbitbot_logs && log_path=/tmp/rabbitbot_logs/rabbitbot_workflow_\$(date +%Y%m%d_%H%M%S).log && ln -sf \${log_path} /tmp/rabbitbot_workflow_latest.log && echo Workflow日志: \${log_path} && cd '${CONTAINER_PROJECT_DIR}' && PYTHONUNBUFFERED=1 bash scripts/start_kuavo_agno_workflow.bash 2>&1 | tee -a \${log_path}"
 }
 
 print_status() {
@@ -360,7 +361,7 @@ print_status() {
     echo "  VLN:        当前已跳过，不启动 ${VLN_CONTAINER}"
     echo "  Memory:     容器 ${WORKFLOW_CONTAINER}:/tmp/memory_agent.log"
     echo "  Robot:      容器 ${WORKFLOW_CONTAINER}:/tmp/robot_agent.log"
-    echo "  Workflow:   前台输出到当前终端"
+    echo "  Workflow:   前台输出到当前终端，并保存到容器 ${WORKFLOW_CONTAINER}:/tmp/rabbitbot_workflow_latest.log"
 }
 
 # -----------------------------------------------------------------------------

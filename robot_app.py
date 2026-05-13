@@ -11,6 +11,7 @@ import traceback
 import logging
 import json
 import time
+from datetime import datetime
 import requests
 from urllib.parse import urljoin
 from requests.exceptions import Timeout
@@ -19,6 +20,14 @@ from requests.exceptions import Timeout
 enable_into_tts = False
 
 app = FastAPI()
+
+
+def _robot_app_timestamp():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
+def _robot_app_elapsed(start_time):
+    return f"{time.perf_counter() - start_time:.3f}s"
 
 
 class NavigationQuery(object):
@@ -174,19 +183,30 @@ async def reset_go_to_status_api(task: str = Form(...)):
 
 @app.post("/do_arm_async")
 async def do_arm_async_api(task: str = Form(...)):
+    request_start = time.perf_counter()
+    timing = {
+        "http_api_received_at": _robot_app_timestamp(),
+    }
     try:
         print("===== do_arm_async =====")
         print(f"Get data")
         print(task)
         action_name = task
         print(f"Do arm: {action_name}")
+        timing["before_robot_do_arm_at"] = _robot_app_timestamp()
         result = robot.do_arm(action_name)
+        timing["after_robot_do_arm_at"] = _robot_app_timestamp()
+        timing["robot_do_arm_elapsed"] = _robot_app_elapsed(request_start)
         if result is None:
             result = {"success": True, "message": ""}
+        if isinstance(result, dict):
+            result["robot_agent_timing"] = timing
         return JSONResponse(content=result)
 
     except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        timing["exception_at"] = _robot_app_timestamp()
+        timing["total_elapsed"] = _robot_app_elapsed(request_start)
+        return JSONResponse(content={"error": str(e), "robot_agent_timing": timing}, status_code=500)
 
 
 @app.post("/do_head_async")

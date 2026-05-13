@@ -9,6 +9,7 @@ import ast
 import json
 import base64
 from io import BytesIO
+from datetime import datetime
 import cv2
 import numpy as np
 from openai import OpenAI
@@ -20,6 +21,21 @@ from requests.exceptions import Timeout, RequestException
 import logging
 logging.basicConfig(level=logging.INFO)   # 把日志打到控制台
 logger = logging.getLogger(__name__)     # 新建一个 logger 实例
+
+
+def _provider_timestamp():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
+def _provider_log_fields(fields):
+    return ", ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+
+
+def _robot_action_chain_log(stage, action_name=None, **fields):
+    field_text = _provider_log_fields(fields)
+    suffix = f", {field_text}" if field_text else ""
+    print(f"[{_provider_timestamp()}] provider动作链路: stage={stage}, action={action_name}{suffix}")
+
 
 from agno.models.vllm import vLLM
 
@@ -540,35 +556,65 @@ class RobotAgent:
         except (Timeout, RequestException) as e:
             print(f'go_to_async: request failed: {e}')
 
-    def do_arm(self, action_name):
+    def _post_arm_action(self, action_name, call_type):
         if not provider_configs['enable_remote_robot_agent']:
+            _robot_action_chain_log("remote_robot_agent_disabled", action_name, mode=call_type)
             return
         data = {'task': action_name}
+        url = urljoin(self.host_url, 'do_arm_async')
+        total_start = time.perf_counter()
         print(f"Task: do arm {action_name}")
+        _robot_action_chain_log("http_request_prepare", action_name, mode=call_type, url=url)
         try:
-            resp = requests.post(urljoin(self.host_url, 'do_arm_async'), data=data, timeout=45)
+            http_start = time.perf_counter()
+            _robot_action_chain_log("http_post_start", action_name, mode=call_type, url=url)
+            resp = requests.post(url, data=data, timeout=45)
+            http_elapsed = time.perf_counter() - http_start
+            _robot_action_chain_log(
+                "http_response_received",
+                action_name,
+                mode=call_type,
+                status_code=resp.status_code,
+                http_elapsed=f"{http_elapsed:.3f}s",
+            )
             try:
-                return resp.json()
+                result = resp.json()
             except Exception:
-                return {"success": resp.ok, "message": resp.text}
+                result = {"success": resp.ok, "message": resp.text}
+            total_elapsed = time.perf_counter() - total_start
+            success = result.get("success", "未知") if isinstance(result, dict) else "未知"
+            _robot_action_chain_log(
+                "http_response_parsed",
+                action_name,
+                mode=call_type,
+                success=success,
+                total_elapsed=f"{total_elapsed:.3f}s",
+            )
+            if isinstance(result, dict):
+                robot_agent_timing = result.get("robot_agent_timing")
+                arm_action_timing = result.get("arm_action_timing")
+                if robot_agent_timing:
+                    _robot_action_chain_log("robot_agent_timing", action_name, mode=call_type, timing=robot_agent_timing)
+                if arm_action_timing:
+                    _robot_action_chain_log("arm_action_timing", action_name, mode=call_type, timing=arm_action_timing)
+            return result
         except (Timeout, RequestException) as e:
-            print(f'do_arm: request failed: {e}')
+            total_elapsed = time.perf_counter() - total_start
+            _robot_action_chain_log(
+                "http_request_failed",
+                action_name,
+                mode=call_type,
+                total_elapsed=f"{total_elapsed:.3f}s",
+                error=e,
+            )
+            print(f'do_arm{"_async" if call_type == "async" else ""}: request failed: {e}')
             return {"success": False, "message": str(e)}
 
+    def do_arm(self, action_name):
+        return self._post_arm_action(action_name, "sync")
+
     async def do_arm_async(self, action_name):
-        if not provider_configs['enable_remote_robot_agent']:
-            return
-        data = {'task': action_name}
-        print(f"Task: do arm {action_name}")
-        try:
-            resp = requests.post(urljoin(self.host_url, 'do_arm_async'), data=data, timeout=45)
-            try:
-                return resp.json()
-            except Exception:
-                return {"success": resp.ok, "message": resp.text}
-        except (Timeout, RequestException) as e:
-            print(f'do_arm_async: request failed: {e}')
-            return {"success": False, "message": str(e)}
+        return self._post_arm_action(action_name, "async")
 
     async def do_head_async(self, yaw, pitch):
         if not provider_configs['enable_remote_robot_agent']:

@@ -2,6 +2,7 @@
 import time
 import threading
 import os
+from datetime import datetime
 
 import rclpy
 from rclpy.action import ActionClient
@@ -13,6 +14,14 @@ from custom_action_interfaces.action import (
     NaviIkArm, NaviShakeHands,
     NaviGrab, NaviTargetChanged
 )
+
+
+def _action_client_timestamp():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
+def _action_client_elapsed(start_time):
+    return f"{time.perf_counter() - start_time:.3f}s"
 
 
 class NaviForwardActionClient(Node):
@@ -167,39 +176,72 @@ class NaviArmActionClient(Node):
         return True
 
     def send_goal(self, action_name, spin=True):
+        action_start = time.perf_counter()
+        timing = {
+            "action_client_start_at": _action_client_timestamp(),
+        }
         goal_msg = NaviArm.Goal()
         print(f"NaviArmActionClient: action_name {action_name}")
         goal_msg.action_name = str(action_name)
 
         server_timeout = float(os.getenv("RABBITBOT_ARM_ACTION_SERVER_TIMEOUT", "5"))
         result_timeout = float(os.getenv("RABBITBOT_ARM_ACTION_RESULT_TIMEOUT", "30"))
-        if not self._action_client.wait_for_server(timeout_sec=server_timeout):
+        wait_server_start = time.perf_counter()
+        timing["wait_for_server_start_at"] = _action_client_timestamp()
+        server_available = self._action_client.wait_for_server(timeout_sec=server_timeout)
+        timing["wait_for_server_done_at"] = _action_client_timestamp()
+        timing["wait_for_server_elapsed"] = f"{time.perf_counter() - wait_server_start:.3f}s"
+        if not server_available:
             self.get_logger().error(f"NaviArm action server not available for '{action_name}'")
-            return {"success": False, "message": "action server not available"}
+            timing["total_elapsed"] = _action_client_elapsed(action_start)
+            return {"success": False, "message": "action server not available", "arm_action_timing": timing}
 
+        send_goal_start = time.perf_counter()
+        timing["send_goal_async_call_at"] = _action_client_timestamp()
         self._send_goal_future = self._action_client.send_goal_async(goal_msg, feedback_callback=self.feedback_callback)
+        timing["send_goal_async_return_at"] = _action_client_timestamp()
+        timing["send_goal_async_elapsed"] = f"{time.perf_counter() - send_goal_start:.3f}s"
 
         if spin:
+            goal_response_wait_start = time.perf_counter()
+            timing["goal_response_wait_start_at"] = _action_client_timestamp()
             if not self._wait_future_done(self._send_goal_future, result_timeout):
                 self.get_logger().error(f"NaviArm goal response timeout for '{action_name}'")
-                return {"success": False, "message": "goal response timeout"}
+                timing["goal_response_wait_done_at"] = _action_client_timestamp()
+                timing["goal_response_wait_elapsed"] = f"{time.perf_counter() - goal_response_wait_start:.3f}s"
+                timing["total_elapsed"] = _action_client_elapsed(action_start)
+                return {"success": False, "message": "goal response timeout", "arm_action_timing": timing}
+            timing["goal_response_wait_done_at"] = _action_client_timestamp()
+            timing["goal_response_wait_elapsed"] = f"{time.perf_counter() - goal_response_wait_start:.3f}s"
             goal_handle = self._send_goal_future.result()
+            timing["goal_accepted"] = bool(goal_handle.accepted)
             if not goal_handle.accepted:
                 self.get_logger().info("Goal rejected :(")
-                return {"success": False, "message": "goal rejected"}
+                timing["total_elapsed"] = _action_client_elapsed(action_start)
+                return {"success": False, "message": "goal rejected", "arm_action_timing": timing}
             self.get_logger().info("Goal accepted :)")
+            timing["get_result_async_call_at"] = _action_client_timestamp()
             self._get_result_future = goal_handle.get_result_async()
+            result_wait_start = time.perf_counter()
+            timing["result_wait_start_at"] = _action_client_timestamp()
             if not self._wait_future_done(self._get_result_future, result_timeout):
                 self.get_logger().error(f"NaviArm result timeout for '{action_name}'")
-                return {"success": False, "message": "result timeout"}
+                timing["result_wait_done_at"] = _action_client_timestamp()
+                timing["result_wait_elapsed"] = f"{time.perf_counter() - result_wait_start:.3f}s"
+                timing["total_elapsed"] = _action_client_elapsed(action_start)
+                return {"success": False, "message": "result timeout", "arm_action_timing": timing}
+            timing["result_wait_done_at"] = _action_client_timestamp()
+            timing["result_wait_elapsed"] = f"{time.perf_counter() - result_wait_start:.3f}s"
             result = self._get_result_future.result().result
             success = bool(getattr(result, "success", True))
             message = getattr(result, "message", "")
+            timing["total_elapsed"] = _action_client_elapsed(action_start)
             self.get_logger().info(f"NaviArm action result: success={success}, message={message}")
-            return {"success": success, "message": message}
+            return {"success": success, "message": message, "arm_action_timing": timing}
         else:
             self._send_goal_future.add_done_callback(self.goal_response_callback)
-            return {"success": True, "message": "goal sent"}
+            timing["total_elapsed"] = _action_client_elapsed(action_start)
+            return {"success": True, "message": "goal sent", "arm_action_timing": timing}
 
     def goal_response_callback(self, future):
         goal_handle = future.result()
