@@ -343,6 +343,7 @@ print_status() {
     echo "  VLN:        当前已跳过，不启动 ${VLN_CONTAINER}"
     echo "  Memory:     ${LOG_DIR}/memory_agent.log"
     echo "  Workflow:   前台输出到当前终端，并保存到 ${LOG_DIR}/rabbitbot_workflow_latest.log"
+    echo "  Profile:    ${LOG_DIR}/workflow_profile.jsonl"
 }
 
 # -----------------------------------------------------------------------------

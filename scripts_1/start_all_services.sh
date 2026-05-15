@@ -374,6 +374,7 @@ print_status() {
     echo "  Memory:     ${LOG_DIR}/memory_agent.log"
     echo "  Robot:      ${LOG_DIR}/robot_agent.log"
     echo "  Workflow:   前台输出到当前终端，并保存到 ${LOG_DIR}/rabbitbot_workflow_latest.log"
+    echo "  Profile:    ${LOG_DIR}/workflow_profile.jsonl"
 }
 
 # -----------------------------------------------------------------------------

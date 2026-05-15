@@ -95,6 +95,8 @@ last_chat_text = ""
 chat_queue = ChatQueue(10)
 before_text = ""
 pending_user_text = ""
+_profile_lock = threading.Lock()
+_profile_span_id = 0
 
 
 def _env_enabled(name, default="0"):
@@ -132,6 +134,91 @@ def _workflow_action_log(stage, action_name=None, **fields):
     field_text = _format_log_fields(fields)
     suffix = f", {field_text}" if field_text else ""
     print(f"[{_workflow_timestamp()}] workflow动作链路: stage={stage}, action={action_name}{suffix}")
+
+
+def _workflow_profile_enabled():
+    return _env_enabled("RABBITBOT_WORKFLOW_PROFILE", "1")
+
+
+def _workflow_profile_path():
+    explicit_path = os.getenv("RABBITBOT_WORKFLOW_PROFILE_LOG", "").strip()
+    if explicit_path:
+        return Path(explicit_path)
+    log_dir = os.getenv("RABBITBOT_LOG_DIR", "").strip()
+    if log_dir:
+        return Path(log_dir) / "workflow_profile.jsonl"
+    return Path.cwd() / "logs" / "workflow_profile.jsonl"
+
+
+def _profile_json_safe(value):
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        return {str(key): _profile_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_profile_json_safe(item) for item in value]
+    return str(value)
+
+
+def _profile_write(record):
+    if not _workflow_profile_enabled():
+        return
+    record = {key: _profile_json_safe(value) for key, value in record.items()}
+    record.setdefault("ts", _workflow_timestamp())
+    profile_path = _workflow_profile_path()
+    try:
+        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        with _profile_lock:
+            with profile_path.open("a", encoding="utf-8") as file:
+                file.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        print(f"workflow profile 写入失败: path={profile_path}, error={exc}")
+
+
+def _profile_next_span_id():
+    global _profile_span_id
+    with _profile_lock:
+        _profile_span_id += 1
+        return _profile_span_id
+
+
+def _profile_start(span, **fields):
+    span_token = {
+        "span_id": _profile_next_span_id(),
+        "span": span,
+        "start_perf": time.perf_counter(),
+    }
+    _profile_write({
+        "event": "start",
+        "span": span,
+        "span_id": span_token["span_id"],
+        **fields,
+    })
+    return span_token
+
+
+def _profile_end(span_token, **fields):
+    if not span_token:
+        return
+    elapsed_seconds = time.perf_counter() - span_token["start_perf"]
+    _profile_write({
+        "event": "end",
+        "span": span_token["span"],
+        "span_id": span_token["span_id"],
+        "elapsed": round(elapsed_seconds, 6),
+        **fields,
+    })
+
+
+def _profile_instant(name, span=None, **fields):
+    record = {
+        "event": "instant",
+        "name": name,
+        **fields,
+    }
+    if span:
+        record["span"] = span
+    _profile_write(record)
 
 
 ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"握手", "打招呼", "right_hand_handshake_wrist", "再见"}
@@ -292,19 +379,24 @@ def _log_arm_action_latency(action_name, elapsed_seconds, result=None, error=Non
 
 async def _do_arm_async_timed(robot, action_name):
     start_time = time.perf_counter()
+    span_token = _profile_start("arm_action", action=action_name, mode="async")
     _workflow_action_log("workflow_do_arm_async_start", action_name)
     try:
         result = await robot.do_arm_async(action_name)
     except Exception as exc:
         elapsed_seconds = time.perf_counter() - start_time
         _log_arm_action_latency(action_name, elapsed_seconds, error=exc, call_type="async")
+        _profile_end(span_token, action=action_name, mode="async", success=False, error=exc)
         raise
     elapsed_seconds = time.perf_counter() - start_time
+    success = _format_arm_action_success(result)
     _log_arm_action_latency(action_name, elapsed_seconds, result=result, call_type="async")
+    _profile_end(span_token, action=action_name, mode="async", success=success)
     return result
 
 
 async def _send_release_arm(robot):
+    span_token = _profile_start("release_arm", action=ARM_RELEASE_ACTION)
     _workflow_action_log("workflow_release_start", ARM_RELEASE_ACTION)
     release_result = await _do_arm_async_timed(robot, ARM_RELEASE_ACTION)
     if isinstance(release_result, dict) and not release_result.get("success", True):
@@ -314,6 +406,8 @@ async def _send_release_arm(robot):
         _workflow_action_log("workflow_release_wait_start", ARM_RELEASE_ACTION, wait=f"{release_wait_seconds:.3f}s")
         await asyncio.sleep(release_wait_seconds)
         _workflow_action_log("workflow_release_wait_done", ARM_RELEASE_ACTION, wait=f"{release_wait_seconds:.3f}s")
+    success = _format_arm_action_success(release_result)
+    _profile_end(span_token, action=ARM_RELEASE_ACTION, success=success)
 
 
 async def _do_arm_before_speech(robot, action_name):
@@ -344,15 +438,19 @@ def _do_arm_sync(robot, action_name):
     do_arm = getattr(robot, "do_arm", None)
     if callable(do_arm):
         start_time = time.perf_counter()
+        span_token = _profile_start("arm_action", action=action_name, mode="sync")
         _workflow_action_log("workflow_do_arm_sync_start", action_name)
         try:
             result = do_arm(action_name)
         except Exception as exc:
             elapsed_seconds = time.perf_counter() - start_time
             _log_arm_action_latency(action_name, elapsed_seconds, error=exc, call_type="sync")
+            _profile_end(span_token, action=action_name, mode="sync", success=False, error=exc)
             raise
         elapsed_seconds = time.perf_counter() - start_time
+        success = _format_arm_action_success(result)
         _log_arm_action_latency(action_name, elapsed_seconds, result=result, call_type="sync")
+        _profile_end(span_token, action=action_name, mode="sync", success=success)
         return result
     raise RuntimeError("robot 不支持同步 do_arm 调用")
 
@@ -1203,6 +1301,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         ctx.docx_script_nav_done_step = None
         ctx.docx_script_done = False
         ctx.docx_script_answers = {}
+        ctx.docx_total_profile_span = _profile_start("docx_total")
         _workflow_log("初始化 DOCX 剧本演出状态", verbose=True)
 
     def format_docx_script_text(text):
@@ -1212,6 +1311,13 @@ def create_main_workflow(ctx: Any) -> Workflow:
         return text.format(leader_calling=leader_calling, coffee_order=coffee_order)
 
     def mark_docx_answer_received(listen_key, scene, segment_index, answer):
+        span_token = _profile_start(
+            "answer_to_feedback",
+            listen_key=listen_key,
+            answer_scene=scene,
+            answer_segment=segment_index,
+            answer=answer,
+        )
         pending_latency = {
             "listen_key": listen_key,
             "scene": scene,
@@ -1219,8 +1325,17 @@ def create_main_workflow(ctx: Any) -> Workflow:
             "answer": answer,
             "received_perf": time.perf_counter(),
             "received_at": _workflow_timestamp(),
+            "profile_span": span_token,
         }
         ctx.docx_pending_answer_latency = pending_latency
+        _profile_instant(
+            "human_answer_received",
+            span="listen_answer",
+            listen_key=listen_key,
+            scene=scene,
+            segment=segment_index,
+            answer=answer,
+        )
         print(
             f"[{pending_latency['received_at']}] DOCX应答延迟: "
             f"stage=human_answer_received, listen_key={listen_key}, "
@@ -1239,6 +1354,16 @@ def create_main_workflow(ctx: Any) -> Workflow:
             f"answer_scene={pending_latency['scene']}, answer_segment={pending_latency['segment']}, "
             f"feedback_scene={scene}, feedback_segment={segment_index}, "
             f"elapsed={elapsed_seconds:.3f}s, answer={pending_latency['answer']}, feedback_text={text}"
+        )
+        _profile_end(
+            pending_latency.get("profile_span"),
+            listen_key=pending_latency["listen_key"],
+            answer_scene=pending_latency["scene"],
+            answer_segment=pending_latency["segment"],
+            feedback_scene=scene,
+            feedback_segment=segment_index,
+            answer=pending_latency["answer"],
+            feedback_text=text,
         )
         ctx.docx_pending_answer_latency = None
 
@@ -1299,15 +1424,19 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 def speak_segment():
                     formatted_text = format_docx_script_text(text)
                     log_docx_feedback_start(scene, segment_index, formatted_text)
-                    return tts_long_text_with_stt_stop(
-                        tts_agent,
-                        formatted_text,
-                        stt_agent,
-                        ctx.robot,
-                        before_text,
-                        ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
-                        ignore_unlisted_interrupts=True,
-                    )
+                    span_token = _profile_start("tts_segment", scene=scene, segment=segment_index, text=formatted_text)
+                    try:
+                        return tts_long_text_with_stt_stop(
+                            tts_agent,
+                            formatted_text,
+                            stt_agent,
+                            ctx.robot,
+                            before_text,
+                            ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
+                            ignore_unlisted_interrupts=True,
+                        )
+                    finally:
+                        _profile_end(span_token, scene=scene, segment=segment_index, text=formatted_text)
 
                 if speak_with_action:
                     interrupt_text = await _do_arm_during_speech(ctx.robot, action_name, speak_segment)
@@ -1330,34 +1459,44 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
     async def navigate_docx_script_step(step, step_index):
         entity_name = step.get("entity")
+        scene = step.get("scene", entity_name)
+        span_token = _profile_start("navigation", step_index=step_index, scene=scene, entity=entity_name)
         if not entity_name:
+            _profile_end(span_token, step_index=step_index, scene=scene, entity=entity_name, status=NavigationStatus.SUCCEEDED)
             return NavigationStatus.SUCCEEDED
 
         if step.get("skip_navigation_if_current") and getattr(ctx, "current_entity_name", None) == entity_name:
+            _profile_end(span_token, step_index=step_index, scene=scene, entity=entity_name, status=NavigationStatus.SUCCEEDED, skipped=True)
             return NavigationStatus.SUCCEEDED
 
         entity = load_docx_script_entity(entity_name)
         if entity is None:
             print(f"DOCX 剧本展点不存在或缺少点位配置: {entity_name}")
+            _profile_end(span_token, step_index=step_index, scene=scene, entity=entity_name, status=NavigationStatus.ABORTED, error="entity_missing")
             return NavigationStatus.ABORTED
 
         location_points = _extract_location_points(entity)
         if not location_points:
             print(f"DOCX 剧本展点缺少可用导航点位: {entity_name}")
+            _profile_end(span_token, step_index=step_index, scene=scene, entity=entity_name, status=NavigationStatus.ABORTED, error="location_missing")
             return NavigationStatus.ABORTED
 
         guide_text = step.get("guide")
         if guide_text:
+            formatted_guide_text = format_docx_script_text(guide_text)
+            guide_span = _profile_start("tts_segment", scene=step.get("scene", entity_name), segment="guide", text=formatted_guide_text)
             interrupt_text = tts_long_text_with_stt_stop(
                 tts_agent,
-                format_docx_script_text(guide_text),
+                formatted_guide_text,
                 stt_agent,
                 ctx.robot,
                 before_text,
                 ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
                 ignore_unlisted_interrupts=True,
             )
+            _profile_end(guide_span, scene=step.get("scene", entity_name), segment="guide", text=formatted_guide_text)
             if not _is_empty_stt_text(interrupt_text):
+                _profile_end(span_token, step_index=step_index, scene=scene, entity=entity_name, status="interrupt")
                 return ("interrupt", interrupt_text.strip())
 
         enable_navi = os.getenv("RABBITBOT_ENABLE_NAVI", "1").strip().lower() not in {"0", "false", "no", "off"}
@@ -1366,6 +1505,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             if _workflow_non_integration_enabled():
                 speech_result = await speak_docx_script_navigation_segments(step, step.get("scene", entity_name))
                 if speech_result:
+                    _profile_end(span_token, step_index=step_index, scene=scene, entity=entity_name, status="interrupt")
                     return speech_result
                 if _wait_manual_navigation_success(entity_name):
                     navi_status = NavigationStatus.SUCCEEDED
@@ -1378,6 +1518,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 )
                 speech_result = await speak_docx_script_navigation_segments(step, step.get("scene", entity_name))
                 if speech_result:
+                    _profile_end(span_token, step_index=step_index, scene=scene, entity=entity_name, status="interrupt")
                     return speech_result
                 while await is_navigating(navi_tools):
                     await asyncio.sleep(0.5)
@@ -1387,6 +1528,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         if navi_status == NavigationStatus.SUCCEEDED:
             set_current_entity_name(entity_name)
             ctx.docx_script_nav_done_step = step_index
+        _profile_end(span_token, step_index=step_index, scene=scene, entity=entity_name, status=navi_status)
         return navi_status
 
     async def run_docx_scripted_tour_next_step():
@@ -1400,15 +1542,19 @@ def create_main_workflow(ctx: Any) -> Workflow:
         step_index = getattr(ctx, "docx_script_step_index", 0)
         if step_index >= len(DOCX_SCRIPT_STEPS):
             ctx.docx_script_done = True
+            _profile_end(getattr(ctx, "docx_total_profile_span", None), status="finished")
+            ctx.docx_total_profile_span = None
             return "done", SCRIPTED_TOUR_FINISHED
 
         step = DOCX_SCRIPT_STEPS[step_index]
         scene = step.get("scene", f"步骤{step_index + 1}")
+        step_span = _profile_start("docx_step", step_index=step_index, scene=scene)
         _workflow_log(f"DOCX 剧本步骤开始: index={step_index}, scene={scene}")
 
         if getattr(ctx, "docx_script_nav_done_step", None) != step_index:
             nav_result = await navigate_docx_script_step(step, step_index)
             if isinstance(nav_result, tuple) and nav_result[0] == "interrupt":
+                _profile_end(step_span, step_index=step_index, scene=scene, status="interrupt")
                 return nav_result
             if nav_result != NavigationStatus.SUCCEEDED:
                 tts_sound(tts_agent, f"{before_text}很抱歉，我暂时无法到达{step.get('entity', scene)}。", "zh")
@@ -1416,6 +1562,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 ctx.docx_script_step_index = step_index + 1
                 ctx.docx_script_segment_index = 0
                 ctx.docx_script_nav_done_step = None
+                _profile_end(step_span, step_index=step_index, scene=scene, status=nav_result)
                 return "done", SCRIPTED_TOUR_STEP_DONE
 
         segments = step.get("segments", [])
@@ -1433,15 +1580,19 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 def speak_segment():
                     formatted_text = format_docx_script_text(text)
                     log_docx_feedback_start(scene, segment_index, formatted_text)
-                    return tts_long_text_with_stt_stop(
-                        tts_agent,
-                        formatted_text,
-                        stt_agent,
-                        ctx.robot,
-                        before_text,
-                        ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
-                        ignore_unlisted_interrupts=True,
-                    )
+                    span_token = _profile_start("tts_segment", scene=scene, segment=segment_index, text=formatted_text)
+                    try:
+                        return tts_long_text_with_stt_stop(
+                            tts_agent,
+                            formatted_text,
+                            stt_agent,
+                            ctx.robot,
+                            before_text,
+                            ignored_interrupt_texts=DOCX_SCRIPT_CONTINUE_TEXTS,
+                            ignore_unlisted_interrupts=True,
+                        )
+                    finally:
+                        _profile_end(span_token, scene=scene, segment=segment_index, text=formatted_text)
 
                 if speak_with_action:
                     interrupt_text = await _do_arm_during_speech(ctx.robot, action_name, speak_segment)
@@ -1458,12 +1609,15 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     continue
                 print(f"DOCX 剧本被用户打断: scene={scene}, segment={segment_index}, text={interrupt_text}")
                 ctx.docx_script_segment_index = segment_index
+                _profile_end(step_span, step_index=step_index, scene=scene, status="interrupt")
                 return "interrupt", interrupt_text.strip()
 
             listen_key = segment.get("listen_key")
             if listen_key:
                 listen_timeout = int(segment.get("listen_timeout", 8))
+                listen_span = _profile_start("listen_answer", listen_key=listen_key, scene=scene, segment=segment_index, timeout=listen_timeout)
                 answer = audio_input_execute_timeout(stt_agent, timeout=listen_timeout, text="")
+                _profile_end(listen_span, listen_key=listen_key, scene=scene, segment=segment_index, answer=answer)
                 if not _is_empty_stt_text(answer):
                     answer = answer.strip()
                     if listen_key == "coffee_order" and not is_valid_coffee_answer(answer):
@@ -1480,10 +1634,13 @@ def create_main_workflow(ctx: Any) -> Workflow:
         ctx.docx_script_step_index = step_index + 1
         ctx.docx_script_segment_index = 0
         ctx.docx_script_nav_done_step = None
+        _profile_end(step_span, step_index=step_index, scene=scene, status="done")
         _workflow_log(f"DOCX 剧本步骤完成: scene={scene}, next_index={ctx.docx_script_step_index}")
         if ctx.docx_script_step_index >= len(DOCX_SCRIPT_STEPS):
             ctx.docx_script_done = True
             ctx.post_docx_chat_mode = True
+            _profile_end(getattr(ctx, "docx_total_profile_span", None), status="finished")
+            ctx.docx_total_profile_span = None
             _workflow_log("DOCX 剧本全部完成")
             return "done", SCRIPTED_TOUR_FINISHED
         return "done", SCRIPTED_TOUR_STEP_DONE
