@@ -1217,8 +1217,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 {
                     "action": "right_wrist_outside",
                     "text": "{leader_calling}，您的到来我和我的小伙伴们都非常高兴，他们说要给您表演个节目，您看咱们看个节目，顺便等下咖啡？",
-                    "listen_key": "dog_show_confirmation",
-                    "listen_timeout": 8,
+                    "post_wait_seconds": 0.5,
                 },
                 {"text": "小伙伴们动起来吧！"},
                 {
@@ -1689,6 +1688,10 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 answer = audio_input_execute_timeout(stt_agent, timeout=listen_timeout, text="")
                 _profile_end(listen_span, listen_key=listen_key, scene=scene, segment=segment_index, answer=answer)
                 accept_docx_listen_answer(listen_key, scene, segment_index, answer)
+
+            post_wait_seconds = float(segment.get("post_wait_seconds", 0) or 0)
+            if post_wait_seconds > 0:
+                await asyncio.sleep(post_wait_seconds)
 
             segment_index += 1
             ctx.docx_script_segment_index = segment_index
