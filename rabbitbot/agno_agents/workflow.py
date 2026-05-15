@@ -1211,6 +1211,37 @@ def create_main_workflow(ctx: Any) -> Workflow:
         coffee_order = getattr(ctx, "docx_script_answers", {}).get("coffee_order", "")
         return text.format(leader_calling=leader_calling, coffee_order=coffee_order)
 
+    def mark_docx_answer_received(listen_key, scene, segment_index, answer):
+        pending_latency = {
+            "listen_key": listen_key,
+            "scene": scene,
+            "segment": segment_index,
+            "answer": answer,
+            "received_perf": time.perf_counter(),
+            "received_at": _workflow_timestamp(),
+        }
+        ctx.docx_pending_answer_latency = pending_latency
+        print(
+            f"[{pending_latency['received_at']}] DOCX应答延迟: "
+            f"stage=human_answer_received, listen_key={listen_key}, "
+            f"scene={scene}, segment={segment_index}, answer={answer}"
+        )
+
+    def log_docx_feedback_start(scene, segment_index, text):
+        pending_latency = getattr(ctx, "docx_pending_answer_latency", None)
+        if not pending_latency:
+            return
+        elapsed_seconds = time.perf_counter() - pending_latency["received_perf"]
+        feedback_at = _workflow_timestamp()
+        print(
+            f"[{feedback_at}] DOCX应答延迟: stage=robot_feedback_tts_start, "
+            f"listen_key={pending_latency['listen_key']}, "
+            f"answer_scene={pending_latency['scene']}, answer_segment={pending_latency['segment']}, "
+            f"feedback_scene={scene}, feedback_segment={segment_index}, "
+            f"elapsed={elapsed_seconds:.3f}s, answer={pending_latency['answer']}, feedback_text={text}"
+        )
+        ctx.docx_pending_answer_latency = None
+
     def is_valid_coffee_answer(text):
         normalized_text = re.sub(r"[\s，。！？?、,.!；;：:\"'“”‘’（）()\[\]【】]+", "", text or "").lower()
         if normalized_text == "":
@@ -1266,9 +1297,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
             interrupt_text = None
             if text:
                 def speak_segment():
+                    formatted_text = format_docx_script_text(text)
+                    log_docx_feedback_start(scene, segment_index, formatted_text)
                     return tts_long_text_with_stt_stop(
                         tts_agent,
-                        format_docx_script_text(text),
+                        formatted_text,
                         stt_agent,
                         ctx.robot,
                         before_text,
@@ -1398,9 +1431,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
             interrupt_text = None
             if text:
                 def speak_segment():
+                    formatted_text = format_docx_script_text(text)
+                    log_docx_feedback_start(scene, segment_index, formatted_text)
                     return tts_long_text_with_stt_stop(
                         tts_agent,
-                        format_docx_script_text(text),
+                        formatted_text,
                         stt_agent,
                         ctx.robot,
                         before_text,
@@ -1437,6 +1472,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                         print(f"忽略非机器狗表演确认回答: {answer}")
                     else:
                         ctx.docx_script_answers[listen_key] = answer
+                        mark_docx_answer_received(listen_key, scene, segment_index, answer)
 
             segment_index += 1
             ctx.docx_script_segment_index = segment_index
