@@ -278,7 +278,6 @@ def tts_long_text_with_stt_stop(
         tts_index = tts_sound(tts_agent, sentence, "zh")
         if action_name is not None:
             action_with_tts(robot, action_name, tts_agent, tts_index)
-        time.sleep(1)
         #tts_wait(tts_agent)
     # 如果循环被 break 退出，说明已收到停止命令，直接停止并清空队列
     if tts_stop_event.is_set():
@@ -342,7 +341,6 @@ def tts_long_text(tts_agent, text, stt_agent, robot, before_text=None):
         tts_index = tts_sound(tts_agent, sentence, "zh")
         if action_name is not None:
             action_with_tts(robot, action_name, tts_agent, tts_index)
-        time.sleep(1)
         #tts_wait(tts_agent)
 
 

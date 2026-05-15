@@ -754,10 +754,8 @@ async def guide_opening_speech(ctx: Any):
 
     if say("各位领导都到齐了吗？"):
         return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
-    await asyncio.sleep(0.1)
     if say("请问哪位是领导？"):
         return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
-    await asyncio.sleep(0.1)
     if say("请把话筒给领导。"):
         return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
     raw_name_text = tts_ask_with_early_stt(ctx.tts_agent, "领导，您怎么称呼？", ctx.stt_agent, timeout=8)
@@ -1293,10 +1291,6 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     ctx.docx_script_segment_index = segment_index
                     return "interrupt", interrupt_text.strip()
 
-            pause_seconds = float(segment.get("pause", 0) or 0)
-            if pause_seconds > 0:
-                await asyncio.sleep(pause_seconds)
-
             segment_index += 1
             ctx.docx_script_segment_index = segment_index
         return None
@@ -1443,10 +1437,6 @@ def create_main_workflow(ctx: Any) -> Workflow:
                         print(f"忽略非机器狗表演确认回答: {answer}")
                     else:
                         ctx.docx_script_answers[listen_key] = answer
-
-            pause_seconds = float(segment.get("pause", 0) or 0)
-            if pause_seconds > 0:
-                await asyncio.sleep(pause_seconds)
 
             segment_index += 1
             ctx.docx_script_segment_index = segment_index
