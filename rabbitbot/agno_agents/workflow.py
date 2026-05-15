@@ -11,6 +11,7 @@ from datetime import datetime
 import difflib
 import re
 import ast
+import atexit
 from agno.workflow.v2 import (
     Workflow,
     Loop,
@@ -97,6 +98,8 @@ before_text = ""
 pending_user_text = ""
 _profile_lock = threading.Lock()
 _profile_span_id = 0
+_profile_summary_lock = threading.RLock()
+_profile_summary = {}
 
 
 def _env_enabled(name, default="0"):
@@ -183,6 +186,7 @@ def _profile_next_span_id():
 
 
 def _profile_start(span, **fields):
+    _profile_summary_start_if_needed()
     span_token = {
         "span_id": _profile_next_span_id(),
         "span": span,
@@ -208,6 +212,7 @@ def _profile_end(span_token, **fields):
         "elapsed": round(elapsed_seconds, 6),
         **fields,
     })
+    _profile_summary_record(span_token["span"], elapsed_seconds)
 
 
 def _profile_instant(name, span=None, **fields):
@@ -219,6 +224,116 @@ def _profile_instant(name, span=None, **fields):
     if span:
         record["span"] = span
     _profile_write(record)
+
+
+def _workflow_profile_summary_enabled():
+    return _env_enabled("RABBITBOT_WORKFLOW_SUMMARY", "1")
+
+
+def _profile_summary_reset():
+    global _profile_summary
+    with _profile_summary_lock:
+        _profile_summary = {
+            "start_perf": None,
+            "printed": False,
+            "loop_iterations": 0,
+            "stats": {
+                "audio_input": {"count": 0, "sum": 0.0},
+                "plan_llm": {"count": 0, "sum": 0.0},
+                "chat_llm": {"count": 0, "sum": 0.0},
+                "chat_tts": {"count": 0, "sum": 0.0},
+                "action": {"count": 0, "sum": 0.0},
+                "navi_check": {"count": 0, "sum": 0.0},
+                "completion_check": {"count": 0, "sum": 0.0},
+            },
+        }
+
+
+def _profile_summary_start_if_needed():
+    if not _workflow_profile_summary_enabled():
+        return
+    with _profile_summary_lock:
+        if not _profile_summary:
+            _profile_summary_reset()
+        if _profile_summary["start_perf"] is None:
+            _profile_summary["start_perf"] = time.perf_counter()
+
+
+def _profile_summary_label(span):
+    return {
+        "audio_input": "audio_input",
+        "listen_answer": "audio_input",
+        "plan_llm": "plan_llm",
+        "chat_llm": "chat_llm",
+        "chat_tts": "chat_tts",
+        "tts_segment": "chat_tts",
+        "arm_action": "action",
+        "navi_check": "navi_check",
+        "completion_check": "completion_check",
+    }.get(span)
+
+
+def _profile_summary_record(span, elapsed_seconds):
+    if not _workflow_profile_summary_enabled():
+        return
+    _profile_summary_start_if_needed()
+    with _profile_summary_lock:
+        if span == "loop_iteration":
+            _profile_summary["loop_iterations"] += 1
+        label = _profile_summary_label(span)
+        if not label:
+            return
+        stat = _profile_summary["stats"][label]
+        stat["count"] += 1
+        stat["sum"] += float(elapsed_seconds)
+
+
+def _profile_summary_line(label):
+    stat = _profile_summary["stats"].get(label, {"count": 0, "sum": 0.0})
+    count = stat["count"]
+    avg = stat["sum"] / count if count else 0.0
+    return f"{label + ' (avg):':<22}{avg:>9.3f}s  (×{count})"
+
+
+def _profile_summary_print(reason="finished", force=False):
+    if not _workflow_profile_summary_enabled():
+        return
+    with _profile_summary_lock:
+        if not _profile_summary:
+            return
+        if _profile_summary.get("printed") and not force:
+            return
+        start_perf = _profile_summary.get("start_perf")
+        loop_total = time.perf_counter() - start_perf if start_perf is not None else 0.0
+        lines = [
+            "========== Workflow Profile Summary ==========",
+            f"loop_total:{loop_total:>20.3f}s",
+            f"loop_iterations:{_profile_summary['loop_iterations']:>9}",
+            _profile_summary_line("audio_input"),
+            _profile_summary_line("plan_llm"),
+            _profile_summary_line("chat_llm"),
+            _profile_summary_line("chat_tts"),
+            _profile_summary_line("action"),
+            _profile_summary_line("navi_check"),
+            _profile_summary_line("completion_check"),
+        ]
+        _profile_summary["printed"] = True
+
+    print("\n".join(lines))
+    _profile_write({
+        "event": "instant",
+        "name": "workflow_profile_summary_printed",
+        "reason": reason,
+        "loop_total": round(loop_total, 6),
+    })
+
+
+def _profile_summary_print_at_exit():
+    _profile_summary_print(reason="process_exit")
+
+
+_profile_summary_reset()
+atexit.register(_profile_summary_print_at_exit)
 
 
 ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"握手", "打招呼", "right_hand_handshake_wrist", "再见"}
@@ -1808,6 +1923,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         _workflow_log(f"original_task: {original_task}", verbose=True)
         _workflow_log(f"previous_steps: {previous_steps}", verbose=True)
 
+        loop_span = _profile_start("loop_iteration", step="audio_input_step")
         text = original_task
         #text = previous_steps.split("===")[-1]
         #text = text[1:]
@@ -1829,6 +1945,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
             script_kind, script_text = await run_scripted_tour_next_step()
             if script_kind == "done":
                 WorkflowTimePoints.PLAN_START = time.time()
+                _profile_end(loop_span, step="audio_input_step", result="script_done")
+                if script_text == SCRIPTED_TOUR_FINISHED:
+                    _profile_summary_print(reason="docx_finished")
                 return StepOutput(content=f"{script_text}")
             if script_kind == "interrupt":
                 out_text = script_text
@@ -1836,10 +1955,18 @@ def create_main_workflow(ctx: Any) -> Workflow:
             else:
                 time.sleep(1)
                 #out_text = audio_input_execute(stt_agent, "speech_to_text", timeout=300)
-                out_text = audio_input_execute_timeout(stt_agent, timeout=30, text="")
+                audio_span = _profile_start("audio_input", source="main_loop", timeout=30)
+                try:
+                    out_text = audio_input_execute_timeout(stt_agent, timeout=30, text="")
+                finally:
+                    _profile_end(audio_span, source="main_loop", timeout=30)
                 while out_text == "<REC_TIMEOUT>" or out_text == "<REC_DUPLICATE>":
                     tts_sound(tts_agent, f"{before_text}你好，请问你需要我做什么吗？", "zh")
-                    out_text = audio_input_execute_timeout(stt_agent, timeout=30, text="")
+                    audio_span = _profile_start("audio_input", source="main_loop_retry", timeout=30)
+                    try:
+                        out_text = audio_input_execute_timeout(stt_agent, timeout=30, text="")
+                    finally:
+                        _profile_end(audio_span, source="main_loop_retry", timeout=30)
         chat_queue.put(out_text, "用户")
 
         #tts_sound(tts_agent, f"{before_text}我听到了，但是可能要思考一会。请稍等片刻", "zh")
@@ -1848,6 +1975,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
         WorkflowTimePoints.PLAN_START = time.time()
 
+        _profile_end(loop_span, step="audio_input_step", result="user_input")
         return StepOutput(content=f"{out_text}")
 
     audio_input_step = Step(
@@ -1891,6 +2019,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             return await view_executor(step_input)
 
         start_time = time.time()
+        plan_llm_span = _profile_start("plan_llm")
         #run_response = plan_agent.run(text, session_id=str(PLAN_SESSION_ID))
         #out_text = run_response.content
         response_stream = plan_agent.run(
@@ -1913,6 +2042,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         log_text = f"plan_executor: plan_duration {duration:.3f}, text {out_text}"
         _workflow_log(log_text, verbose=True)
         file_logger.debug(log_text)
+        _profile_end(plan_llm_span, output=out_text)
 
         planner_choice = (out_text or "").strip()[:1].upper()
         if planner_choice == "C":
@@ -1960,6 +2090,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
         tts_wait(tts_agent)
 
         WorkflowTimePoints.CHAT_START = time.time()
+        chat_llm_span = _profile_start("chat_llm")
+        chat_tts_span = None
         active_chat_agent = post_docx_chat_agent if getattr(ctx, "post_docx_chat_mode", False) else chat_agent
         if sess_idx is not None:
             _workflow_log(f"chat_agent: session_id {str(sess_idx)}", verbose=True)
@@ -2087,6 +2219,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 _workflow_log(log_text, verbose=True)
                 file_logger.debug(log_text)
                 #tts_index = tts_sound(tts_agent, f"{before_text}" + out_text.strip(), lang)
+                if chat_tts_span is None:
+                    chat_tts_span = _profile_start("chat_tts")
                 tts_index = tts_sound(tts_agent, out_text.strip(), lang)
                 speecher_start_event.set()
                 if navi_tools is not None:
@@ -2110,6 +2244,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 num_setence += 1
                 #if num_setence > 3:
                 #    break
+
+        _profile_end(chat_llm_span, sentence_count=num_setence)
 
         remaining_text = out_text.strip()
         if remaining_text and not speecher_stop_event.is_set():
@@ -2135,6 +2271,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 log_text = f"chat_executor: seq_idx {num_setence}, infer_time {first_infer_time:.3f}, text {remaining_text}"
                 _workflow_log(log_text, verbose=True)
                 file_logger.debug(log_text)
+                if chat_tts_span is None:
+                    chat_tts_span = _profile_start("chat_tts")
                 tts_index = tts_sound(tts_agent, remaining_text, lang)
                 speecher_start_event.set()
                 if action_name is not None:
@@ -2168,6 +2306,8 @@ def create_main_workflow(ctx: Any) -> Workflow:
             if tts_get_wav_count(tts_agent) == 0:
                 _workflow_log("WAV播完，退出聊天", verbose=True)
                 break
+        if chat_tts_span is not None:
+            _profile_end(chat_tts_span, sentence_count=num_setence)
         listener_stop_event.set()
         speecher_start_event.set()
         #audio_input_execute(stt_agent, "stop")
@@ -2785,7 +2925,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
         history_text = chat_queue.build_history(max_count=4)
         input_text_with_chat = history_text
         _workflow_log(f"input_text_with_chat: {input_text_with_chat}", verbose=True)
+        navi_check_span = _profile_start("navi_check")
         run_response = navi_check_agent.run(input_text_with_chat, session_id=str(NAVI_CHECK_SESSION_ID))
+        _profile_end(navi_check_span)
         out_text = run_response.content
         _workflow_log(f"out_text: {out_text}", verbose=True)
         out_text = out_text.split("\n")[0]
@@ -3229,15 +3371,22 @@ def create_main_workflow(ctx: Any) -> Workflow:
     async def task_completion_check(
         step_input: StepInput,
     ) -> AsyncIterator[Union[WorkflowRunResponseEvent, StepOutput]]:
+        completion_span = _profile_start("completion_check")
         original_task = step_input.message or ''
         previous_steps = step_input.get_all_previous_content()
 
         if getattr(ctx, "post_docx_chat_mode", False):
-            return StepOutput(content=CompletionCheckModel(task_completed=False))
+            result = StepOutput(content=CompletionCheckModel(task_completed=False))
+            _profile_end(completion_span, skipped=True)
+            return result
         if SCRIPTED_TOUR_FINISHED in previous_steps:
-            return StepOutput(content=CompletionCheckModel(task_completed=False))
+            result = StepOutput(content=CompletionCheckModel(task_completed=False))
+            _profile_end(completion_span, skipped=True)
+            return result
         if SCRIPTED_TOUR_STEP_DONE in previous_steps:
-            return StepOutput(content=CompletionCheckModel(task_completed=False))
+            result = StepOutput(content=CompletionCheckModel(task_completed=False))
+            _profile_end(completion_span, skipped=True)
+            return result
 
         prompt = dedent("""\
             Task: "{task_description}"
@@ -3246,9 +3395,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
             previous_steps=previous_steps,
         )
 
-        return await task_completion_check_agent.arun(
+        result = await task_completion_check_agent.arun(
             prompt, stream=True, stream_intermediate_steps=True,
         )
+        _profile_end(completion_span)
+        return result
 
     def loop_breaker(outputs: List[StepOutput]) -> bool:
         if not outputs:
@@ -3257,6 +3408,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         for output in outputs:
             if isinstance(output.content, CompletionCheckModel):
                 if output.content.task_completed:
+                    _profile_summary_print(reason="loop_breaker_completed")
                     return True
 
         return False
