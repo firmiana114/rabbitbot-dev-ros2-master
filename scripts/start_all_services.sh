@@ -32,9 +32,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RABBITBOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROJECT_DIR="$(cd "${RABBITBOT_DIR}/.." && pwd)"
 MODELS_DIR="${RABBITBOT_MODELS_DIR:-${PROJECT_DIR}/models}"
-LOG_DIR="${PROJECT_DIR}/logs"
+LOG_DIR="${RABBITBOT_LOG_DIR:-${RABBITBOT_DIR}/logs}"
 CONTAINER_PROJECT_ROOT="${RABBITBOT_CONTAINER_PROJECT_ROOT:-/data}"
 CONTAINER_PROJECT_DIR="${RABBITBOT_CONTAINER_PROJECT_DIR:-${CONTAINER_PROJECT_ROOT}/$(basename "${RABBITBOT_DIR}")}"
+CONTAINER_LOG_DIR="${RABBITBOT_CONTAINER_LOG_DIR:-${CONTAINER_PROJECT_DIR}/logs}"
 
 VLM_CONTAINER="vlm"
 AUDIO_CONTAINER="navid-vllm-cuda-mic-audio"
@@ -242,6 +243,10 @@ start_vlm_and_embedding() {
         > "${MODELS_DIR}/start_vllm_runtime.sh"
 
     chmod +x "${MODELS_DIR}/start_vllm_runtime.sh"
+    ln -sf "${MODELS_DIR}/start_vllm_runtime.log" "${LOG_DIR}/start_vllm_runtime.log"
+    ln -sf "${MODELS_DIR}/qwen2.5-vl-7b.log" "${LOG_DIR}/qwen2.5-vl-7b.log"
+    ln -sf "${MODELS_DIR}/qwen2.5-vl-7b-gptq.log" "${LOG_DIR}/qwen2.5-vl-7b-gptq.log"
+    ln -sf "${MODELS_DIR}/qwen3-embedding-0.6b.log" "${LOG_DIR}/qwen3-embedding-0.6b.log"
 
     exec_detached "${VLM_CONTAINER}" 'bash /models/start_vllm_runtime.sh > /models/start_vllm_runtime.log 2>&1'
 
@@ -256,7 +261,7 @@ start_tts() {
     fi
 
     log_info "通过 scripts/start_tts_app.bash 启动 TTS"
-    exec_detached "${AUDIO_CONTAINER}" "cd '${CONTAINER_PROJECT_DIR}' && export TTS_DEVICE_NAME='${TTS_DEVICE_NAME}' && bash scripts/start_tts_app.bash > /tmp/rabbitbot_tts.log 2>&1"
+    exec_detached "${AUDIO_CONTAINER}" "cd '${CONTAINER_PROJECT_DIR}' && mkdir -p '${CONTAINER_LOG_DIR}' && export TTS_DEVICE_NAME='${TTS_DEVICE_NAME}' && bash scripts/start_tts_app.bash > '${CONTAINER_LOG_DIR}/rabbitbot_tts.log' 2>&1"
     wait_until "TTS 服务 (${TTS_PORT})" "${WAIT_DEFAULT_SECONDS}" tts_ready
 }
 
@@ -267,7 +272,7 @@ start_stt() {
     fi
 
     log_info "通过 scripts/start_stt_app.bash 启动 STT"
-    exec_detached "${AUDIO_CONTAINER}" "cd '${CONTAINER_PROJECT_DIR}' && export STT_DEVICE_NAME='${STT_DEVICE_NAME}' && bash scripts/start_stt_app.bash > /tmp/rabbitbot_stt.log 2>&1"
+    exec_detached "${AUDIO_CONTAINER}" "cd '${CONTAINER_PROJECT_DIR}' && mkdir -p '${CONTAINER_LOG_DIR}' && export STT_DEVICE_NAME='${STT_DEVICE_NAME}' && bash scripts/start_stt_app.bash > '${CONTAINER_LOG_DIR}/rabbitbot_stt.log' 2>&1"
     wait_until "STT 服务 (${STT_PORT})" "${WAIT_DEFAULT_SECONDS}" stt_ready
 }
 
@@ -289,7 +294,7 @@ start_memory_agent() {
     fi
 
     log_info "通过 scripts/start_memory_agent.sh 启动 Memory Agent"
-    exec_detached "${WORKFLOW_CONTAINER}" "cd '${CONTAINER_PROJECT_DIR}' && bash scripts/start_memory_agent.sh > /tmp/memory_agent.log 2>&1"
+    exec_detached "${WORKFLOW_CONTAINER}" "cd '${CONTAINER_PROJECT_DIR}' && mkdir -p '${CONTAINER_LOG_DIR}' && bash scripts/start_memory_agent.sh > '${CONTAINER_LOG_DIR}/memory_agent.log' 2>&1"
     wait_until "Memory Agent 服务 (${MEMORY_AGENT_PORT})" "${WAIT_DEFAULT_SECONDS}" memory_ready
 }
 
@@ -305,9 +310,9 @@ start_workflow() {
 
     log_info "前台启动 Workflow，后续输出会直接显示在当前终端"
     log_info "Workflow 输出会同时保存到本机 ${workflow_latest_log}"
-    log_info "Workflow 输出会同时保存到容器 ${WORKFLOW_CONTAINER}:/tmp/rabbitbot_workflow_latest.log"
+    log_info "Workflow 输出会同时保存到容器 ${WORKFLOW_CONTAINER}:${CONTAINER_LOG_DIR}/rabbitbot_workflow_latest.log"
     log_info "按 Ctrl+C 可停止前台 workflow"
-    docker exec -it "${WORKFLOW_CONTAINER}" bash -lc "mkdir -p /tmp/rabbitbot_logs && log_path=/tmp/rabbitbot_logs/rabbitbot_workflow_\$(date +%Y%m%d_%H%M%S).log && ln -sf \${log_path} /tmp/rabbitbot_workflow_latest.log && echo Workflow容器日志: \${log_path} && cd '${CONTAINER_PROJECT_DIR}' && PYTHONUNBUFFERED=1 bash scripts/start_kuavo_agno_workflow.bash 2>&1 | tee -a \${log_path}" 2>&1 | tee -a "${workflow_log_path}"
+    docker exec -it "${WORKFLOW_CONTAINER}" bash -lc "mkdir -p '${CONTAINER_LOG_DIR}' && log_path='${CONTAINER_LOG_DIR}'/rabbitbot_workflow_\$(date +%Y%m%d_%H%M%S).log && ln -sf \${log_path} '${CONTAINER_LOG_DIR}'/rabbitbot_workflow_latest.log && echo Workflow容器日志: \${log_path} && cd '${CONTAINER_PROJECT_DIR}' && PYTHONUNBUFFERED=1 bash scripts/start_kuavo_agno_workflow.bash 2>&1 | tee -a \${log_path}" 2>&1 | tee -a "${workflow_log_path}"
     local workflow_status=${PIPESTATUS[0]}
     return "${workflow_status}"
 }
@@ -330,14 +335,14 @@ print_status() {
 
     echo ""
     log_info "主要日志位置："
-    echo "  VLM:        ${MODELS_DIR}/start_vllm_runtime.log"
-    echo "  VLM 模型:   ${MODELS_DIR}/qwen2.5-vl-7b.log 或 ${MODELS_DIR}/qwen2.5-vl-7b-gptq.log"
-    echo "  Embedding:  ${MODELS_DIR}/qwen3-embedding-0.6b.log"
-    echo "  TTS:        容器 ${AUDIO_CONTAINER}:/tmp/rabbitbot_tts.log"
-    echo "  STT:        容器 ${AUDIO_CONTAINER}:/tmp/rabbitbot_stt.log"
+    echo "  VLM:        ${LOG_DIR}/start_vllm_runtime.log"
+    echo "  VLM 模型:   ${LOG_DIR}/qwen2.5-vl-7b.log 或 ${LOG_DIR}/qwen2.5-vl-7b-gptq.log"
+    echo "  Embedding:  ${LOG_DIR}/qwen3-embedding-0.6b.log"
+    echo "  TTS:        ${LOG_DIR}/rabbitbot_tts.log"
+    echo "  STT:        ${LOG_DIR}/rabbitbot_stt.log"
     echo "  VLN:        当前已跳过，不启动 ${VLN_CONTAINER}"
-    echo "  Memory:     容器 ${WORKFLOW_CONTAINER}:/tmp/memory_agent.log"
-    echo "  Workflow:   前台输出到当前终端，并保存到本机 ${LOG_DIR}/rabbitbot_workflow_latest.log 和容器 ${WORKFLOW_CONTAINER}:/tmp/rabbitbot_workflow_latest.log"
+    echo "  Memory:     ${LOG_DIR}/memory_agent.log"
+    echo "  Workflow:   前台输出到当前终端，并保存到 ${LOG_DIR}/rabbitbot_workflow_latest.log"
 }
 
 # -----------------------------------------------------------------------------
