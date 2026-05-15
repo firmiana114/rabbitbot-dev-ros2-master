@@ -5,12 +5,21 @@ import json
 import os
 import random
 import threading
+from datetime import datetime
 
 from rabbitbot.tools.navi_agno import is_navigating
 
 
 _recent_tts_texts = []
 _recent_tts_lock = threading.Lock()
+
+
+def _sound_timestamp():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
+def _format_trace_fields(fields):
+    return ", ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
 
 
 def _normalize_echo_text(text):
@@ -109,7 +118,18 @@ def tts_sound(tts_agent, text, lang):
     #def sound_agent_run():
     #    tts_agent.run(json.dumps(input_dict))
     #threading.Thread(target=sound_agent_run).start()
+    request_start = time.perf_counter()
+    print(
+        f"[{_sound_timestamp()}] TTS请求链路: "
+        f"stage=workflow_tts_request_start, text={text}"
+    )
     tts_index = tts_agent.run(json.dumps(input_dict))
+    elapsed = time.perf_counter() - request_start
+    print(
+        f"[{_sound_timestamp()}] TTS请求链路: "
+        f"stage=workflow_tts_request_done, tts_index={tts_index}, "
+        f"elapsed={elapsed:.3f}s, text={text}"
+    )
     return int(tts_index)
 
 
@@ -299,31 +319,96 @@ def tts_long_text_with_stt_stop(
     return interrupt_text_holder["text"]
 
 
-def tts_ask_with_early_stt(tts_agent, text, stt_agent, timeout=8, lang="zh", stop_tts_on_answer=False):
+def tts_ask_with_early_stt(
+    tts_agent,
+    text,
+    stt_agent,
+    timeout=8,
+    lang="zh",
+    stop_tts_on_answer=False,
+    trace_event=None,
+    trace_id=None,
+):
     """在播报问题前启动 STT，避免用户需要等待监听启动后才能回答。"""
+    trace_start = time.perf_counter()
+
+    def emit_trace(phase, **fields):
+        elapsed = time.perf_counter() - trace_start
+        payload = {
+            "phase": phase,
+            "trace_id": trace_id,
+            "elapsed_from_listen_start": round(elapsed, 6),
+            **fields,
+        }
+        print(
+            f"[{_sound_timestamp()}] 早听应答链路: "
+            f"{_format_trace_fields(payload)}"
+        )
+        if trace_event:
+            trace_event(**payload)
+
     print(f"audio_input early ask: timeout {timeout}")
-    audio_input_execute(stt_agent, "start_async", "")
-    tts_sound(tts_agent, text, lang)
+    emit_trace("listen_start_request", timeout=timeout, question_text=text)
+    listen_start_perf = time.perf_counter()
+    start_result = audio_input_execute(stt_agent, "start_async", "")
+    emit_trace(
+        "listen_start_done",
+        result=start_result,
+        elapsed=round(time.perf_counter() - listen_start_perf, 6),
+    )
+    emit_trace("question_tts_request_start", text=text)
+    question_tts_perf = time.perf_counter()
+    question_tts_index = tts_sound(tts_agent, text, lang)
+    emit_trace(
+        "question_tts_request_done",
+        tts_index=question_tts_index,
+        elapsed=round(time.perf_counter() - question_tts_perf, 6),
+        text=text,
+    )
 
     time_sec = 0
+    poll_index = 0
     audio_input_text = audio_input_execute(stt_agent, "get_text_async")
     audio_input_status = audio_input_execute(stt_agent, "get_status_async")
+    emit_trace("stt_poll", poll_index=poll_index, status=audio_input_status, text=audio_input_text)
     while audio_input_text == "" and audio_input_status == "<REC_START>":
         time.sleep(0.2)
         time_sec += 0.2
         if time_sec > timeout:
             audio_input_text = "<REC_TIMEOUT>"
+            emit_trace("stt_timeout", poll_index=poll_index, waited=round(time_sec, 3))
             break
+        poll_index += 1
         audio_input_text = audio_input_execute(stt_agent, "get_text_async")
         audio_input_status = audio_input_execute(stt_agent, "get_status_async")
+        emit_trace("stt_poll", poll_index=poll_index, status=audio_input_status, text=audio_input_text)
 
+    emit_trace("stt_raw_text_received", status=audio_input_status, text=audio_input_text, poll_count=poll_index + 1)
+    emit_trace("stt_dedupe_start", text=audio_input_text)
     audio_input_text = _dedupe_stt_utterance(stt_agent, audio_input_text)
+    emit_trace("stt_dedupe_done", text=audio_input_text)
     if stop_tts_on_answer and _is_valid_interrupt_text(audio_input_text):
+        emit_trace("question_tts_stop_start", text=text)
+        stop_perf = time.perf_counter()
         tts_stop(tts_agent)
+        emit_trace(
+            "question_tts_stop_done",
+            elapsed=round(time.perf_counter() - stop_perf, 6),
+            text=text,
+        )
         time.sleep(0.1)
     if audio_input_status == "<REC_STOP>" and audio_input_text == "":
         audio_input_text = "<REC_STOP>"
-    audio_input_execute(stt_agent, "stop_async")
+    emit_trace("stt_stop_request_start", final_text=audio_input_text)
+    stop_listen_perf = time.perf_counter()
+    stop_result = audio_input_execute(stt_agent, "stop_async")
+    emit_trace(
+        "stt_stop_request_done",
+        result=stop_result,
+        elapsed=round(time.perf_counter() - stop_listen_perf, 6),
+        final_text=audio_input_text,
+    )
+    emit_trace("listen_return", final_text=audio_input_text)
     return audio_input_text
 
 

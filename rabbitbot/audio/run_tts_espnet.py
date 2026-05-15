@@ -11,12 +11,25 @@ import librosa
 import threading
 import queue
 import torch
+from datetime import datetime
 from kokoro import KPipeline, KModel
 from enum import Enum
 #from espnet2.bin.tts_inference import Text2Speech
 from rabbitbot.audio.tts_utils import process_text_en_for_stt, process_text_zh_for_stt
 from rabbitbot.tools.logging import logger as file_logger
 import numpy as np
+
+
+def _tts_timestamp():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
+def _tts_trace(stage, tts_index=None, text=None, **fields):
+    field_text = ", ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+    suffix = f", {field_text}" if field_text else ""
+    log_text = f"[{_tts_timestamp()}] TTS服务链路: stage={stage}, tts_index={tts_index}, text={text}{suffix}"
+    print(log_text)
+    file_logger.debug(log_text)
 
 
 def parse_args():
@@ -169,6 +182,7 @@ class EspnetTTS(object):
         self.status = TTSStatus.RUNNING
         self.tts_index = 0
         self.interrupt_generation = 0
+        self.tts_trace_texts = {}
         queue_len = 4096
         self.tts_queue = np.zeros((queue_len))
         #self.tts_cloud_host_url = os.environ.get("TTS_CLOUD", None)
@@ -215,8 +229,10 @@ class EspnetTTS(object):
                 self.wav_q.put((None, None, generation))
                 break
             if self.status != TTSStatus.RUNNING or generation != self.interrupt_generation:
+                _tts_trace("tts_generation_skipped", tts_index=tts_index, text=text, generation=generation)
                 self.num_text -= 1
                 continue
+            _tts_trace("tts_generate_start", tts_index=tts_index, text=text, generation=generation)
             start_time = time.time()
             if self.tts_cloud is None:
                 if self.tts_engine_type == "espnet":
@@ -241,8 +257,17 @@ class EspnetTTS(object):
             log_text = f"KokoroTTS: text {text}, time {tts_time:.3f}"
             print(log_text)
             file_logger.debug(log_text)
+            _tts_trace(
+                "tts_generate_done",
+                tts_index=tts_index,
+                text=text,
+                elapsed=round(tts_time, 6),
+                has_wav=wav is not None,
+                generation=generation,
+            )
             if wav is not None and self.status == TTSStatus.RUNNING and generation == self.interrupt_generation:
                 self.num_wav += 1
+                _tts_trace("tts_wav_queued", tts_index=tts_index, text=text, generation=generation)
                 self.wav_q.put((wav, tts_index, generation))
             #self.text_q.done()
             self.num_text -= 1
@@ -265,6 +290,12 @@ class EspnetTTS(object):
                 #continue
                 break
             if self.status != TTSStatus.RUNNING or generation != self.interrupt_generation:
+                _tts_trace(
+                    "tts_play_skipped",
+                    tts_index=tts_index,
+                    text=self.tts_trace_texts.get(tts_index),
+                    generation=generation,
+                )
                 self.num_wav -= 1
                 continue
             if isinstance(wav, torch.Tensor):
@@ -276,12 +307,32 @@ class EspnetTTS(object):
                 #sd.play(data_resampled, self.target_sr, device=self.device_id)
                 #sd.wait()
                 try:
+                    play_start = time.perf_counter()
+                    _tts_trace(
+                        "tts_play_start",
+                        tts_index=tts_index,
+                        text=self.tts_trace_texts.get(tts_index),
+                        samples=len(data_resampled),
+                        target_sr=self.target_sr,
+                    )
                     self.tts_queue[tts_index] = 1
                     self.sd_stream.play_and_wait(data_resampled)
-                except Exception:
-                    pass
+                    _tts_trace(
+                        "tts_play_done",
+                        tts_index=tts_index,
+                        text=self.tts_trace_texts.get(tts_index),
+                        elapsed=round(time.perf_counter() - play_start, 6),
+                    )
+                except Exception as exc:
+                    _tts_trace(
+                        "tts_play_error",
+                        tts_index=tts_index,
+                        text=self.tts_trace_texts.get(tts_index),
+                        error=exc,
+                    )
             else:
                 self.tts_queue[tts_index] = 1
+                _tts_trace("tts_play_skipped_no_device", tts_index=tts_index, text=self.tts_trace_texts.get(tts_index))
             self.num_wav -= 1
             #self.wav_q.done()
         if self.debug_mode:
@@ -290,9 +341,16 @@ class EspnetTTS(object):
     def put_text(self, text):
         if self.debug_mode:
             print(f"Put text: {text}")
-        self.text_q.put((text, self.tts_index, self.interrupt_generation))
-        self.num_text += 1
         tts_index = self.tts_index
+        self.tts_trace_texts[tts_index] = text
+        _tts_trace(
+            "tts_enqueue_text",
+            tts_index=tts_index,
+            text=text,
+            generation=self.interrupt_generation,
+        )
+        self.text_q.put((text, tts_index, self.interrupt_generation))
+        self.num_text += 1
         self.tts_index += 1
         return tts_index
 

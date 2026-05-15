@@ -9,6 +9,7 @@ import json
 import traceback
 import logging
 import threading
+from datetime import datetime
 from opencc import OpenCC
 from RealtimeSTT import AudioToTextRecorder
 import concurrent.futures
@@ -34,6 +35,16 @@ print(f"in_device_id: {in_device_id}")
 
 last_recorded_rms = 0.0
 last_recorded_rms_lock = threading.Lock()
+
+
+def _stt_timestamp():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
+def _stt_trace(stage, **fields):
+    field_text = ", ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+    suffix = f", {field_text}" if field_text else ""
+    print(f"[{_stt_timestamp()}] STT服务链路: stage={stage}{suffix}")
 
 
 def update_last_recorded_rms(chunk):
@@ -137,6 +148,8 @@ class STTTimeoutWrapper(object):
 
     def stop_record(self):
         if self.recoder_status == "<REC_START>":
+            stop_start = time.perf_counter()
+            _stt_trace("stop_record_start", status=self.recoder_status)
             print("STTTimeoutWrapper: Abort recoder")
             if hasattr(self.recorder, "set_enable_transcribe"):
                 self.recorder.set_enable_transcribe(False)
@@ -145,10 +158,23 @@ class STTTimeoutWrapper(object):
                 self.recoder_thread.join()
             if hasattr(self.recorder, "set_enable_transcribe"):
                 self.recorder.set_enable_transcribe(True)
+            _stt_trace(
+                "stop_record_done",
+                elapsed=round(time.perf_counter() - stop_start, 6),
+                output_text=self.output_text,
+                utterance_id=self.output_utterance_id,
+            )
         self.recoder_status = "<REC_STOP>"
 
     def record(self):
+        record_start = time.perf_counter()
+        _stt_trace("record_thread_start")
         self.output_text = self.recorder.text()
+        _stt_trace(
+            "record_text_returned",
+            elapsed=round(time.perf_counter() - record_start, 6),
+            output_text=self.output_text,
+        )
         if self.output_text:
             self.utterance_id += 1
             self.output_utterance_id = self.utterance_id
@@ -164,6 +190,7 @@ class STTTimeoutWrapper(object):
             print("Recorder 不支持 set_global_prompt，跳过全局提示词设置")
 
         self.recoder_status = "<REC_START>"
+        _stt_trace("start_record", prompt=prompt)
         self.recoder_thread = threading.Thread(target=self.record)
         self.recoder_thread.start()
 

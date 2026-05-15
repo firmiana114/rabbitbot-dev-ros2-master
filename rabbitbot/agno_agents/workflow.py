@@ -1428,19 +1428,48 @@ def create_main_workflow(ctx: Any) -> Workflow:
         coffee_order = getattr(ctx, "docx_script_answers", {}).get("coffee_order", "")
         return text.format(leader_calling=leader_calling, coffee_order=coffee_order)
 
-    def mark_docx_answer_received(listen_key, scene, segment_index, answer):
+    def make_docx_interaction_trace(listen_key, scene, segment_index, trace_id=None):
+        trace_id = trace_id or f"{listen_key}-{scene}-{segment_index}-{int(time.time() * 1000)}"
+
+        def emit_trace(**fields):
+            fields = dict(fields)
+            fields.pop("trace_id", None)
+            phase = fields.get("phase")
+            _profile_instant(
+                "interaction_latency",
+                span="interaction_latency",
+                trace_id=trace_id,
+                listen_key=listen_key,
+                scene=scene,
+                segment=segment_index,
+                **fields,
+            )
+            print(
+                f"[{_workflow_timestamp()}] 用户到TTS链路: "
+                f"trace_id={trace_id}, listen_key={listen_key}, "
+                f"scene={scene}, segment={segment_index}, "
+                f"phase={phase}, elapsed_from_listen_start={fields.get('elapsed_from_listen_start')}, "
+                f"text={fields.get('text')}, status={fields.get('status')}, "
+                f"tts_index={fields.get('tts_index')}"
+            )
+
+        return trace_id, emit_trace
+
+    def mark_docx_answer_received(listen_key, scene, segment_index, answer, trace_id=None):
         span_token = _profile_start(
             "answer_to_feedback",
             listen_key=listen_key,
             answer_scene=scene,
             answer_segment=segment_index,
             answer=answer,
+            trace_id=trace_id,
         )
         pending_latency = {
             "listen_key": listen_key,
             "scene": scene,
             "segment": segment_index,
             "answer": answer,
+            "trace_id": trace_id,
             "received_perf": time.perf_counter(),
             "received_at": _workflow_timestamp(),
             "profile_span": span_token,
@@ -1453,10 +1482,21 @@ def create_main_workflow(ctx: Any) -> Workflow:
             scene=scene,
             segment=segment_index,
             answer=answer,
+            trace_id=trace_id,
+        )
+        _profile_instant(
+            "interaction_latency",
+            span="interaction_latency",
+            phase="human_answer_accepted",
+            trace_id=trace_id,
+            listen_key=listen_key,
+            scene=scene,
+            segment=segment_index,
+            answer=answer,
         )
         print(
             f"[{pending_latency['received_at']}] DOCX应答延迟: "
-            f"stage=human_answer_received, listen_key={listen_key}, "
+            f"stage=human_answer_received, trace_id={trace_id}, listen_key={listen_key}, "
             f"scene={scene}, segment={segment_index}, answer={answer}"
         )
 
@@ -1468,10 +1508,25 @@ def create_main_workflow(ctx: Any) -> Workflow:
         feedback_at = _workflow_timestamp()
         print(
             f"[{feedback_at}] DOCX应答延迟: stage=robot_feedback_tts_start, "
+            f"trace_id={pending_latency.get('trace_id')}, "
             f"listen_key={pending_latency['listen_key']}, "
             f"answer_scene={pending_latency['scene']}, answer_segment={pending_latency['segment']}, "
             f"feedback_scene={scene}, feedback_segment={segment_index}, "
             f"elapsed={elapsed_seconds:.3f}s, answer={pending_latency['answer']}, feedback_text={text}"
+        )
+        _profile_instant(
+            "interaction_latency",
+            span="interaction_latency",
+            phase="feedback_tts_start",
+            trace_id=pending_latency.get("trace_id"),
+            listen_key=pending_latency["listen_key"],
+            answer_scene=pending_latency["scene"],
+            answer_segment=pending_latency["segment"],
+            feedback_scene=scene,
+            feedback_segment=segment_index,
+            elapsed_from_answer=round(elapsed_seconds, 6),
+            answer=pending_latency["answer"],
+            feedback_text=text,
         )
         _profile_end(
             pending_latency.get("profile_span"),
@@ -1482,6 +1537,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             feedback_segment=segment_index,
             answer=pending_latency["answer"],
             feedback_text=text,
+            trace_id=pending_latency.get("trace_id"),
         )
         ctx.docx_pending_answer_latency = None
 
@@ -1506,7 +1562,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         ]
         return any(keyword in normalized_text for keyword in coffee_keywords + no_coffee_keywords)
 
-    def accept_docx_listen_answer(listen_key, scene, segment_index, answer):
+    def accept_docx_listen_answer(listen_key, scene, segment_index, answer, trace_id=None):
         if _is_empty_stt_text(answer):
             return False
 
@@ -1518,7 +1574,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             return False
 
         ctx.docx_script_answers[listen_key] = answer
-        mark_docx_answer_received(listen_key, scene, segment_index, answer)
+        mark_docx_answer_received(listen_key, scene, segment_index, answer, trace_id=trace_id)
         return True
 
     def is_valid_dog_show_confirmation(text):
@@ -1573,6 +1629,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                         if early_listen:
                             listen_span = _profile_start("listen_answer", listen_key=listen_key, scene=scene, segment=segment_index, timeout=listen_timeout, early=True)
                             answer = ""
+                            trace_id, trace_event = make_docx_interaction_trace(listen_key, scene, segment_index)
                             try:
                                 answer = tts_ask_with_early_stt(
                                     tts_agent,
@@ -1580,10 +1637,12 @@ def create_main_workflow(ctx: Any) -> Workflow:
                                     stt_agent,
                                     timeout=listen_timeout,
                                     stop_tts_on_answer=True,
+                                    trace_event=trace_event,
+                                    trace_id=trace_id,
                                 )
                             finally:
-                                _profile_end(listen_span, listen_key=listen_key, scene=scene, segment=segment_index, early=True, answer=answer)
-                            return ("__DOCX_LISTEN_ANSWER__", answer)
+                                _profile_end(listen_span, listen_key=listen_key, scene=scene, segment=segment_index, early=True, answer=answer, trace_id=trace_id)
+                            return ("__DOCX_LISTEN_ANSWER__", answer, trace_id)
                         return tts_long_text_with_stt_stop(
                             tts_agent,
                             formatted_text,
@@ -1603,7 +1662,13 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
                 if isinstance(interrupt_text, tuple) and interrupt_text[0] == "__DOCX_LISTEN_ANSWER__":
                     listen_answer_handled = True
-                    accept_docx_listen_answer(listen_key, scene, segment_index, interrupt_text[1])
+                    accept_docx_listen_answer(
+                        listen_key,
+                        scene,
+                        segment_index,
+                        interrupt_text[1],
+                        trace_id=interrupt_text[2] if len(interrupt_text) > 2 else None,
+                    )
                     interrupt_text = None
 
             if not speak_with_action:
@@ -1752,6 +1817,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                         if early_listen:
                             listen_span = _profile_start("listen_answer", listen_key=listen_key, scene=scene, segment=segment_index, timeout=listen_timeout, early=True)
                             answer = ""
+                            trace_id, trace_event = make_docx_interaction_trace(listen_key, scene, segment_index)
                             try:
                                 answer = tts_ask_with_early_stt(
                                     tts_agent,
@@ -1759,10 +1825,12 @@ def create_main_workflow(ctx: Any) -> Workflow:
                                     stt_agent,
                                     timeout=listen_timeout,
                                     stop_tts_on_answer=True,
+                                    trace_event=trace_event,
+                                    trace_id=trace_id,
                                 )
                             finally:
-                                _profile_end(listen_span, listen_key=listen_key, scene=scene, segment=segment_index, early=True, answer=answer)
-                            return ("__DOCX_LISTEN_ANSWER__", answer)
+                                _profile_end(listen_span, listen_key=listen_key, scene=scene, segment=segment_index, early=True, answer=answer, trace_id=trace_id)
+                            return ("__DOCX_LISTEN_ANSWER__", answer, trace_id)
                         return tts_long_text_with_stt_stop(
                             tts_agent,
                             formatted_text,
@@ -1782,7 +1850,13 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
                 if isinstance(interrupt_text, tuple) and interrupt_text[0] == "__DOCX_LISTEN_ANSWER__":
                     listen_answer_handled = True
-                    accept_docx_listen_answer(listen_key, scene, segment_index, interrupt_text[1])
+                    accept_docx_listen_answer(
+                        listen_key,
+                        scene,
+                        segment_index,
+                        interrupt_text[1],
+                        trace_id=interrupt_text[2] if len(interrupt_text) > 2 else None,
+                    )
                     interrupt_text = None
 
             if not speak_with_action:
