@@ -884,12 +884,6 @@ async def guide_opening_speech(ctx: Any):
         wait_action_before_return=False,
     )
     visit_type = _parse_first_visit_answer(raw_visit_text)
-    if visit_type == "unknown":
-        raw_visit_text_retry = tts_ask_with_early_stt(ctx.tts_agent, "我没听清，您是第一次来我们园区吗？", ctx.stt_agent, timeout=8, stop_tts_on_answer=True)
-        retry_visit_type = _parse_first_visit_answer(raw_visit_text_retry)
-        if retry_visit_type != "unknown":
-            raw_visit_text = raw_visit_text_retry
-            visit_type = retry_visit_type
 
     if visit_type == "repeat":
         first_visit = False
