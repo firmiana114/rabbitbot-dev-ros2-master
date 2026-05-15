@@ -37,6 +37,21 @@ def _robot_action_chain_log(stage, action_name=None, **fields):
     print(f"[{_provider_timestamp()}] provider动作链路: stage={stage}, action={action_name}{suffix}")
 
 
+def _provider_env_float(name, default):
+    raw_value = os.getenv(name, str(default))
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        print(f"Invalid {name}={raw_value}, use {default}")
+        return float(default)
+
+
+def _robot_arm_http_timeout(action_name):
+    if action_name == "release":
+        return _provider_env_float("RABBITBOT_ARM_RELEASE_HTTP_TIMEOUT", 3.0)
+    return _provider_env_float("RABBITBOT_ARM_ACTION_HTTP_TIMEOUT", 45.0)
+
+
 from agno.models.vllm import vLLM
 
 #from rabbitbot.agents import MapAgent, Brain
@@ -562,13 +577,14 @@ class RobotAgent:
             return
         data = {'task': action_name}
         url = urljoin(self.host_url, 'do_arm_async')
+        timeout_seconds = _robot_arm_http_timeout(action_name)
         total_start = time.perf_counter()
         print(f"Task: do arm {action_name}")
-        _robot_action_chain_log("http_request_prepare", action_name, mode=call_type, url=url)
+        _robot_action_chain_log("http_request_prepare", action_name, mode=call_type, url=url, timeout=timeout_seconds)
         try:
             http_start = time.perf_counter()
-            _robot_action_chain_log("http_post_start", action_name, mode=call_type, url=url)
-            resp = requests.post(url, data=data, timeout=45)
+            _robot_action_chain_log("http_post_start", action_name, mode=call_type, url=url, timeout=timeout_seconds)
+            resp = requests.post(url, data=data, timeout=timeout_seconds)
             http_elapsed = time.perf_counter() - http_start
             _robot_action_chain_log(
                 "http_response_received",
