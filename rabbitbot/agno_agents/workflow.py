@@ -455,7 +455,7 @@ def _do_arm_sync(robot, action_name):
     raise RuntimeError("robot 不支持同步 do_arm 调用")
 
 
-async def _do_arm_during_speech(robot, action_name, speech_func):
+async def _do_arm_during_speech(robot, action_name, speech_func, wait_action_before_return=True):
     action_thread = None
     action_result = None
     action_error = None
@@ -470,6 +470,18 @@ async def _do_arm_during_speech(robot, action_name, speech_func):
         except Exception as exc:
             action_error = exc
 
+    async def finish_action_after_speech():
+        _workflow_action_log("workflow_concurrent_action_join_start", action_name)
+        await asyncio.to_thread(action_thread.join)
+        _workflow_action_log("workflow_concurrent_action_join_done", action_name)
+        if action_error is not None:
+            print(f"动作执行异常: action={action_name}, error={action_error}")
+        else:
+            if isinstance(action_result, dict) and not action_result.get("success", True):
+                print(f"动作回执失败: action={action_name}, result={action_result}")
+
+        await _release_arm_after_concurrent_speech(robot, action_name)
+
     if action_name:
         _workflow_action_log("workflow_concurrent_action_thread_create", action_name)
         action_thread = threading.Thread(target=run_action, daemon=True)
@@ -482,16 +494,11 @@ async def _do_arm_during_speech(robot, action_name, speech_func):
     if action_thread is None:
         return speech_result
 
-    _workflow_action_log("workflow_concurrent_action_join_start", action_name)
-    await asyncio.to_thread(action_thread.join)
-    _workflow_action_log("workflow_concurrent_action_join_done", action_name)
-    if action_error is not None:
-        print(f"动作执行异常: action={action_name}, error={action_error}")
+    if wait_action_before_return:
+        await finish_action_after_speech()
     else:
-        if isinstance(action_result, dict) and not action_result.get("success", True):
-            print(f"动作回执失败: action={action_name}, result={action_result}")
-
-    await _release_arm_after_concurrent_speech(robot, action_name)
+        _workflow_action_log("workflow_concurrent_action_join_background", action_name)
+        asyncio.create_task(finish_action_after_speech())
     return speech_result
 
 
@@ -872,11 +879,13 @@ async def guide_opening_speech(ctx: Any):
             f"{leader_calling}，欢迎您来到我们人形机器人产业园，您是第一次来我们园区吗？",
             ctx.stt_agent,
             timeout=8,
+            stop_tts_on_answer=True,
         ),
+        wait_action_before_return=False,
     )
     visit_type = _parse_first_visit_answer(raw_visit_text)
     if visit_type == "unknown":
-        raw_visit_text_retry = tts_ask_with_early_stt(ctx.tts_agent, "我没听清，您是第一次来我们园区吗？", ctx.stt_agent, timeout=8)
+        raw_visit_text_retry = tts_ask_with_early_stt(ctx.tts_agent, "我没听清，您是第一次来我们园区吗？", ctx.stt_agent, timeout=8, stop_tts_on_answer=True)
         retry_visit_type = _parse_first_visit_answer(raw_visit_text_retry)
         if retry_visit_type != "unknown":
             raw_visit_text = raw_visit_text_retry
@@ -1190,6 +1199,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     "text": "对了，{leader_calling}、各位，我们这里有咖啡，拿铁、美式，您看您各位需要什么？",
                     "listen_key": "coffee_order",
                     "listen_timeout": 8,
+                    "early_listen": True,
                 },
                 {"action": "right_hand_handshake_wrist", "text": "好的，我来给各位安排。", "speak_with_action": True},
             ],
@@ -1367,6 +1377,12 @@ def create_main_workflow(ctx: Any) -> Workflow:
         )
         ctx.docx_pending_answer_latency = None
 
+    def normalize_coffee_answer(text):
+        answer = (text or "").strip()
+        for wrong_text in ["老铁", "拿贴", "拿帖", "拿跌"]:
+            answer = answer.replace(wrong_text, "拿铁")
+        return answer
+
     def is_valid_coffee_answer(text):
         normalized_text = re.sub(r"[\s，。！？?、,.!；;：:\"'“”‘’（）()\[\]【】]+", "", text or "").lower()
         if normalized_text == "":
@@ -1374,12 +1390,28 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
         coffee_keywords = [
             "咖啡", "拿铁", "美式", "热拿铁", "冰拿铁", "热美式", "冰美式",
+            "老铁", "拿贴", "拿帖", "拿跌",
             "都可以", "随便", "任选", "一样", "都行", "可以",
         ]
         no_coffee_keywords = [
             "不喝", "不用", "不要", "不需要", "免了", "算了", "不用了", "不要了",
         ]
         return any(keyword in normalized_text for keyword in coffee_keywords + no_coffee_keywords)
+
+    def accept_docx_listen_answer(listen_key, scene, segment_index, answer):
+        if _is_empty_stt_text(answer):
+            return False
+
+        answer = answer.strip()
+        if listen_key == "coffee_order":
+            answer = normalize_coffee_answer(answer)
+        elif listen_key == "dog_show_confirmation" and not is_valid_dog_show_confirmation(answer):
+            print(f"忽略非机器狗表演确认回答: {answer}")
+            return False
+
+        ctx.docx_script_answers[listen_key] = answer
+        mark_docx_answer_received(listen_key, scene, segment_index, answer)
+        return True
 
     def is_valid_dog_show_confirmation(text):
         normalized_text = normalize_docx_script_control_text(text)
@@ -1419,13 +1451,31 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 await _do_arm_before_speech(ctx.robot, action_name)
 
             text = segment.get("text", "")
+            listen_key = segment.get("listen_key")
+            listen_timeout = int(segment.get("listen_timeout", 8))
+            early_listen = bool(segment.get("early_listen")) and listen_key
             interrupt_text = None
+            listen_answer_handled = False
             if text:
                 def speak_segment():
                     formatted_text = format_docx_script_text(text)
                     log_docx_feedback_start(scene, segment_index, formatted_text)
                     span_token = _profile_start("tts_segment", scene=scene, segment=segment_index, text=formatted_text)
                     try:
+                        if early_listen:
+                            listen_span = _profile_start("listen_answer", listen_key=listen_key, scene=scene, segment=segment_index, timeout=listen_timeout, early=True)
+                            answer = ""
+                            try:
+                                answer = tts_ask_with_early_stt(
+                                    tts_agent,
+                                    formatted_text,
+                                    stt_agent,
+                                    timeout=listen_timeout,
+                                    stop_tts_on_answer=True,
+                                )
+                            finally:
+                                _profile_end(listen_span, listen_key=listen_key, scene=scene, segment=segment_index, early=True, answer=answer)
+                            return ("__DOCX_LISTEN_ANSWER__", answer)
                         return tts_long_text_with_stt_stop(
                             tts_agent,
                             formatted_text,
@@ -1442,6 +1492,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     interrupt_text = await _do_arm_during_speech(ctx.robot, action_name, speak_segment)
                 else:
                     interrupt_text = speak_segment()
+
+                if isinstance(interrupt_text, tuple) and interrupt_text[0] == "__DOCX_LISTEN_ANSWER__":
+                    listen_answer_handled = True
+                    accept_docx_listen_answer(listen_key, scene, segment_index, interrupt_text[1])
+                    interrupt_text = None
 
             if not speak_with_action:
                 await _release_arm_after_speech(ctx.robot, action_name)
@@ -1575,13 +1630,31 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 await _do_arm_before_speech(ctx.robot, action_name)
 
             text = segment.get("text", "")
+            listen_key = segment.get("listen_key")
+            listen_timeout = int(segment.get("listen_timeout", 8))
+            early_listen = bool(segment.get("early_listen")) and listen_key
             interrupt_text = None
+            listen_answer_handled = False
             if text:
                 def speak_segment():
                     formatted_text = format_docx_script_text(text)
                     log_docx_feedback_start(scene, segment_index, formatted_text)
                     span_token = _profile_start("tts_segment", scene=scene, segment=segment_index, text=formatted_text)
                     try:
+                        if early_listen:
+                            listen_span = _profile_start("listen_answer", listen_key=listen_key, scene=scene, segment=segment_index, timeout=listen_timeout, early=True)
+                            answer = ""
+                            try:
+                                answer = tts_ask_with_early_stt(
+                                    tts_agent,
+                                    formatted_text,
+                                    stt_agent,
+                                    timeout=listen_timeout,
+                                    stop_tts_on_answer=True,
+                                )
+                            finally:
+                                _profile_end(listen_span, listen_key=listen_key, scene=scene, segment=segment_index, early=True, answer=answer)
+                            return ("__DOCX_LISTEN_ANSWER__", answer)
                         return tts_long_text_with_stt_stop(
                             tts_agent,
                             formatted_text,
@@ -1599,6 +1672,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 else:
                     interrupt_text = speak_segment()
 
+                if isinstance(interrupt_text, tuple) and interrupt_text[0] == "__DOCX_LISTEN_ANSWER__":
+                    listen_answer_handled = True
+                    accept_docx_listen_answer(listen_key, scene, segment_index, interrupt_text[1])
+                    interrupt_text = None
+
             if not speak_with_action:
                 await _release_arm_after_speech(ctx.robot, action_name)
             if not _is_empty_stt_text(interrupt_text):
@@ -1612,21 +1690,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 _profile_end(step_span, step_index=step_index, scene=scene, status="interrupt")
                 return "interrupt", interrupt_text.strip()
 
-            listen_key = segment.get("listen_key")
-            if listen_key:
-                listen_timeout = int(segment.get("listen_timeout", 8))
+            if listen_key and not listen_answer_handled:
                 listen_span = _profile_start("listen_answer", listen_key=listen_key, scene=scene, segment=segment_index, timeout=listen_timeout)
                 answer = audio_input_execute_timeout(stt_agent, timeout=listen_timeout, text="")
                 _profile_end(listen_span, listen_key=listen_key, scene=scene, segment=segment_index, answer=answer)
-                if not _is_empty_stt_text(answer):
-                    answer = answer.strip()
-                    if listen_key == "coffee_order" and not is_valid_coffee_answer(answer):
-                        print(f"忽略非咖啡相关回答: {answer}")
-                    elif listen_key == "dog_show_confirmation" and not is_valid_dog_show_confirmation(answer):
-                        print(f"忽略非机器狗表演确认回答: {answer}")
-                    else:
-                        ctx.docx_script_answers[listen_key] = answer
-                        mark_docx_answer_received(listen_key, scene, segment_index, answer)
+                accept_docx_listen_answer(listen_key, scene, segment_index, answer)
 
             segment_index += 1
             ctx.docx_script_segment_index = segment_index

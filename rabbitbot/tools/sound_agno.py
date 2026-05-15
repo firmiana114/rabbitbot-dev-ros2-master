@@ -299,7 +299,7 @@ def tts_long_text_with_stt_stop(
     return interrupt_text_holder["text"]
 
 
-def tts_ask_with_early_stt(tts_agent, text, stt_agent, timeout=8, lang="zh"):
+def tts_ask_with_early_stt(tts_agent, text, stt_agent, timeout=8, lang="zh", stop_tts_on_answer=False):
     """在播报问题前启动 STT，避免用户需要等待监听启动后才能回答。"""
     print(f"audio_input early ask: timeout {timeout}")
     audio_input_execute(stt_agent, "start_async", "")
@@ -318,6 +318,9 @@ def tts_ask_with_early_stt(tts_agent, text, stt_agent, timeout=8, lang="zh"):
         audio_input_status = audio_input_execute(stt_agent, "get_status_async")
 
     audio_input_text = _dedupe_stt_utterance(stt_agent, audio_input_text)
+    if stop_tts_on_answer and _is_valid_interrupt_text(audio_input_text):
+        tts_stop(tts_agent)
+        time.sleep(0.1)
     if audio_input_status == "<REC_STOP>" and audio_input_text == "":
         audio_input_text = "<REC_STOP>"
     audio_input_execute(stt_agent, "stop_async")
