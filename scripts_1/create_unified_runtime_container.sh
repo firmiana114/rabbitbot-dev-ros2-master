@@ -4,6 +4,7 @@
 # 默认保留已有统一容器，避免丢失 vLLM 编译缓存；如需重建，设置 RECREATE_CONTAINER=1。
 # 默认前台附加容器输出，接近旧四容器 workflow 体验。
 # 如需后台启动统一容器，设置 ATTACH_AFTER_START=0。
+# 如需把终端输入传给容器内 workflow，设置 RABBITBOT_UNIFIED_ATTACH_STDIN=1。
 # 如需停止旧的四容器释放 host 端口，设置 STOP_LEGACY_CONTAINERS=1。
 
 set -euo pipefail
@@ -17,6 +18,7 @@ CONTAINER_RABBITBOT_DIR="${CONTAINER_RABBITBOT_DIR:-${CONTAINER_PROJECT_ROOT}/ra
 RECREATE_CONTAINER="${RECREATE_CONTAINER:-0}"
 START_AFTER_CREATE="${START_AFTER_CREATE:-1}"
 ATTACH_AFTER_START="${ATTACH_AFTER_START:-1}"
+RABBITBOT_UNIFIED_ATTACH_STDIN="${RABBITBOT_UNIFIED_ATTACH_STDIN:-0}"
 STOP_LEGACY_CONTAINERS="${STOP_LEGACY_CONTAINERS:-0}"
 
 LEGACY_CONTAINERS=(
@@ -58,7 +60,11 @@ start_or_attach_container() {
         else
             log_info "前台启动统一容器：${CONTAINER_NAME}"
             log_info "后续输出会直接显示在当前终端，按 Ctrl+C 会向统一容器转发中断信号"
-            docker start --attach "${CONTAINER_NAME}"
+            start_args=(--attach)
+            if [ "${RABBITBOT_UNIFIED_ATTACH_STDIN}" = "1" ]; then
+                start_args+=(--interactive)
+            fi
+            docker start "${start_args[@]}" "${CONTAINER_NAME}"
         fi
     else
         if container_running "${CONTAINER_NAME}"; then
@@ -107,12 +113,18 @@ if [ -e /dev/snd ]; then
     )
 fi
 
+stdin_args=()
+if [ "${RABBITBOT_UNIFIED_ATTACH_STDIN}" = "1" ]; then
+    stdin_args+=(-i)
+fi
+
 log_info "创建统一容器：${CONTAINER_NAME}"
 docker create \
     --name "${CONTAINER_NAME}" \
     --network host \
     --ipc host \
     --runtime nvidia \
+    "${stdin_args[@]}" \
     "${audio_args[@]}" \
     -e RABBITBOT_DIR="${CONTAINER_RABBITBOT_DIR}" \
     -e RABBITBOT_TTS_ALLOW_BUILTIN="${RABBITBOT_TTS_ALLOW_BUILTIN:-0}" \
