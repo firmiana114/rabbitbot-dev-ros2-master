@@ -107,7 +107,7 @@ if [ "${START_AFTER_CREATE}" = "1" ]; then
     if [ "${ATTACH_AFTER_START}" = "1" ]; then
         log_info "前台启动统一容器：${CONTAINER_NAME}"
         log_info "后续输出会直接显示在当前终端，按 Ctrl+C 会向统一容器转发中断信号"
-        docker start --attach --sig-proxy=true "${CONTAINER_NAME}"
+        docker start --attach "${CONTAINER_NAME}"
     else
         log_info "后台启动统一容器：${CONTAINER_NAME}"
         docker start "${CONTAINER_NAME}" >/dev/null
