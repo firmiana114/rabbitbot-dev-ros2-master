@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # 创建夸父机器人统一运行时实验容器。
 # 默认只创建容器；如需立即启动，设置 START_AFTER_CREATE=1。
+# START_AFTER_CREATE=1 时默认前台附加容器输出，接近旧四容器 workflow 体验。
+# 如需后台启动统一容器，设置 ATTACH_AFTER_START=0。
 # 如需停止旧的四容器释放 host 端口，设置 STOP_LEGACY_CONTAINERS=1。
 
 set -euo pipefail
@@ -13,6 +15,7 @@ MODELS_DIR="${MODELS_DIR:-${PROJECT_ROOT}/models}"
 CONTAINER_RABBITBOT_DIR="${CONTAINER_RABBITBOT_DIR:-${CONTAINER_PROJECT_ROOT}/rabbitbot-dev-ros2-master}"
 RECREATE_CONTAINER="${RECREATE_CONTAINER:-1}"
 START_AFTER_CREATE="${START_AFTER_CREATE:-0}"
+ATTACH_AFTER_START="${ATTACH_AFTER_START:-1}"
 STOP_LEGACY_CONTAINERS="${STOP_LEGACY_CONTAINERS:-0}"
 
 LEGACY_CONTAINERS=(
@@ -101,6 +104,12 @@ docker create \
 log_info "统一容器创建完成：${CONTAINER_NAME}"
 
 if [ "${START_AFTER_CREATE}" = "1" ]; then
-    log_info "启动统一容器：${CONTAINER_NAME}"
-    docker start "${CONTAINER_NAME}" >/dev/null
+    if [ "${ATTACH_AFTER_START}" = "1" ]; then
+        log_info "前台启动统一容器：${CONTAINER_NAME}"
+        log_info "后续输出会直接显示在当前终端，按 Ctrl+C 会向统一容器转发中断信号"
+        docker start --attach --sig-proxy=true "${CONTAINER_NAME}"
+    else
+        log_info "后台启动统一容器：${CONTAINER_NAME}"
+        docker start "${CONTAINER_NAME}" >/dev/null
+    fi
 fi
