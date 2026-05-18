@@ -153,7 +153,7 @@ start_robot_agent() {
         log_success "Robot Agent 已运行"
         return 0
     fi
-    start_background "Robot Agent" "${LOG_DIR}/robot_agent.log" bash -lc "cd '${PROJECT_DIR}' && source scripts/path_env.sh && source /opt/ros/foxy/setup.bash && source \"\${RABBITBOT_VLN_WS_DIR}/install/setup.bash\" && export CUR_DIR=\$(pwd) && cd \"\${RABBITBOT_PYORBBEC_DIR}\" && export PYTHONPATH=\$PYTHONPATH:\$(pwd)/install/lib/ && cd \${CUR_DIR} && export PYTHONPATH=/usr/local/lib:\$(pwd):\${PROJECT_DIR}/py38/lib/python3.8/site-packages:\${PYTHONPATH} && export RABBITBOT_MODEL_SERVER=http://127.0.0.1:8000/v1 && export RABBITBOT_VLN_URL=http://127.0.0.1:8001 && export RABBITBOT_MEMORY_AGENT_URL=http://127.0.0.1:28182 && export REALTIME_STT_BASE_URL=http://localhost:28184/v1 && export REALTIME_TTS_BASE_URL=http://localhost:28185/v1 && export RABBITBOT_STT_AGENT_URL=\${REALTIME_STT_BASE_URL} && export RABBITBOT_TTS_AGENT_URL=\${REALTIME_TTS_BASE_URL} && export RABBITBOT_ROBOT_CAMERA=\${RABBITBOT_ROBOT_CAMERA:-null} && export DEBUG_PROPAGATE_EXCEPTIONS=True && /usr/bin/python3.8 -m uvicorn robot_app:app --host 0.0.0.0 --port 28180 --log-level debug"
+    start_background "Robot Agent" "${LOG_DIR}/robot_agent.log" bash -lc "cd '${PROJECT_DIR}' && export RABBITBOT_ROBOT_CAMERA=\${RABBITBOT_ROBOT_CAMERA:-null} && bash scripts/start_robot_app.bash"
     wait_until "Robot Agent 服务 (28180)" "${WAIT_DEFAULT_SECONDS}" port_open 28180
 }
 
