@@ -21,6 +21,14 @@ from openai_chat_app import (
 
 app = FastAPI()
 
+
+def env_enabled(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 out_device_id = os.environ.get("OUTPUT_DEVICE_INDEX")
 out_device_id = int(out_device_id) if out_device_id and out_device_id.strip() else None
 print(f"out_device_id: {out_device_id}")
@@ -30,10 +38,14 @@ lang = "zh"
 print(f"language: {lang}")
 tts_engine = EspnetTTS(lang=lang, device_id=out_device_id, debug_mode=False)
 tts_engine.init_async_workers()
+preload_fast_sound = env_enabled("RABBITBOT_TTS_FAST_SOUND_PRELOAD", True)
+startup_speech = env_enabled("RABBITBOT_TTS_STARTUP_SPEECH", True)
+print(f"RABBITBOT_TTS_FAST_SOUND_PRELOAD: {preload_fast_sound}")
+print(f"RABBITBOT_TTS_STARTUP_SPEECH: {startup_speech}")
 
 before_text = ""
 
-if True:
+if startup_speech:
     if lang == "zh":
         tts_engine.put_text(f"{before_text}你好，我是智元机二机器人")
         tts_engine.put_text(f"{before_text}正在进行声音测试")
@@ -51,8 +63,9 @@ def normalize_rms(y, target_rms=0.2):   # 0.1 ≈ −20 dBFS
 
 class FastSound(object):
 
-    def __init__(self, tts_engine):
+    def __init__(self, tts_engine, preload=True):
         self.tts_engine = tts_engine
+        self.preload = preload
         self.wav_list = {
             "welcome": [],
             "ready": [],
@@ -67,10 +80,15 @@ class FastSound(object):
             "introguide": [],
             "unknown": [],
         }
+        self.text_list = {stype: [] for stype in self.wav_list}
 
     def add_text(self, text, stype, speed):
-        wav_data = self.tts_engine.text_to_wav(text, speed)
-        self.wav_list[stype].append((text, wav_data))
+        self.text_list[stype].append((text, speed))
+        if self.preload:
+            wav_data = self.tts_engine.text_to_wav(text, speed)
+            self.wav_list[stype].append((text, wav_data))
+        else:
+            print(f"FastSound: 跳过启动预生成 stype={stype}, text={text}")
 
     def add_wav_file(self, filepath, text, stype):
         data, samplerate = sf.read(filepath, dtype='float32')
@@ -81,17 +99,27 @@ class FastSound(object):
         self.tts_engine.sound_wav(data, 16000)
 
     def random_tts(self, stype):
-        wav_lst = self.wav_list[stype]
-        if wav_lst is not None:
-            n = len(wav_lst)
-            rand_num = random.randint(0, n-1)
+        wav_lst = self.wav_list.get(stype, [])
+        text_lst = self.text_list.get(stype, [])
+        if wav_lst:
+            rand_num = random.randint(0, len(wav_lst)-1)
             print(f"FastSound: rand_num {rand_num}")
             text, wav_data =  wav_lst[rand_num]
             if text !=  "，，":
                 self.tts_engine.put_wav(wav_data)
+        elif text_lst:
+            rand_num = random.randint(0, len(text_lst)-1)
+            print(f"FastSound: lazy rand_num {rand_num}")
+            text, speed = text_lst[rand_num]
+            if text !=  "，，":
+                wav_data = self.tts_engine.text_to_wav(text, speed)
+                self.wav_list[stype].append((text, wav_data))
+                self.tts_engine.put_wav(wav_data)
+        else:
+            print(f"FastSound: 未配置音频类型 {stype}")
 
 
-fast_sound = FastSound(tts_engine)
+fast_sound = FastSound(tts_engine, preload=preload_fast_sound)
 NORMAL_SOUND_SPEED = 1.0
 SLOW_SOUND_SPEED = 0.9
 fast_sound.add_text(f"{before_text}欢迎来到智元公司，下面我来带你参观展厅，当然我也可以和你聊聊天。你有什么需要吗？", "welcome", NORMAL_SOUND_SPEED)
@@ -159,10 +187,10 @@ fast_sound.add_text(f"{before_text}这一块你有什么想了解的吗？", "in
 fast_sound.add_text(f"{before_text}你还想了解什么吗？", "introguide", NORMAL_SOUND_SPEED)
 fast_sound.add_text(f"{before_text}你还想让我介绍什么吗？", "introguide", NORMAL_SOUND_SPEED)
 
-if lang == "zh":
+if startup_speech and lang == "zh":
     #tts_engine.put_text(f"{before_text}机器人语音输出模块加载完毕")
     tts_engine.put_text(f"{before_text}机器人语音输出模块加载完毕")
-elif lang == "en":
+elif startup_speech and lang == "en":
     import nltk
     nltk.download('averaged_perceptron_tagger_eng')
     tts_engine.put_text("P4-28: Sound module setup completed")

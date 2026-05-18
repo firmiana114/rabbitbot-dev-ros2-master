@@ -44,18 +44,19 @@ bash scripts_1/create_unified_runtime_container.sh
 | Neo4j | 统一容器内可启动 |
 | VLM | 统一容器内可启动，默认降为 `max_model_len=32768` |
 | Embedding | 统一容器内可启动 |
-| TTS | 仍是完整 workflow 的主要阻塞点 |
-| STT/Memory/Robot/Workflow | 依赖 TTS 阶段通过后继续验证 |
+| TTS | 统一容器默认使用 CPU 和轻量启动，跳过启动时常用语预生成 |
+| STT/Memory/Robot/Workflow | 依赖 TTS 轻量启动后继续验证 |
 
 已知问题：
 
 1. TTS 原实现默认使用 CUDA。单容器内 VLM/Embedding 已占用 GPU 后，TTS CUDA 初始化容易卡住。
 2. 已增加 `RABBITBOT_TTS_DEVICE` 环境变量，旧四容器默认仍使用 `cuda`。
-3. 统一容器默认把 `RABBITBOT_TTS_DEVICE` 设置为 `cpu`，但 CPU 模式会显著拉长 TTS 预热时间；120 秒单独测试仍在预生成常用语，尚未进入 Uvicorn 服务阶段。
-4. 因此当前统一镜像还不能替代四容器稳定架构，只能作为继续压缩镜像和排查资源策略的实验基线。
+3. 统一容器默认把 `RABBITBOT_TTS_DEVICE` 设置为 `cpu`，并设置 `RABBITBOT_TTS_FAST_SOUND_PRELOAD=0`、`RABBITBOT_TTS_STARTUP_SPEECH=0`，避免 CPU 模式在 Uvicorn 监听前同步预生成常用语。
+4. 轻量启动后，常用语会在首次 `fast_sound_*` 请求时惰性生成并缓存；首次播放可能仍有额外延迟。
+5. 因此当前统一镜像还不能替代四容器稳定架构，只能作为继续压缩镜像和排查资源策略的实验基线。
 
 后续优先方向：
 
-1. 给 TTS 增加轻量启动模式，跳过启动时的常用语预生成。
-2. 或把 VLM/Embedding 的 GPU 资源占用继续下调，让 TTS 保持 CUDA。
-3. 再验证 STT、Memory Agent、Robot Agent 和前台 workflow。
+1. 继续验证 STT、Memory Agent、Robot Agent 和前台 workflow。
+2. 评估首次惰性生成常用语的延迟是否可接受。
+3. 或把 VLM/Embedding 的 GPU 资源占用继续下调，让 TTS 保持 CUDA。
