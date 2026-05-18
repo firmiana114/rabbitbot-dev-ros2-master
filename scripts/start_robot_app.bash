@@ -11,6 +11,12 @@ export ROS_HOSTNAME=${ROS_IP}
 
 source py38/bin/activate
 
+ROBOT_PYTHON=py38/bin/python
+if [ "${RABBITBOT_ROBOT_USE_SYSTEM_PY38:-0}" = "1" ]; then
+    ROBOT_PYTHON=/usr/bin/python3.8
+    export PYTHONPATH=$(pwd)/py38/lib/python3.8/site-packages:${PYTHONPATH:-}
+fi
+
 # source /opt/ros/noetic/setup.bash
 source /opt/ros/foxy/setup.bash
 
@@ -43,6 +49,6 @@ export RABBITBOT_ROBOT_CAMERA="${RABBITBOT_ROBOT_CAMERA:-}"
 
 export DEBUG_PROPAGATE_EXCEPTIONS=True
 
-py38/bin/python -m uvicorn robot_app:app --host 0.0.0.0 --port 28180 --log-level debug
+${ROBOT_PYTHON} -m uvicorn robot_app:app --host 0.0.0.0 --port 28180 --log-level debug
 
 #python3 robot_app.py

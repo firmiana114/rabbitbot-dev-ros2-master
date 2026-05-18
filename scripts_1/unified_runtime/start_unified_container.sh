@@ -153,7 +153,7 @@ start_robot_agent() {
         log_success "Robot Agent 已运行"
         return 0
     fi
-    start_background "Robot Agent" "${LOG_DIR}/robot_agent.log" bash -lc "cd '${PROJECT_DIR}' && export RABBITBOT_ROBOT_CAMERA=\${RABBITBOT_ROBOT_CAMERA:-null} && bash scripts/start_robot_app.bash"
+    start_background "Robot Agent" "${LOG_DIR}/robot_agent.log" bash -lc "cd '${PROJECT_DIR}' && export RABBITBOT_ROBOT_CAMERA=\${RABBITBOT_ROBOT_CAMERA:-null} && export RABBITBOT_ROBOT_USE_SYSTEM_PY38=1 && bash scripts/start_robot_app.bash"
     wait_until "Robot Agent 服务 (28180)" "${WAIT_DEFAULT_SECONDS}" port_open 28180
 }
 
