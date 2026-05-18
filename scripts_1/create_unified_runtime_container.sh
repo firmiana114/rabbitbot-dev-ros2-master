@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 创建夸父机器人统一运行时实验容器。
-# 默认只创建容器；如需立即启动，设置 START_AFTER_CREATE=1。
+# 默认创建或复用容器后立即前台启动/附加输出；如只创建不启动，设置 START_AFTER_CREATE=0。
 # 默认保留已有统一容器，避免丢失 vLLM 编译缓存；如需重建，设置 RECREATE_CONTAINER=1。
-# START_AFTER_CREATE=1 时默认前台附加容器输出，接近旧四容器 workflow 体验。
+# 默认前台附加容器输出，接近旧四容器 workflow 体验。
 # 如需后台启动统一容器，设置 ATTACH_AFTER_START=0。
 # 如需停止旧的四容器释放 host 端口，设置 STOP_LEGACY_CONTAINERS=1。
 
@@ -15,7 +15,7 @@ CONTAINER_PROJECT_ROOT="${CONTAINER_PROJECT_ROOT:-/workspace/projects}"
 MODELS_DIR="${MODELS_DIR:-${PROJECT_ROOT}/models}"
 CONTAINER_RABBITBOT_DIR="${CONTAINER_RABBITBOT_DIR:-${CONTAINER_PROJECT_ROOT}/rabbitbot-dev-ros2-master}"
 RECREATE_CONTAINER="${RECREATE_CONTAINER:-0}"
-START_AFTER_CREATE="${START_AFTER_CREATE:-0}"
+START_AFTER_CREATE="${START_AFTER_CREATE:-1}"
 ATTACH_AFTER_START="${ATTACH_AFTER_START:-1}"
 STOP_LEGACY_CONTAINERS="${STOP_LEGACY_CONTAINERS:-0}"
 
