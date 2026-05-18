@@ -57,7 +57,7 @@ export OUTPUT_DEVICE_INDEX=25
 
 #python3 tests/audio/test_long_chat_stop.py
 
-python3 examples/run_kuavo_agno.py --patch
+py310/bin/python examples/run_kuavo_agno.py --patch
 
 #ros2 action send_goal /navi_arm custom_action_interfaces/action/NaviArm "{action_name: '点赞'}"
 #ros2 action send_goal /navi_arm custom_action_interfaces/action/NaviArm "{action_name: '打招呼'}"
