@@ -52,9 +52,10 @@ bash scripts_1/create_unified_runtime_container.sh
 1. TTS 原实现默认使用 CUDA。单容器内 VLM/Embedding 已占用 GPU 后，TTS CUDA 初始化容易卡住。
 2. 已增加 `RABBITBOT_TTS_DEVICE` 环境变量，旧四容器默认仍使用 `cuda`。
 3. 统一容器默认把 `RABBITBOT_TTS_DEVICE` 设置为 `cpu`，并设置 `RABBITBOT_TTS_FAST_SOUND_PRELOAD=0`、`RABBITBOT_TTS_STARTUP_SPEECH=0`，避免 CPU 模式在 Uvicorn 监听前同步预生成常用语。
-4. 统一容器日志默认写入 `logs/unified_runtime`，避免复用旧四容器日志符号链接导致容器内重定向失败。
-5. 轻量启动后，常用语会在首次 `fast_sound_*` 请求时惰性生成并缓存；首次播放可能仍有额外延迟。
-6. 因此当前统一镜像还不能替代四容器稳定架构，只能作为继续压缩镜像和排查资源策略的实验基线。
+4. 项目目录挂载到 `/workspace/projects`，避免 Neo4j 官方镜像把数据卷挂到 `/data` 时遮蔽项目目录。
+5. 统一容器日志默认写入 `logs/unified_runtime`，避免复用旧四容器日志符号链接导致容器内重定向失败。
+6. 轻量启动后，常用语会在首次 `fast_sound_*` 请求时惰性生成并缓存；首次播放可能仍有额外延迟。
+7. 因此当前统一镜像还不能替代四容器稳定架构，只能作为继续压缩镜像和排查资源策略的实验基线。
 
 后续优先方向：
 

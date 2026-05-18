@@ -8,7 +8,9 @@ set -euo pipefail
 IMAGE_NAME="${IMAGE_NAME:-rabbitbot-unified-runtime:20260518}"
 CONTAINER_NAME="${CONTAINER_NAME:-rabbitbot-unified-runtime}"
 PROJECT_ROOT="${PROJECT_ROOT:-/mnt/ssd/navgation/projects}"
+CONTAINER_PROJECT_ROOT="${CONTAINER_PROJECT_ROOT:-/workspace/projects}"
 MODELS_DIR="${MODELS_DIR:-${PROJECT_ROOT}/models}"
+CONTAINER_RABBITBOT_DIR="${CONTAINER_RABBITBOT_DIR:-${CONTAINER_PROJECT_ROOT}/rabbitbot-dev-ros2-master}"
 RECREATE_CONTAINER="${RECREATE_CONTAINER:-1}"
 START_AFTER_CREATE="${START_AFTER_CREATE:-0}"
 STOP_LEGACY_CONTAINERS="${STOP_LEGACY_CONTAINERS:-0}"
@@ -80,6 +82,7 @@ docker create \
     --ipc host \
     --runtime nvidia \
     "${audio_args[@]}" \
+    -e RABBITBOT_DIR="${CONTAINER_RABBITBOT_DIR}" \
     -e RABBITBOT_TTS_ALLOW_BUILTIN="${RABBITBOT_TTS_ALLOW_BUILTIN:-0}" \
     -e RABBITBOT_UNIFIED_TTS_DEVICE="${RABBITBOT_UNIFIED_TTS_DEVICE:-cpu}" \
     -e RABBITBOT_UNIFIED_TTS_FAST_SOUND_PRELOAD="${RABBITBOT_UNIFIED_TTS_FAST_SOUND_PRELOAD:-0}" \
@@ -89,7 +92,7 @@ docker create \
     -e AUTO_START_WORKFLOW="${AUTO_START_WORKFLOW:-1}" \
     -e WAIT_DEFAULT_SECONDS="${WAIT_DEFAULT_SECONDS:-420}" \
     -e WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS:-600}" \
-    -v "${PROJECT_ROOT}:/data" \
+    -v "${PROJECT_ROOT}:${CONTAINER_PROJECT_ROOT}" \
     -v "${MODELS_DIR}:/models" \
     -v rabbitbot_unified_neo4j_data:/var/lib/neo4j/data \
     -v rabbitbot_unified_neo4j_logs:/var/lib/neo4j/logs \

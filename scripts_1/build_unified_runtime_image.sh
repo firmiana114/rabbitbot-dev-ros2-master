@@ -13,7 +13,7 @@ docker build -f docker/unified_runtime/Dockerfile -t "${IMAGE_NAME}" .
 
 echo "[INFO] 运行冒烟检查"
 docker run --rm --network host --runtime nvidia \
-    -v /mnt/ssd/navgation/projects:/data \
+    -v /mnt/ssd/navgation/projects:/workspace/projects \
     -v /mnt/ssd/navgation/projects/models:/models \
     --entrypoint /usr/local/bin/rabbitbot-unified-smoke-check \
     "${IMAGE_NAME}"

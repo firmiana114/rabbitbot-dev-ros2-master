@@ -31,14 +31,14 @@ COPY --from=neo4j /usr/lib/aarch64-linux-gnu/libonig.so.5* /usr/lib/aarch64-linu
 ENV JAVA_HOME=/opt/java/openjdk \
     NEO4J_HOME=/var/lib/neo4j \
     PATH=/var/lib/neo4j/bin:/opt/java/openjdk/bin:/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    RABBITBOT_DIR=/data/rabbitbot-dev-ros2-master \
+    RABBITBOT_DIR=/workspace/projects/rabbitbot-dev-ros2-master \
     RABBITBOT_MODELS_DIR=/models
 
 COPY scripts_1/unified_runtime/start_unified_container.sh /usr/local/bin/rabbitbot-start-unified
 COPY scripts_1/unified_runtime/smoke_check.sh /usr/local/bin/rabbitbot-unified-smoke-check
 
 RUN chmod +x /usr/local/bin/rabbitbot-start-unified /usr/local/bin/rabbitbot-unified-smoke-check \
-    && mkdir -p /data /models /logs /var/lib/neo4j/data /var/lib/neo4j/logs \
+    && mkdir -p /data /workspace/projects /models /logs /var/lib/neo4j/data /var/lib/neo4j/logs \
     && (getent group neo4j >/dev/null || groupadd -g 7474 neo4j) \
     && (id neo4j >/dev/null 2>&1 || useradd -u 7474 -g neo4j -d /var/lib/neo4j -s /usr/sbin/nologin neo4j) \
     && chown -R neo4j:neo4j /var/lib/neo4j
