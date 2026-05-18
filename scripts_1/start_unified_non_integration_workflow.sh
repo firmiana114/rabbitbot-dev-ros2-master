@@ -49,4 +49,4 @@ if [ "${STOP_UNIFIED_CONTAINER}" = "1" ] && [ "${CONTAINER_NAME}" != "rabbitbot-
 fi
 
 cd "${PROJECT_DIR}"
-exec bash scripts_1/create_unified_runtime_container.sh
+exec bash scripts_1/start_unified_integration_workflow.sh

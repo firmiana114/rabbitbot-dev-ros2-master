@@ -32,7 +32,7 @@ AUTO_START_WORKFLOW=0 \
 RABBITBOT_TTS_ALLOW_BUILTIN=1 \
 STOP_LEGACY_CONTAINERS=1 \
 START_AFTER_CREATE=1 \
-bash scripts_1/create_unified_runtime_container.sh
+bash scripts_1/start_unified_integration_workflow.sh
 ```
 
 当前验证状态：

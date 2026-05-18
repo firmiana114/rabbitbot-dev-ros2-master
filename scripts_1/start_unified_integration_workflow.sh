@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 创建夸父机器人统一运行时实验容器。
+# 启动夸父机器人统一容器联调 workflow。
 # 默认创建或复用容器后立即前台启动/附加输出；如只创建不启动，设置 START_AFTER_CREATE=0。
 # 默认保留已有统一容器，避免丢失 vLLM 编译缓存；如需重建，设置 RECREATE_CONTAINER=1。
 # 默认前台附加容器输出，接近旧四容器 workflow 体验。
