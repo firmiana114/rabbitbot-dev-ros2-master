@@ -126,7 +126,7 @@ start_tts() {
         log_success "TTS 已运行"
         return 0
     fi
-    start_background "TTS" "${LOG_DIR}/rabbitbot_tts.log" bash -lc "cd '${PROJECT_DIR}' && export RABBITBOT_TTS_DEVICE=\${RABBITBOT_UNIFIED_TTS_DEVICE:-cpu} && export RABBITBOT_TTS_FAST_SOUND_PRELOAD=\${RABBITBOT_UNIFIED_TTS_FAST_SOUND_PRELOAD:-0} && export RABBITBOT_TTS_STARTUP_SPEECH=\${RABBITBOT_UNIFIED_TTS_STARTUP_SPEECH:-0} && bash scripts/start_tts_app.bash"
+    start_background "TTS" "${LOG_DIR}/rabbitbot_tts.log" bash -lc "cd '${PROJECT_DIR}' && export RABBITBOT_TTS_DEVICE=\${RABBITBOT_UNIFIED_TTS_DEVICE:-cuda} && export RABBITBOT_TTS_FAST_SOUND_PRELOAD=\${RABBITBOT_UNIFIED_TTS_FAST_SOUND_PRELOAD:-0} && export RABBITBOT_TTS_STARTUP_SPEECH=\${RABBITBOT_UNIFIED_TTS_STARTUP_SPEECH:-0} && bash scripts/start_tts_app.bash"
     wait_until "TTS 服务 (28185)" "${WAIT_DEFAULT_SECONDS}" http_ok http://127.0.0.1:28185/docs
 }
 
