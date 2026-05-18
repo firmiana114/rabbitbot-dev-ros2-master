@@ -1,0 +1,61 @@
+# 统一运行时镜像实验
+
+本目录用于实验把 RabbitBot 当前四个运行镜像合并为一个运行时镜像。
+
+当前统一镜像名：
+
+```bash
+rabbitbot-unified-runtime:20260518
+```
+
+合入来源：
+
+| 来源镜像 | 用途 |
+| --- | --- |
+| `navid-rabbitbot:stt-tts-audio-ct2cuda-20260511` | 统一镜像基底、STT/TTS 运行时 |
+| `rabbitbot-vllm:20260511` | VLM/Embedding vLLM 运行时 |
+| `foxy-ros-cam-orb-ubuntu20:rabbitbot-20260511` | ROS Foxy、Robot Agent 所需 Python 3.8 运行时 |
+| `neo4j:5.26-community` | Neo4j 程序、Java、入口依赖 |
+
+构建和冒烟检查：
+
+```bash
+cd /mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master
+bash scripts_1/build_unified_runtime_image.sh
+```
+
+创建统一容器：
+
+```bash
+cd /mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master
+AUTO_START_WORKFLOW=0 \
+RABBITBOT_TTS_ALLOW_BUILTIN=1 \
+STOP_LEGACY_CONTAINERS=1 \
+START_AFTER_CREATE=1 \
+bash scripts_1/create_unified_runtime_container.sh
+```
+
+当前验证状态：
+
+| 项 | 状态 |
+| --- | --- |
+| 镜像构建 | 已通过 |
+| 冒烟检查 | 已通过 |
+| Neo4j | 统一容器内可启动 |
+| VLM | 统一容器内可启动，默认降为 `max_model_len=32768` |
+| Embedding | 统一容器内可启动 |
+| TTS | 仍是完整 workflow 的主要阻塞点 |
+| STT/Memory/Robot/Workflow | 依赖 TTS 阶段通过后继续验证 |
+
+已知问题：
+
+1. TTS 原实现默认使用 CUDA。单容器内 VLM/Embedding 已占用 GPU 后，TTS CUDA 初始化容易卡住。
+2. 已增加 `RABBITBOT_TTS_DEVICE` 环境变量，旧四容器默认仍使用 `cuda`。
+3. 统一容器默认把 `RABBITBOT_TTS_DEVICE` 设置为 `cpu`，但 CPU 模式会显著拉长 TTS 预热时间；120 秒单独测试仍在预生成常用语，尚未进入 Uvicorn 服务阶段。
+4. 因此当前统一镜像还不能替代四容器稳定架构，只能作为继续压缩镜像和排查资源策略的实验基线。
+
+后续优先方向：
+
+1. 给 TTS 增加轻量启动模式，跳过启动时的常用语预生成。
+2. 或把 VLM/Embedding 的 GPU 资源占用继续下调，让 TTS 保持 CUDA。
+3. 再验证 STT、Memory Agent、Robot Agent 和前台 workflow。

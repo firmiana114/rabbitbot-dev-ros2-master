@@ -115,7 +115,7 @@ class CloudTTS(object):
 
 class EspnetTTS(object):
     def __init__(self, lang, device_id, debug_mode=False):
-        self.device = "cuda"
+        self.device = os.getenv("RABBITBOT_TTS_DEVICE", "cuda").strip() or "cuda"
         print(f"EspnetTTS: device {self.device}")
 
         with open('kuavo_configs.json', 'r', encoding='utf-8') as file:
@@ -160,11 +160,11 @@ class EspnetTTS(object):
                         repo_id="hexgrad/Kokoro-82M",
                         config=kokoro_config_path,
                         model=kokoro_model_path,
-                    ).to("cuda").eval()
+                    ).to(self.device).eval()
                     self.pipeline = KPipeline(lang_code='z', repo_id="hexgrad/Kokoro-82M", model=kokoro_model)
                     self.voice = kokoro_voice_path
                 else:
-                    self.pipeline = KPipeline(lang_code='z', device="cuda")
+                    self.pipeline = KPipeline(lang_code='z', device=self.device)
                     self.voice = "zm_yunxi"
                 self.orig_sr = 24000
         else:
