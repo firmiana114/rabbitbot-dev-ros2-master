@@ -18,6 +18,7 @@ COPY --from=workflow /usr/lib/python3.8 /usr/lib/python3.8
 COPY --from=workflow /usr/lib/aarch64-linux-gnu/libpython3.8* /usr/lib/aarch64-linux-gnu/
 COPY --from=workflow /usr/lib/aarch64-linux-gnu/libssl.so.1.1 /usr/lib/aarch64-linux-gnu/
 COPY --from=workflow /usr/lib/aarch64-linux-gnu/libcrypto.so.1.1 /usr/lib/aarch64-linux-gnu/
+COPY --from=workflow /usr/lib/aarch64-linux-gnu/libspdlog.so* /usr/lib/aarch64-linux-gnu/
 
 # Neo4j 复制官方镜像内的程序、入口脚本和 Java 运行时。
 COPY --from=neo4j /var/lib/neo4j /var/lib/neo4j
