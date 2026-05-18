@@ -43,6 +43,6 @@ export RABBITBOT_ROBOT_CAMERA="${RABBITBOT_ROBOT_CAMERA:-}"
 
 export DEBUG_PROPAGATE_EXCEPTIONS=True
 
-python -m uvicorn robot_app:app --host 0.0.0.0 --port 28180 --log-level debug
+py38/bin/python -m uvicorn robot_app:app --host 0.0.0.0 --port 28180 --log-level debug
 
 #python3 robot_app.py
