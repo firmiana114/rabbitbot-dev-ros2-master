@@ -13,4 +13,4 @@ export GRAPHITI_EMBD_MODEL_URL="http://127.0.0.1:8005/v1"
 #cd ~/workspace/rabbitbot && source ./.venv/bin/activate
 #cd ${CUR_DIR}
 
-uvicorn memory_app:app --host 0.0.0.0 --port 28182 --reload --log-level debug
+py310/bin/python -m uvicorn memory_app:app --host 0.0.0.0 --port 28182 --reload --log-level debug
