@@ -4,7 +4,7 @@
 #
 # 前提：
 #   1. STT 服务已经启动，并监听在 28184 端口。
-#   2. 音频容器内已经识别到输入设备，例如 Wireless Mic。
+#   2. STT 服务已经识别到输入设备，例如 Wireless Mic。
 #
 # 用法：
 #   bash scripts_1/listen_stt_and_print.sh

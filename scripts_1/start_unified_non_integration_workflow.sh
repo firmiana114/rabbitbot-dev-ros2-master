@@ -18,7 +18,6 @@
 #   RABBITBOT_WORKFLOW_VERBOSE=1    显示详细调试日志
 #   RECREATE_CONTAINER=1            删除并重建非联调统一容器
 #   STOP_UNIFIED_CONTAINER=0        不自动停止普通统一容器
-#   STOP_LEGACY_CONTAINERS=0        不自动停止旧四容器
 #
 # =============================================================================
 
@@ -37,7 +36,6 @@ export START_AFTER_CREATE="${START_AFTER_CREATE:-1}"
 export ATTACH_AFTER_START="${ATTACH_AFTER_START:-1}"
 export RABBITBOT_UNIFIED_ATTACH_STDIN="${RABBITBOT_UNIFIED_ATTACH_STDIN:-1}"
 export RABBITBOT_TTS_ALLOW_BUILTIN="${RABBITBOT_TTS_ALLOW_BUILTIN:-1}"
-export STOP_LEGACY_CONTAINERS="${STOP_LEGACY_CONTAINERS:-1}"
 
 echo "[INFO] 启动统一容器非联调 workflow：导航点位由终端按回车确认成功"
 echo "[INFO] 项目目录：${PROJECT_DIR}"

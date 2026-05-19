@@ -2,10 +2,8 @@
 # 启动夸父机器人统一容器联调 workflow。
 # 默认创建或复用容器后立即前台启动/附加输出；如只创建不启动，设置 START_AFTER_CREATE=0。
 # 默认保留已有统一容器，避免丢失 vLLM 编译缓存；如需重建，设置 RECREATE_CONTAINER=1。
-# 默认前台附加容器输出，接近旧四容器 workflow 体验。
 # 如需后台启动统一容器，设置 ATTACH_AFTER_START=0。
 # 如需把终端输入传给容器内 workflow，设置 RABBITBOT_UNIFIED_ATTACH_STDIN=1。
-# 如需停止旧的四容器释放 host 端口，设置 STOP_LEGACY_CONTAINERS=1。
 
 set -euo pipefail
 
@@ -19,14 +17,7 @@ RECREATE_CONTAINER="${RECREATE_CONTAINER:-0}"
 START_AFTER_CREATE="${START_AFTER_CREATE:-1}"
 ATTACH_AFTER_START="${ATTACH_AFTER_START:-1}"
 RABBITBOT_UNIFIED_ATTACH_STDIN="${RABBITBOT_UNIFIED_ATTACH_STDIN:-0}"
-STOP_LEGACY_CONTAINERS="${STOP_LEGACY_CONTAINERS:-0}"
 
-LEGACY_CONTAINERS=(
-    vlm
-    navid-vllm-cuda-mic-audio
-    kuavo-agno-projects-only-test
-    neo4j-community
-)
 
 log_info() {
     echo -e "\033[32m[INFO]\033[0m $1"
@@ -84,10 +75,6 @@ fi
 require_dir "${PROJECT_ROOT}"
 require_dir "${MODELS_DIR}"
 
-if [ "${STOP_LEGACY_CONTAINERS}" = "1" ]; then
-    log_warn "将停止旧四容器以释放 host 端口"
-    docker stop "${LEGACY_CONTAINERS[@]}" >/dev/null 2>&1 || true
-fi
 
 if container_exists "${CONTAINER_NAME}"; then
     if [ "${RECREATE_CONTAINER}" = "1" ]; then
