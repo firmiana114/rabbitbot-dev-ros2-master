@@ -992,17 +992,17 @@ async def guide_opening_speech(ctx: Any):
         }
 
     if opening_mode != "full":
-        if say("欢迎您来到我们人形机器人产业园。我是机二，可以带您参观展区，也可以回答您的问题。"):
+        if say("欢迎您来到滨湖复星人形机器人产业园。我是小星，可以带您参观展区，也可以回答您的问题。"):
             return {
-                "leader_calling": "领导",
+                "leader_calling": "亚勤院士",
                 "raw_name_text": pending_user_text,
                 "raw_visit_text": "",
                 "first_visit": True,
                 "start_entity_name": None,
             }
-        say("如果您想开始参观，可以直接告诉我想去哪个板块。", interruptible=False)
+        say("如果您想开始参观，可以直接告诉我。", interruptible=False)
         leader_info = {
-            "leader_calling": "领导",
+            "leader_calling": "亚勤院士",
             "raw_name_text": "",
             "raw_visit_text": "",
             "first_visit": True,
@@ -1011,26 +1011,21 @@ async def guide_opening_speech(ctx: Any):
         ctx.leader_info = leader_info
         return leader_info
 
-    if say("各位领导都到齐了吗？"):
-        return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
-    if say("请问哪位是领导？"):
-        return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
-    if say("请把话筒给领导。"):
-        return {"leader_calling": "领导", "raw_name_text": pending_user_text, "raw_visit_text": "", "first_visit": True, "start_entity_name": None}
-    raw_name_text = tts_ask_with_early_stt(ctx.tts_agent, "领导，您怎么称呼？", ctx.stt_agent, timeout=8)
-    if _is_empty_stt_text(raw_name_text):
-        leader_calling = "领导"
-    else:
-        leader_calling = _extract_leader_calling(raw_name_text)
+    leader_calling = "亚勤院士"
+    raw_name_text = "亚勤院士"
 
-    if await _do_arm_during_speech(ctx.robot, "握手", lambda: say(f"{leader_calling}，您好。")):
+    if say("亚勤院士您好，请把话筒给亚勤院士。"):
+        return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
+    if await _do_arm_during_speech(ctx.robot, "握手", lambda: say("欢迎您来到滨湖复星人形机器人产业园。")):
+        return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
+    if await _do_arm_during_speech(ctx.robot, "打招呼", lambda: say("各位朋友，也欢迎你们！")):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
     raw_visit_text = await _do_arm_during_speech(
         ctx.robot,
         "打招呼",
         lambda: tts_ask_with_early_stt(
             ctx.tts_agent,
-            f"{leader_calling}，欢迎您来到我们人形机器人产业园，您是第一次来我们园区吗？",
+            f"{leader_calling}，请问，您是第一次来我们园区吗？",
             ctx.stt_agent,
             timeout=8,
             stop_tts_on_answer=True,
@@ -1041,14 +1036,14 @@ async def guide_opening_speech(ctx: Any):
 
     if visit_type == "repeat":
         first_visit = False
-        if say("那之前您来的时候，我还没来，我们园区最近做了一些升级，您随我来，我简单的给您介绍一下。"):
+        if say("那之前您来的时候，我还没来，我们园区最近做了一些升级，您随我来，我简单地给您介绍一下。"):
             return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": None}
     else:
         first_visit = True
-        if say("那您随我来，我简单的给您介绍一下园区。"):
+        if say("好的，那您随我来，我简单地给您介绍一下园区。"):
             return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": None}
 
-    start_entity_name = "起始板块"
+    start_entity_name = "点位1"
     start_description = ""
     start_entity = _load_json_entity(start_entity_name)
     if start_entity is not None:
@@ -1339,12 +1334,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
     }
     DOCX_SCRIPT_STEPS = [
         {
-            "scene": "跟随步行",
+            "scene": "点咖啡",
             "entity": DOCX_SCRIPT_POINT_ENTITY["point_2"],
-            "guide": "{leader_calling}、各位，请随我来。",
             "segments": [
                 {
-                    "text": "对了，{leader_calling}、各位，我们这里有咖啡，拿铁、美式，您看您各位需要什么？",
+                    "text": "对了，{leader_calling}、各位，我们给各位准备了咖啡还有其他饮料，我让我的小伙伴给送过来？",
                     "listen_key": "coffee_order",
                     "listen_timeout": 8,
                     "early_listen": True,
@@ -1364,61 +1358,29 @@ def create_main_workflow(ctx: Any) -> Workflow:
             ],
         },
         {
-            "scene": "机器狗表演",
-            "entity": DOCX_SCRIPT_POINT_ENTITY["point_3"],
-            "skip_navigation_if_current": True,
-            "segments": [
-                {
-                    "action": "right_wrist_outside",
-                    "text": "{leader_calling}，您的到来我和我的小伙伴们都非常高兴，他们说要给您表演个节目，您看咱们看个节目，顺便等下咖啡？",
-                    "post_wait_seconds": 0.5,
-                },
-                {"text": "小伙伴们动起来吧！"},
-                {
-                    "text": "那我再给您讲讲我们园区的规划情况：近期我们园区也取得了一些成绩，但是我们正在以“专业化、智能化、生态化”为目标，正在系统推进市级特色园区的创建工作。未来我们园区将继续围绕人形机器人这个产业核心赛道，持续创新、加快项目招引力度、完善产业生态、提升运营服务、做强特色，全力将我们园区打造为长三角具有影响力的人形机器人产业高地。"
-                },
-            ],
-        },
-        {
             "scene": "拿取咖啡",
             "entity": DOCX_SCRIPT_POINT_ENTITY["point_3"],
             "skip_navigation_if_current": True,
             "segments": [
-                {"text": "跳的真好，谢谢小伙伴！"},
-                {"text": "大概就是这些了。"},
                 {
                     "action": "right_wrist_outside",
-                    "text": "{leader_calling}，咖啡已经到了，请各位领导自取。",
+                    "text": "{leader_calling}，咖啡和饮料来了，请您还有各位朋友自取。",
+                },
+                {
+                    "text": "我再给各位介绍一下产业园和清华创新中心的合作成果。相关内容还在补充中，后续我会为各位更新更完整的介绍。",
                 },
             ],
         },
         {
-            "scene": "观看沙盘",
-            "entity": DOCX_SCRIPT_POINT_ENTITY["point_4"],
-            "speak_during_navigation": True,
-            "speak_during_navigation_segments": 1,
-            "segments": [
-                {
-                    "text": "各位领导跟我来，园区占地约217亩，总建筑面积32.8万平方米，总投资12.6亿元，园区采用“两轴四片”设计，以东西生活轴、南北生产轴划分四大产业组团，尤其值得一提的是，我们通力合作，将建设周期从24个月压缩至21个月，提前3个月全面竣工，体现了“滨湖速度”。",
-                },
-                {
-                    "action": "right_wrist_outside",
-                    "text": "这个是我们整个园区的布局沙盘。",
-                },
-            ],
-        },
-        {
-            "scene": "告别并指引小巴方向",
+            "scene": "前往点位5并指引小巴方向",
             "entity": DOCX_SCRIPT_POINT_ENTITY["point_5"],
-            "speak_during_navigation": True,
-            "speak_during_navigation_segments": 3,
             "segments": [
-                {"text": "各位领导，眼见为实，为了让各位领导可以更多的了解我们的园区。"},
                 {
                     "action": "right_wrist_outside",
-                    "text": "我们安排了无人驾驶小巴，也是我的小伙伴，小紫，带各位领导更加深入的了解我们园区。",
+                    "text": "{leader_calling}、各位领导，下面请移步门外。",
                 },
-                {"action": "再见", "text": "各位领导再会！", "speak_with_action": True},
+                {"text": "请各位乘坐无人驾驶小巴车来深入地了解我们园区。"},
+                {"action": "再见", "text": "各位再会！", "speak_with_action": True},
             ],
         },
     ]
