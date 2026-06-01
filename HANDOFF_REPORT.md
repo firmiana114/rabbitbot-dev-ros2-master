@@ -2,50 +2,51 @@
 
 ## 背景和目标
 
-本轮目标是让统一容器的联调和非联调 workflow 共用同一个容器实例，避免 `rabbitbot-unified-runtime` 与 `rabbitbot-unified-runtime-non-integration` 两套容器状态互相分叉。当前工作分支为 `June6_workflow`，项目运行主机为 `AGX-orin-FX`，项目路径为 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`。
+本轮目标是按新的机器人动作字段名更新当前 `June6_workflow` 分支中的六月六日导览 workflow。项目运行主机为 `AGX-orin-FX`，项目路径为 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`。
 
 ## 当前状态
 
 已完成：
 
-- 已将统一容器启动模型改为“基础服务常驻容器 + workflow 按需前台执行”。
-- `scripts_1/start_unified_integration_workflow.sh` 创建容器时固定设置 `AUTO_START_WORKFLOW=0`，容器入口只启动 Neo4j、VLM、Embedding、TTS、STT、Memory Agent、Robot Agent，并保持容器运行。
-- 联调 workflow 现在由宿主机脚本通过 `docker exec` 在 `rabbitbot-unified-runtime` 内前台启动，默认传入 `RABBITBOT_WORKFLOW_NON_INTEGRATION=0`。
-- `scripts_1/start_unified_non_integration_workflow.sh` 现在也默认使用 `rabbitbot-unified-runtime`，并在本次 `docker exec` 中传入 `RABBITBOT_WORKFLOW_NON_INTEGRATION=1`。
-- 非联调模式仍默认启用终端输入转发，导航点位可通过终端回车确认成功。
-- 启动脚本会等待基础服务端口就绪，再启动 workflow，避免 workflow 早于服务可用。
-- 如果发现已有统一容器仍是旧的自启动 workflow 模式，脚本默认会重建为基础服务模式，避免旧环境变量残留。
+- 已将六月六日剧本中的旧动作字段替换为新动作字段名：
+  - `握手` -> `shake_hand`
+  - `打招呼` -> `face_wave`
+  - `right_wrist_outside` -> `right_hand_up`
+  - `right_hand_handshake_wrist` -> `right_hand_up`
+  - `再见` -> `high_wave`
+- 已同步更新动作释放规则：
+  - `shake_hand`、`face_wave`、`high_wave`、`hug` 按说话前动作释放规则处理。
+  - `right_hand_up`、`hands_up` 按说话后动作释放规则处理。
+  - 释放动作字段保持为 `release`。
+- 已保留此前的单容器双模式 unified 启动改造和 STT 灵敏度改造。
 
 未完成：
 
-- 尚未在真实统一容器中启动一轮联调和非联调 workflow 做完整运行验证。
-- 尚未删除历史遗留的 `rabbitbot-unified-runtime-non-integration` 容器；停止脚本仍会兼容清理这个旧容器。
+- 尚未在真实机器人上验证新动作字段是否全部能被 Robot Agent 正确执行。
+- `right_hand_handshake_wrist` 原先用于“好的，我来给各位安排。”这一句的 OK 手势；新字段列表未提供 OK 手势字段，本轮按右手平举 `right_hand_up` 处理。
 
 ## 已验证的事实
 
-- 当前脚本语法检查通过。
-- 单容器双模式的关键环境变量已经改为每次 workflow 启动时传入，而不是依赖 `docker create` 时固化。
-- workflow 日志仍会同步写入 `${RABBITBOT_DIR}/logs/unified_runtime/rabbitbot_workflow_latest.log`。
-- `RUN_WORKFLOW_AFTER_START=0` 可用于只启动基础服务，不启动 workflow。
-- `START_AFTER_CREATE=0` 可用于只创建或复用容器，不启动基础服务和 workflow。
+- 当前分支为 `June6_workflow`。
+- 六月六日剧本中的旧动作字段已经替换为新动作字段。
+- workflow 代码中的动作链路日志会继续打印新动作字段，便于从日志确认实际发送给 Robot Agent 的动作名。
 
 ## 阻塞问题
 
-当前没有代码层面的阻塞。运行验证仍依赖 Orin 上 Docker、统一镜像、音频设备和模型服务可正常启动。
+当前没有代码层面的阻塞。运行层面仍需真实机器人动作服务确认新字段名和动作控制端一致。
 
 ## 建议的下一步
 
-- 先运行 `bash scripts_1/start_unified_integration_workflow.sh`，确认基础服务和联调 workflow 前台输出正常。
-- 再运行 `bash scripts_1/start_unified_non_integration_workflow.sh`，确认仍使用同一个 `rabbitbot-unified-runtime` 容器，并且回车模拟导航成功可用。
-- 如首次运行遇到旧容器被重建，属于预期行为；后续同一个容器会被复用。
-- 如只想提前拉起基础服务，可运行 `RUN_WORKFLOW_AFTER_START=0 bash scripts_1/start_unified_integration_workflow.sh`。
+- 启动非联调 workflow，先确认剧本文本流程不受动作字段替换影响。
+- 启动联调 workflow，逐个观察 `shake_hand`、`face_wave`、`right_hand_up`、`high_wave` 的机器人动作是否正确。
+- 如果“好的，我来给各位安排。”需要恢复 OK 手势，需要由动作服务提供对应的新字段名后再替换 `right_hand_up`。
 
 ## 注意事项
 
-- 现在 `AUTO_START_WORKFLOW` 不再作为容器内自启动 workflow 的开关使用。为了兼容旧习惯，脚本会把 `AUTO_START_WORKFLOW=0` 映射为 `RUN_WORKFLOW_AFTER_START=0`。
-- `RABBITBOT_WORKFLOW_NON_INTEGRATION` 现在由 `docker exec` 本次执行注入，因此同一个容器可以在联调和非联调之间切换。
-- 旧的 `rabbitbot-unified-runtime-non-integration` 容器不再由启动脚本使用，但停止脚本仍可清理它。
+- 本轮只修改动作字段名和释放规则，没有改六月六日剧本文案。
+- `release` 已经是新动作字段名，因此保持不变。
+- `hug` 和 `hands_up` 当前未在六月六日剧本中使用，但已经加入释放规则，方便后续剧本直接使用。
 
 ## 其它信息
 
-本轮修改集中在 `scripts_1/start_unified_integration_workflow.sh` 和 `scripts_1/start_unified_non_integration_workflow.sh`。本轮保持此前 STT 灵敏度修改不变。
+本轮修改集中在 `rabbitbot/agno_agents/workflow.py`。如后续需要同步到其它分支，可 cherry-pick 本轮提交。

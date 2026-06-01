@@ -336,18 +336,16 @@ _profile_summary_reset()
 atexit.register(_profile_summary_print_at_exit)
 
 
-ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"握手", "打招呼", "right_hand_handshake_wrist", "再见"}
-ARM_ACTIONS_NEED_RELEASE_AFTER_SPEECH = {"right_wrist_outside"}
+ARM_ACTIONS_NEED_RELEASE_BEFORE_SPEECH = {"shake_hand", "face_wave", "high_wave", "hug"}
+ARM_ACTIONS_NEED_RELEASE_AFTER_SPEECH = {"right_hand_up", "hands_up"}
 ARM_RELEASE_ACTION = "release"
 ARM_BEFORE_RELEASE_DELAYS = {
-    "握手": 0.0,
+    "shake_hand": 0.0,
 }
 ARM_BEFORE_RELEASE_DELAY_ENV = {
-    "握手": "RABBITBOT_HANDSHAKE_BEFORE_RELEASE_DELAY",
+    "shake_hand": "RABBITBOT_HANDSHAKE_BEFORE_RELEASE_DELAY",
 }
-HAND_GESTURE_COMMANDS = {
-    "right_hand_handshake_wrist": "ok right 800 2000",
-}
+HAND_GESTURE_COMMANDS = {}
 
 
 def _get_hand_gesture_command(action_name):
@@ -1016,13 +1014,13 @@ async def guide_opening_speech(ctx: Any):
 
     if say("亚勤院士您好，请把话筒给亚勤院士。"):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
-    if await _do_arm_during_speech(ctx.robot, "握手", lambda: say("欢迎您来到滨湖复星人形机器人产业园。")):
+    if await _do_arm_during_speech(ctx.robot, "shake_hand", lambda: say("欢迎您来到滨湖复星人形机器人产业园。")):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
-    if await _do_arm_during_speech(ctx.robot, "打招呼", lambda: say("各位朋友，也欢迎你们！")):
+    if await _do_arm_during_speech(ctx.robot, "face_wave", lambda: say("各位朋友，也欢迎你们！")):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
     raw_visit_text = await _do_arm_during_speech(
         ctx.robot,
-        "打招呼",
+        "face_wave",
         lambda: tts_ask_with_early_stt(
             ctx.tts_agent,
             f"{leader_calling}，请问，您是第一次来我们园区吗？",
@@ -1316,15 +1314,15 @@ def create_main_workflow(ctx: Any) -> Workflow:
         "合影板块",
     ]
     SCRIPTED_TOUR_ACTIONS = {
-        "起始板块": "打招呼",
-        "多功能展示区": "right_wrist_outside",
-        "园区历史板块": "right_wrist_outside",
-        "复星集团板块": "right_wrist_outside",
-        "园区布局板块": "right_wrist_outside",
-        "园区介绍板块": "right_wrist_outside",
-        "园区企业介绍板块": "right_wrist_outside",
-        "智慧园区板块": "right_wrist_outside",
-        "合影板块": "再见",
+        "起始板块": "face_wave",
+        "多功能展示区": "right_hand_up",
+        "园区历史板块": "right_hand_up",
+        "复星集团板块": "right_hand_up",
+        "园区布局板块": "right_hand_up",
+        "园区介绍板块": "right_hand_up",
+        "园区企业介绍板块": "right_hand_up",
+        "智慧园区板块": "right_hand_up",
+        "合影板块": "high_wave",
     }
     DOCX_SCRIPT_POINT_ENTITY = {
         "point_2": "点位2",
@@ -1343,7 +1341,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     "listen_timeout": 8,
                     "early_listen": True,
                 },
-                {"action": "right_hand_handshake_wrist", "text": "好的，我来给各位安排。", "speak_with_action": True},
+                {"action": "right_hand_up", "text": "好的，我来给各位安排。", "speak_with_action": True},
             ],
         },
         {
@@ -1363,7 +1361,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             "skip_navigation_if_current": True,
             "segments": [
                 {
-                    "action": "right_wrist_outside",
+                    "action": "right_hand_up",
                     "text": "{leader_calling}，咖啡和饮料来了，请您还有各位朋友自取。",
                 },
                 {
@@ -1376,11 +1374,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
             "entity": DOCX_SCRIPT_POINT_ENTITY["point_5"],
             "segments": [
                 {
-                    "action": "right_wrist_outside",
+                    "action": "right_hand_up",
                     "text": "{leader_calling}、各位领导，下面请移步门外。",
                 },
                 {"text": "请各位乘坐无人驾驶小巴车来深入地了解我们园区。"},
-                {"action": "再见", "text": "各位再会！", "speak_with_action": True},
+                {"action": "high_wave", "text": "各位再会！", "speak_with_action": True},
             ],
         },
     ]
@@ -1916,7 +1914,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         index = getattr(ctx, "scripted_tour_index", 0)
         if index >= len(entity_order):
             ctx.scripted_tour_done = True
-            await _do_arm_async_timed(ctx.robot, "再见")
+            await _do_arm_async_timed(ctx.robot, "high_wave")
             tts_sound(tts_agent, f"{before_text}各位领导再会，欢迎您再次来到我们人形机器人产业园。", "zh")
             tts_wait(tts_agent)
             return "done", SCRIPTED_TOUR_FINISHED
@@ -2302,14 +2300,14 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     go_to_status = await navi_tools.go_to_status()
                     if go_to_status == NavigationStatus.PENDING or go_to_status == NavigationStatus.SUCCEEDED:
                         if action_name is not None:
-                            if action_name  == "握手":
+                            if action_name == "shake_hand":
                                 #await handshake_execute_v2(ctx)
                                 action_with_tts(ctx.robot, action_name, tts_agent, tts_index)
                             else:
                                 action_with_tts(ctx.robot, action_name, tts_agent, tts_index)
                 else:
                     if action_name is not None:
-                        if action_name  == "握手":
+                        if action_name == "shake_hand":
                             #await handshake_execute_v2(ctx)
                             action_with_tts(ctx.robot, action_name, tts_agent, tts_index)
                         else:
@@ -2360,7 +2358,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             if go_to_status == NavigationStatus.PENDING or go_to_status == NavigationStatus.SUCCEEDED:
                 if "自我介绍" in text or "你好" in text or "您好" in text:
                     time.sleep(0.6)
-                    await _do_arm_async_timed(ctx.robot, "打招呼")
+                    await _do_arm_async_timed(ctx.robot, "face_wave")
 
         #out_text = run_response.content
         chat_queue.put(last_chat_text, "机器人")
