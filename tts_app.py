@@ -43,6 +43,14 @@ startup_speech = env_enabled("RABBITBOT_TTS_STARTUP_SPEECH", True)
 print(f"RABBITBOT_TTS_FAST_SOUND_PRELOAD: {preload_fast_sound}")
 print(f"RABBITBOT_TTS_STARTUP_SPEECH: {startup_speech}")
 
+warmup_enabled = env_enabled("RABBITBOT_TTS_WARMUP", True)
+print(f"RABBITBOT_TTS_WARMUP: {warmup_enabled}")
+if warmup_enabled:
+    # 启动阶段静默预热：即使关闭了启动播报(STARTUP_SPEECH)与快捷音预生成(FAST_SOUND_PRELOAD)，
+    # 也在此吸收 jieba/kokoro/librosa 三处首次冷启动，避免首句真实播报延迟约 6~7 秒。无声音输出。
+    # 此处异步 worker 仍空闲，warmup 同步执行不会与合成线程并发使用 kokoro pipeline。
+    tts_engine.warmup()
+
 before_text = ""
 
 if startup_speech:

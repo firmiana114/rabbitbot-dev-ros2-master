@@ -444,6 +444,42 @@ class EspnetTTS(object):
             wav = self.text2speech[self.lang](text)["wav"]
             sf.write(file_path, wav.view(-1).cpu().numpy(), self.text2speech[self.lang].fs, "PCM_16")
 
+    def warmup(self, text="你好，欢迎参观。"):
+        '''启动阶段静默预热：触发 jieba 分词、kokoro 首次推理、librosa 重采样三处一次性冷启动，
+        使首句真实播报不再承担约 6~7 秒的初始化耗时。仅执行合成与重采样，不向音频设备输出，无声音。'''
+        overall_start = time.time()
+        print(f"TTS预热开始: text={text}, engine={self.tts_engine_type}")
+        file_logger.info(f"TTS预热开始: text={text}, engine={self.tts_engine_type}")
+        try:
+            synth_start = time.time()
+            wav = self.text_to_wav(text)
+            synth_elapsed = time.time() - synth_start
+            if wav is None:
+                msg = "TTS预热: 合成返回空 wav，跳过重采样预热"
+                print(msg)
+                file_logger.warning(msg)
+                return
+            if isinstance(wav, torch.Tensor):
+                wav_data = wav.view(-1).cpu().numpy()
+            else:
+                wav_data = wav
+            resample_start = time.time()
+            # 仅触发 librosa(numba/soxr) 的首次 JIT 编译，结果丢弃，不播放
+            librosa.resample(wav_data, orig_sr=self.orig_sr, target_sr=self.target_sr)
+            resample_elapsed = time.time() - resample_start
+            total_elapsed = time.time() - overall_start
+            msg = (
+                f"TTS预热完成: 合成耗时={synth_elapsed:.3f}s, 重采样耗时={resample_elapsed:.3f}s, "
+                f"总耗时={total_elapsed:.3f}s (jieba/kokoro/librosa 冷启动已在启动阶段吸收)"
+            )
+            print(msg)
+            file_logger.info(msg)
+        except Exception as exc:
+            # 预热失败不应阻断服务启动，仅记录异常类型与信息以便排查
+            msg = f"TTS预热失败(不影响服务启动): {type(exc).__name__}: {exc}"
+            print(msg)
+            file_logger.warning(msg, exc_info=True)
+
     def close(self):
         self.put_text(None)
 
