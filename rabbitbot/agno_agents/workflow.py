@@ -1344,7 +1344,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
                 {
                     "text": "对了，{leader_calling}、各位，我们给各位准备了咖啡还有其他饮料，我让我的小伙伴给送过来？",
                     "listen_key": "coffee_order",
-                    "listen_timeout": 8,
+                    # 该问句约 9~10 秒且为边说边听(early_listen)，监听超时从问句开播起算；
+                    # 超时须大于问句时长并留出作答窗口，否则用户听完问句后已无时间作答。
+                    "listen_timeout": 16,
                     "early_listen": True,
                 },
                 {"action": "right_hand_up", "text": "好的，我来给各位安排。", "speak_with_action": True},
