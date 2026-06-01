@@ -2,50 +2,47 @@
 
 ## 背景和目标
 
-本轮目标是按新的机器人动作字段名更新当前 `June6_workflow` 分支中的六月六日导览 workflow。项目运行主机为 `AGX-orin-FX`，项目路径为 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`。
+本轮目标是调整当前 `June6_workflow` 分支中的动作执行策略：除 `shake_hand` 握手外，其它动作都应与说话同步执行，并且不能阻塞或延后 TTS 说话。项目运行主机为 `AGX-orin-FX`，项目路径为 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`。
 
 ## 当前状态
 
 已完成：
 
-- 已将六月六日剧本中的旧动作字段替换为新动作字段名：
-  - `握手` -> `shake_hand`
-  - `打招呼` -> `face_wave`
-  - `right_wrist_outside` -> `right_hand_up`
-  - `right_hand_handshake_wrist` -> `right_hand_up`
-  - `再见` -> `high_wave`
-- 已同步更新动作释放规则：
-  - `shake_hand`、`face_wave`、`high_wave`、`hug` 按说话前动作释放规则处理。
-  - `right_hand_up`、`hands_up` 按说话后动作释放规则处理。
-  - 释放动作字段保持为 `release`。
-- 已保留此前的单容器双模式 unified 启动改造和 STT 灵敏度改造。
+- 新增统一判断 `_should_speak_with_action(action_name, configured=False)`：
+  - 无动作时不并发。
+  - 显式配置 `speak_with_action` 时并发。
+  - 动作不是 `shake_hand` 时默认并发。
+- 已将两个 DOCX 剧本执行循环改为使用统一判断，避免段落漏写 `speak_with_action` 时退回“先动作、再说话”。
+- 已将旧的实体导览路径也改为非握手动作与介绍文本并发执行。
+- 现有动作链路日志继续保留，会记录新动作字段的开始、回执、释放和并发执行阶段。
+- 已保留此前的新动作字段改造、单容器双模式 unified 启动改造和 STT 灵敏度改造。
 
 未完成：
 
-- 尚未在真实机器人上验证新动作字段是否全部能被 Robot Agent 正确执行。
-- `right_hand_handshake_wrist` 原先用于“好的，我来给各位安排。”这一句的 OK 手势；新字段列表未提供 OK 手势字段，本轮按右手平举 `right_hand_up` 处理。
+- 尚未在真实机器人上验证所有非握手动作与 TTS 并发时的体感效果。
+- `shake_hand` 仍允许按调用点显式决定是否与说话并发；本轮只保证非握手动作默认并发。
 
 ## 已验证的事实
 
 - 当前分支为 `June6_workflow`。
-- 六月六日剧本中的旧动作字段已经替换为新动作字段。
-- workflow 代码中的动作链路日志会继续打印新动作字段，便于从日志确认实际发送给 Robot Agent 的动作名。
+- `rabbitbot/agno_agents/workflow.py` 可以通过 Python 编译检查。
+- 现有六月六日剧本动作字段仍使用新字段名：`shake_hand`、`face_wave`、`right_hand_up`、`high_wave`。
 
 ## 阻塞问题
 
-当前没有代码层面的阻塞。运行层面仍需真实机器人动作服务确认新字段名和动作控制端一致。
+当前没有代码层面的阻塞。运行层面仍需真实机器人动作服务验证并发执行是否稳定。
 
 ## 建议的下一步
 
-- 启动非联调 workflow，先确认剧本文本流程不受动作字段替换影响。
-- 启动联调 workflow，逐个观察 `shake_hand`、`face_wave`、`right_hand_up`、`high_wave` 的机器人动作是否正确。
-- 如果“好的，我来给各位安排。”需要恢复 OK 手势，需要由动作服务提供对应的新字段名后再替换 `right_hand_up`。
+- 先运行非联调 workflow，确认文本流程和 STT 打断不受影响。
+- 再运行联调 workflow，重点观察 `face_wave`、`right_hand_up`、`high_wave` 是否在说话期间同时执行。
+- 如某个动作时间过长或释放过早，可继续调整对应释放延迟环境变量。
 
 ## 注意事项
 
-- 本轮只修改动作字段名和释放规则，没有改六月六日剧本文案。
-- `release` 已经是新动作字段名，因此保持不变。
-- `hug` 和 `hands_up` 当前未在六月六日剧本中使用，但已经加入释放规则，方便后续剧本直接使用。
+- 本轮没有修改六月六日剧本文案。
+- 本轮没有改变 `release` 字段名。
+- 如果后续希望 `shake_hand` 也统一不与说话并发，需要单独调整当前开场握手调用点。
 
 ## 其它信息
 

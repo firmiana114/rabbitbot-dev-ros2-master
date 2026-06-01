@@ -348,6 +348,12 @@ ARM_BEFORE_RELEASE_DELAY_ENV = {
 HAND_GESTURE_COMMANDS = {}
 
 
+def _should_speak_with_action(action_name, configured=False):
+    if not action_name:
+        return False
+    return bool(configured) or action_name != "shake_hand"
+
+
 def _get_hand_gesture_command(action_name):
     if not action_name:
         return ""
@@ -1609,7 +1615,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         while segment_index < end_index:
             segment = segments[segment_index]
             action_name = segment.get("action")
-            speak_with_action = bool(segment.get("speak_with_action")) and action_name
+            speak_with_action = _should_speak_with_action(action_name, segment.get("speak_with_action"))
             if action_name and not speak_with_action:
                 await _do_arm_before_speech(ctx.robot, action_name)
 
@@ -1797,7 +1803,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         while segment_index < len(segments):
             segment = segments[segment_index]
             action_name = segment.get("action")
-            speak_with_action = bool(segment.get("speak_with_action")) and action_name
+            speak_with_action = _should_speak_with_action(action_name, segment.get("speak_with_action"))
             if action_name and not speak_with_action:
                 await _do_arm_before_speech(ctx.robot, action_name)
 
@@ -1972,15 +1978,22 @@ def create_main_workflow(ctx: Any) -> Workflow:
             tts_wait(tts_agent)
 
         action_name = SCRIPTED_TOUR_ACTIONS.get(entity_name)
-        if action_name:
-            await _do_arm_before_speech(ctx.robot, action_name)
-
         interrupt_text = None
         description = entity.get("description", "")
         if description:
-            interrupt_text = tts_long_text_with_stt_stop(tts_agent, description, stt_agent, ctx.robot, before_text)
+            def speak_entity_description():
+                return tts_long_text_with_stt_stop(tts_agent, description, stt_agent, ctx.robot, before_text)
 
-        await _release_arm_after_speech(ctx.robot, action_name)
+            if _should_speak_with_action(action_name):
+                interrupt_text = await _do_arm_during_speech(ctx.robot, action_name, speak_entity_description)
+            else:
+                if action_name:
+                    await _do_arm_before_speech(ctx.robot, action_name)
+                interrupt_text = speak_entity_description()
+                await _release_arm_after_speech(ctx.robot, action_name)
+        elif action_name:
+            await _do_arm_before_speech(ctx.robot, action_name)
+            await _release_arm_after_speech(ctx.robot, action_name)
         if not _is_empty_stt_text(interrupt_text):
             print(f"剧本导览被用户打断: entity={entity_name}, text={interrupt_text}")
             return "interrupt", interrupt_text.strip()
