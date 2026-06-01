@@ -38,8 +38,18 @@ cc = OpenCC('t2s')
 # ===== 配置参数 =====
 INPUT_CHANNELS = 1
 SAMPLE_RATE_MODEL = 16000
-SILENCE_SEC = 0.3  # 静音超过0.3秒才算结束
-BUFFER_MAX_SEC = 15
+SILENCE_SEC = float(os.environ.get("STT_SILENCE_SEC", "0.50"))
+BUFFER_MAX_SEC = float(os.environ.get("STT_BUFFER_MAX_SEC", "15"))
+VAD_WINDOW_SEC = float(os.environ.get("STT_VAD_WINDOW_SEC", "0.45"))
+VAD_KEEP_SEC = float(os.environ.get("STT_VAD_KEEP_SEC", "0.12"))
+VAD_SPEECH_THRES = float(os.environ.get("STT_VAD_SPEECH_THRES", "0.18"))
+VAD_START_HITS = int(os.environ.get("STT_VAD_START_HITS", "1"))
+MIN_RMS = float(os.environ.get("STT_MIN_RMS", "0.035"))
+MIN_UTTERANCE_SEC = float(os.environ.get("STT_MIN_UTTERANCE_SEC", "0.45"))
+INPUT_BLOCK_SEC = float(os.environ.get("STT_INPUT_BLOCK_SEC", "0.1"))
+INPUT_LATENCY = os.environ.get("STT_INPUT_LATENCY", "high")
+AUDIO_QUEUE_MAX_CHUNKS = int(os.environ.get("STT_AUDIO_QUEUE_MAX_CHUNKS", "160"))
+INPUT_GAIN = float(os.environ.get("STT_INPUT_GAIN", "0.75"))
 
 in_device_id = os.environ.get("INPUT_DEVICE_INDEX")
 in_device_id = int(in_device_id) if in_device_id and in_device_id.strip() else None
@@ -60,6 +70,14 @@ STT_DEVICE = os.environ.get("STT_DEVICE", "cuda")
 print(f"Loading SenseVoice model from: {SENSEVOICE_MODEL_PATH}")
 print(f"Loading VAD model from: {VAD_MODEL_PATH}")
 print(f"STT device: {STT_DEVICE}")
+print(
+    "STT filter config: "
+    f"silence_sec={SILENCE_SEC}, vad_window_sec={VAD_WINDOW_SEC}, "
+    f"vad_speech_thres={VAD_SPEECH_THRES}, vad_start_hits={VAD_START_HITS}, "
+    f"min_rms={MIN_RMS}, min_utterance_sec={MIN_UTTERANCE_SEC}, "
+    f"input_block_sec={INPUT_BLOCK_SEC}, input_latency={INPUT_LATENCY}, "
+    f"audio_queue_max_chunks={AUDIO_QUEUE_MAX_CHUNKS}, input_gain={INPUT_GAIN}"
+)
 
 import re
 
@@ -120,6 +138,7 @@ class AudioRecorder:
         self.utterance_id = 0
         self.output_utterance_id = 0
         self.has_recognized = False
+        self.speech_hit_count = 0
         
     def reset(self):
         with self.lock:
@@ -130,6 +149,7 @@ class AudioRecorder:
             self.output_text = ""
             self.output_utterance_id = 0
             self.has_recognized = False
+            self.speech_hit_count = 0
             self.recording_complete.clear()
             
     def start(self):
@@ -142,53 +162,76 @@ class AudioRecorder:
     def add_audio(self, audio_16k):
         if not self.is_recording:
             return
-            
+
+        recognize_now = False
         with self.lock:
             self.vad_buffer.extend(audio_16k)
             
             # 如果已经开始录音，持续累积音频
             if self.input_speech:
                 self.audio_buffer.extend(audio_16k)
+                max_samples = int(BUFFER_MAX_SEC * SAMPLE_RATE_MODEL)
+                if len(self.audio_buffer) > max_samples:
+                    self.audio_buffer = self.audio_buffer[-max_samples:]
             
-            # 每 0.35 秒做一次 VAD 检测
-            if len(self.vad_buffer) >= int(0.35 * SAMPLE_RATE_MODEL):
+            # 按窗口做 VAD 检测；门限和音量门控都通过环境变量可调。
+            if len(self.vad_buffer) >= int(VAD_WINDOW_SEC * SAMPLE_RATE_MODEL):
                 vad_input = np.array(self.vad_buffer, dtype=np.float32)
+                vad_rms = float(np.sqrt(np.mean(vad_input.astype(np.float32) ** 2)))
                 segments = vad_model.generate(
                     input=vad_input,
                     chunk_size=160,
-                    speech_thres=0.05  # 降低阈值，更灵敏
+                    speech_thres=VAD_SPEECH_THRES
                 )
-                has_speech = len(segments) > 0 and len(segments[0]["value"]) > 0
+                has_speech = len(segments) > 0 and len(segments[0]["value"]) > 0 and vad_rms >= MIN_RMS
                 current_time = time.time()
                 
                 if has_speech:
+                    self.speech_hit_count += 1
                     # 首次检测到语音，初始化录音缓冲
-                    if not self.input_speech:
+                    if not self.input_speech and self.speech_hit_count >= VAD_START_HITS:
                         self.input_speech = True
-                        print("[SenseVoice] Speech detected, recording...")
+                        print(
+                            "[SenseVoice] Speech detected, recording... "
+                            f"rms={vad_rms:.4f}, threshold={MIN_RMS:.4f}, "
+                            f"hits={self.speech_hit_count}/{VAD_START_HITS}"
+                        )
                         self.audio_buffer = list(self.vad_buffer)
-                    self.last_voice_time = current_time
+                    if self.input_speech:
+                        self.last_voice_time = current_time
                 else:
+                    self.speech_hit_count = 0
                     if self.input_speech:
                         if current_time - self.last_voice_time > SILENCE_SEC:
                             self.input_speech = False
-                            self._recognize()
-                            self.recording_complete.set()
+                            recognize_now = True
                 
-                # 保留最近 0.1 秒作为滑动窗口（供下次 VAD 检测用）
-                self.vad_buffer = self.vad_buffer[-int(0.1 * SAMPLE_RATE_MODEL):]
-                
+                # 保留最近一小段作为滑动窗口，避免切掉起音。
+                self.vad_buffer = self.vad_buffer[-int(VAD_KEEP_SEC * SAMPLE_RATE_MODEL):]
+
+        if recognize_now:
+            self._recognize()
+            self.recording_complete.set()
+
     def _recognize(self):
         if self.has_recognized:
             return
-        if len(self.audio_buffer) < int(0.3 * SAMPLE_RATE_MODEL):
+        if len(self.audio_buffer) < int(MIN_UTTERANCE_SEC * SAMPLE_RATE_MODEL):
+            print(
+                "[SenseVoice] Audio too short, skipping... "
+                f"duration={len(self.audio_buffer)/SAMPLE_RATE_MODEL:.2f}s, "
+                f"min={MIN_UTTERANCE_SEC:.2f}s"
+            )
             return
             
         audio = np.array(self.audio_buffer, dtype=np.float32)
         rms = np.sqrt(np.mean(audio.astype(np.float32) ** 2))
         
-        if rms < 0.02:
-            print("[SenseVoice] Audio too quiet, skipping...")
+        if rms < MIN_RMS:
+            print(
+                "[SenseVoice] Audio too quiet, skipping... "
+                f"rms={rms:.4f}, threshold={MIN_RMS:.4f}"
+            )
             return
             
         print(f"[SenseVoice] Recognizing {len(audio)/SAMPLE_RATE_MODEL:.2f}s audio...")
@@ -228,33 +271,65 @@ class AudioRecorder:
 recorder = AudioRecorder()
 recorder.output_text = ""
 recorder.output_utterance_id = 0
+audio_queue = queue.Queue(maxsize=AUDIO_QUEUE_MAX_CHUNKS)
+audio_drop_count = 0
+last_audio_status_log_time = 0.0
+
+
+def audio_worker():
+    print("[SenseVoice] Audio worker started")
+    while True:
+        audio_48k = audio_queue.get()
+        if audio_48k is None:
+            audio_queue.task_done()
+            break
+        try:
+            if NEED_RESAMPLE:
+                audio_16k = resample_poly(audio_48k, SAMPLE_RATE_MODEL, DEVICE_SR).astype(np.float32)
+            else:
+                audio_16k = audio_48k.astype(np.float32)
+            if INPUT_GAIN != 1.0:
+                audio_16k = (audio_16k * INPUT_GAIN).astype(np.float32)
+            recorder.add_audio(audio_16k)
+        except Exception:
+            traceback.print_exc()
+        finally:
+            audio_queue.task_done()
+
 
 # ===== 音频流回调 =====
 def audio_callback(indata, frames, time_info, status):
+    global audio_drop_count, last_audio_status_log_time
     if status:
-        print(f"Audio status: {status}")
+        now = time.time()
+        if now - last_audio_status_log_time > 5:
+            print(f"Audio status: {status}")
+            last_audio_status_log_time = now
     
-    audio_48k = indata[:, 0].flatten()
-    
-    if NEED_RESAMPLE:
-        audio_16k = resample_poly(audio_48k, SAMPLE_RATE_MODEL, DEVICE_SR).astype(np.float32)
-    else:
-        audio_16k = audio_48k.astype(np.float32)
-        
-    recorder.add_audio(audio_16k)
+    audio_48k = indata[:, 0].copy()
+    try:
+        audio_queue.put_nowait(audio_48k)
+    except queue.Full:
+        audio_drop_count += 1
+        if audio_drop_count == 1 or audio_drop_count % 50 == 0:
+            print(
+                "[SenseVoice] Audio queue full, dropping chunk... "
+                f"drop_count={audio_drop_count}, queue_size={audio_queue.qsize()}"
+            )
 
 
 # ===== 启动音频流 =====
 if in_device_id is not None:
     print(f"Starting audio stream on device {in_device_id}...")
+    threading.Thread(target=audio_worker, daemon=True).start()
     audio_stream = sd.InputStream(
         device=in_device_id,
         channels=INPUT_CHANNELS,
         samplerate=DEVICE_SR,
         callback=audio_callback,
-        blocksize=int(DEVICE_SR * 0.05),
+        blocksize=int(DEVICE_SR * INPUT_BLOCK_SEC),
         dtype='float32',
-        latency='low'
+        latency=INPUT_LATENCY
     )
     audio_stream.start()
 else:
@@ -309,7 +384,7 @@ async def _exec(task, lang, text, timeout):
     elif task == "stop_async":
         recorder.stop()
         # 立即进行一次识别
-        if not recorder.get_text() and len(recorder.audio_buffer) > int(0.3 * SAMPLE_RATE_MODEL):
+        if not recorder.get_text() and len(recorder.audio_buffer) > int(MIN_UTTERANCE_SEC * SAMPLE_RATE_MODEL):
             recorder._recognize()
         out_text = "Stopped"
         
