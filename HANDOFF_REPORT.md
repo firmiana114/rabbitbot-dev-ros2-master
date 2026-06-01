@@ -2,57 +2,50 @@
 
 ## 背景和目标
 
-本轮目标是将当前 `June6_workflow` 分支的 STT 灵敏度调整为与 `tianjin` 分支一致，同时由本轮选择更适合导览现场的静音结束时间。当前项目运行在 Orin 主机 `AGX-orin-FX`，项目路径为 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`。
+本轮目标是让统一容器的联调和非联调 workflow 共用同一个容器实例，避免 `rabbitbot-unified-runtime` 与 `rabbitbot-unified-runtime-non-integration` 两套容器状态互相分叉。当前工作分支为 `June6_workflow`，项目运行主机为 `AGX-orin-FX`，项目路径为 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`。
 
 ## 当前状态
 
 已完成：
 
-- 已确认当前实际存在的对照分支为 `tianjin`，未发现本地 `tianjinworkflow` 分支。
-- 已将 `tianjin` 分支中的 STT 参数化配置、VAD 判定、最小 RMS 过滤、最短语音时长、输入增益、音频队列处理和麦克风音量设置同步到 `June6_workflow`。
-- 已将默认静音结束时间设置为 `0.50` 秒。该值比旧的 `0.30` 秒更不容易截断现场讲话中的短停顿，同时仍保持较快响应。
-- Workflow 打断阈值 `RABBITBOT_INTERRUPT_RMS_THRESHOLD=0.02` 未调整，因为当前分支与 `tianjin` 分支已经一致。
+- 已将统一容器启动模型改为“基础服务常驻容器 + workflow 按需前台执行”。
+- `scripts_1/start_unified_integration_workflow.sh` 创建容器时固定设置 `AUTO_START_WORKFLOW=0`，容器入口只启动 Neo4j、VLM、Embedding、TTS、STT、Memory Agent、Robot Agent，并保持容器运行。
+- 联调 workflow 现在由宿主机脚本通过 `docker exec` 在 `rabbitbot-unified-runtime` 内前台启动，默认传入 `RABBITBOT_WORKFLOW_NON_INTEGRATION=0`。
+- `scripts_1/start_unified_non_integration_workflow.sh` 现在也默认使用 `rabbitbot-unified-runtime`，并在本次 `docker exec` 中传入 `RABBITBOT_WORKFLOW_NON_INTEGRATION=1`。
+- 非联调模式仍默认启用终端输入转发，导航点位可通过终端回车确认成功。
+- 启动脚本会等待基础服务端口就绪，再启动 workflow，避免 workflow 早于服务可用。
+- 如果发现已有统一容器仍是旧的自启动 workflow 模式，脚本默认会重建为基础服务模式，避免旧环境变量残留。
 
 未完成：
 
-- 尚未启动统一容器进行真实麦克风输入验证。
-- 尚未在展览现场环境下确认 `0.50` 秒静音结束时间是否需要继续微调。
+- 尚未在真实统一容器中启动一轮联调和非联调 workflow 做完整运行验证。
+- 尚未删除历史遗留的 `rabbitbot-unified-runtime-non-integration` 容器；停止脚本仍会兼容清理这个旧容器。
 
 ## 已验证的事实
 
-- `scripts/start_stt_funasr_app.bash` 现在默认导出以下 STT 参数：
-  - `STT_SILENCE_SEC=0.50`
-  - `STT_VAD_WINDOW_SEC=0.45`
-  - `STT_VAD_KEEP_SEC=0.12`
-  - `STT_VAD_SPEECH_THRES=0.12`
-  - `STT_VAD_START_HITS=1`
-  - `STT_MIN_RMS=0.022`
-  - `STT_MIN_UTTERANCE_SEC=0.35`
-  - `STT_INPUT_BLOCK_SEC=0.1`
-  - `STT_INPUT_LATENCY=high`
-  - `STT_AUDIO_QUEUE_MAX_CHUNKS=160`
-  - `STT_INPUT_GAIN=1.0`
-  - `STT_INPUT_VOLUME_PERCENT=80`
-- `stt_app_funasr.py` 会打印 STT 过滤参数，便于从服务日志确认实际生效值。
-- `stt_app_funasr.py` 会在检测到语音、跳过过短音频、跳过过低音量音频、音频队列满、音频流状态异常等关键路径输出诊断信息。
+- 当前脚本语法检查通过。
+- 单容器双模式的关键环境变量已经改为每次 workflow 启动时传入，而不是依赖 `docker create` 时固化。
+- workflow 日志仍会同步写入 `${RABBITBOT_DIR}/logs/unified_runtime/rabbitbot_workflow_latest.log`。
+- `RUN_WORKFLOW_AFTER_START=0` 可用于只启动基础服务，不启动 workflow。
+- `START_AFTER_CREATE=0` 可用于只创建或复用容器，不启动基础服务和 workflow。
 
 ## 阻塞问题
 
-当前没有代码层面的阻塞。运行层面仍依赖统一容器、麦克风设备和现场音量环境。
+当前没有代码层面的阻塞。运行验证仍依赖 Orin 上 Docker、统一镜像、音频设备和模型服务可正常启动。
 
 ## 建议的下一步
 
-- 启动统一非联调或联调 workflow，观察 STT 启动日志中的过滤参数是否为预期值。
-- 使用现场麦克风做一次近距离、正常距离和背景噪声下的识别测试。
-- 如果仍然误触发，优先提高 `STT_MIN_RMS` 或 `STT_VAD_SPEECH_THRES`；如果漏听，优先降低 `STT_MIN_RMS` 或提高麦克风输入音量。
-- 如果响应偏慢，可将 `STT_SILENCE_SEC` 从 `0.50` 下调到 `0.45`；如果仍截断短停顿，可上调到 `0.55`。
+- 先运行 `bash scripts_1/start_unified_integration_workflow.sh`，确认基础服务和联调 workflow 前台输出正常。
+- 再运行 `bash scripts_1/start_unified_non_integration_workflow.sh`，确认仍使用同一个 `rabbitbot-unified-runtime` 容器，并且回车模拟导航成功可用。
+- 如首次运行遇到旧容器被重建，属于预期行为；后续同一个容器会被复用。
+- 如只想提前拉起基础服务，可运行 `RUN_WORKFLOW_AFTER_START=0 bash scripts_1/start_unified_integration_workflow.sh`。
 
 ## 注意事项
 
-- `RABBITBOT_INTERRUPT_RMS_THRESHOLD` 属于 workflow 打断检测阈值，不等同于 STT 服务内部的 VAD 和 RMS 阈值。
-- 本轮只调整 STT 灵敏度相关逻辑，没有修改六月六日导览剧本内容。
-- STT 参数均可通过环境变量覆盖，脚本默认值只是统一启动时的基线。
+- 现在 `AUTO_START_WORKFLOW` 不再作为容器内自启动 workflow 的开关使用。为了兼容旧习惯，脚本会把 `AUTO_START_WORKFLOW=0` 映射为 `RUN_WORKFLOW_AFTER_START=0`。
+- `RABBITBOT_WORKFLOW_NON_INTEGRATION` 现在由 `docker exec` 本次执行注入，因此同一个容器可以在联调和非联调之间切换。
+- 旧的 `rabbitbot-unified-runtime-non-integration` 容器不再由启动脚本使用，但停止脚本仍可清理它。
 
 ## 其它信息
 
-本轮修改集中在 `stt_app_funasr.py` 和 `scripts/start_stt_funasr_app.bash`。如果后续需要完全复现 `tianjin` 的行为，需要特别注意本轮刻意将静音结束时间从 `tianjin` 启动脚本默认的 `0.45` 秒调整为了 `0.50` 秒。
+本轮修改集中在 `scripts_1/start_unified_integration_workflow.sh` 和 `scripts_1/start_unified_non_integration_workflow.sh`。本轮保持此前 STT 灵敏度修改不变。
