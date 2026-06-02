@@ -3,7 +3,7 @@
 #
 # 运行模型：
 #   1. 统一容器只作为基础服务底座，容器内入口固定 AUTO_START_WORKFLOW=0。
-#   2. 本脚本等待 Neo4j、VLM、Embedding、TTS、STT、Memory Agent、Robot Agent 就绪。
+#   2. 本脚本等待 Neo4j、TTS、STT、Memory Agent、Robot Agent 就绪；VLM/Embedding 默认跳过。
 #   3. workflow 通过 docker exec 在当前终端前台启动，联调/非联调模式由本次执行传入。
 #
 # 常用环境变量：
@@ -12,6 +12,8 @@
 #   RECREATE_CONTAINER=1            强制删除并重建统一容器
 #   RABBITBOT_WORKFLOW_VERBOSE=1    显示 workflow 详细日志
 #   RABBITBOT_UNIFIED_ATTACH_STDIN=1 将终端输入传给 workflow
+#   RABBITBOT_UNIFIED_START_VLM=1 显式启动 VLM
+#   RABBITBOT_UNIFIED_START_EMBEDDING=1 显式启动 Embedding
 
 set -euo pipefail
 
@@ -32,6 +34,8 @@ RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE:-0}"
 STOP_EXISTING_WORKFLOW="${STOP_EXISTING_WORKFLOW:-1}"
 WAIT_DEFAULT_SECONDS="${WAIT_DEFAULT_SECONDS:-420}"
 WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS:-600}"
+RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM:-0}"
+RABBITBOT_UNIFIED_START_EMBEDDING="${RABBITBOT_UNIFIED_START_EMBEDDING:-0}"
 
 log_info() {
     echo -e "\033[32m[INFO]\033[0m $1"
@@ -111,8 +115,16 @@ wait_until() {
 wait_for_base_services() {
     log_info "等待统一容器基础服务就绪：${CONTAINER_NAME}"
     wait_until "Neo4j Bolt (7687)" "${WAIT_DEFAULT_SECONDS}" port_open 7687
-    wait_until "VLM 服务 (8000)" "${WAIT_VLM_SECONDS}" json_model_ok http://127.0.0.1:8000/v1/models
-    wait_until "Embedding 服务 (8005)" "${WAIT_DEFAULT_SECONDS}" json_model_ok http://127.0.0.1:8005/v1/models
+    if [ "${RABBITBOT_UNIFIED_START_VLM}" = "1" ]; then
+        wait_until "VLM 服务 (8000)" "${WAIT_VLM_SECONDS}" json_model_ok http://127.0.0.1:8000/v1/models
+    else
+        log_info "RABBITBOT_UNIFIED_START_VLM=0，跳过等待 VLM 服务 (8000)"
+    fi
+    if [ "${RABBITBOT_UNIFIED_START_EMBEDDING}" = "1" ]; then
+        wait_until "Embedding 服务 (8005)" "${WAIT_DEFAULT_SECONDS}" json_model_ok http://127.0.0.1:8005/v1/models
+    else
+        log_info "RABBITBOT_UNIFIED_START_EMBEDDING=0，跳过等待 Embedding 服务 (8005)"
+    fi
     wait_until "TTS 服务 (28185)" "${WAIT_DEFAULT_SECONDS}" http_ok http://127.0.0.1:28185/docs
     wait_until "STT 服务 (28184)" "${WAIT_DEFAULT_SECONDS}" http_ok http://127.0.0.1:28184/docs
     wait_until "Memory Agent 服务 (28182)" "${WAIT_DEFAULT_SECONDS}" http_ok http://127.0.0.1:28182/docs
@@ -132,12 +144,25 @@ ensure_compatible_container() {
 
     local container_auto_start
     container_auto_start="$(container_env_value "${CONTAINER_NAME}" AUTO_START_WORKFLOW || true)"
+    local container_start_vlm
+    container_start_vlm="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNIFIED_START_VLM || true)"
+    local container_start_embedding
+    container_start_embedding="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNIFIED_START_EMBEDDING || true)"
+    local incompatible_reason=""
     if [ "${container_auto_start}" != "0" ]; then
+        incompatible_reason="旧的自启动 workflow 模式"
+    elif [ "${container_start_vlm:-未设置}" != "${RABBITBOT_UNIFIED_START_VLM}" ]; then
+        incompatible_reason="VLM 启动配置变化：container=${container_start_vlm:-未设置}, expected=${RABBITBOT_UNIFIED_START_VLM}"
+    elif [ "${container_start_embedding:-未设置}" != "${RABBITBOT_UNIFIED_START_EMBEDDING}" ]; then
+        incompatible_reason="Embedding 启动配置变化：container=${container_start_embedding:-未设置}, expected=${RABBITBOT_UNIFIED_START_EMBEDDING}"
+    fi
+
+    if [ -n "${incompatible_reason}" ]; then
         if [ "${RECREATE_INCOMPATIBLE_CONTAINER}" = "1" ]; then
-            log_warn "已有统一容器仍是旧的自启动 workflow 模式，将重建为基础服务模式：${CONTAINER_NAME}"
+            log_warn "已有统一容器配置不匹配，将重建：${CONTAINER_NAME}，原因：${incompatible_reason}"
             docker rm -f "${CONTAINER_NAME}" >/dev/null
         else
-            log_error "已有统一容器 AUTO_START_WORKFLOW=${container_auto_start:-未设置}，不适合单容器双模式启动。"
+            log_error "已有统一容器配置不匹配：${incompatible_reason}"
             log_error "请设置 RECREATE_CONTAINER=1 或 RECREATE_INCOMPATIBLE_CONTAINER=1 后重试。"
             exit 1
         fi
@@ -175,6 +200,8 @@ create_container_if_needed() {
         -e RABBITBOT_UNIFIED_TTS_FAST_SOUND_PRELOAD="${RABBITBOT_UNIFIED_TTS_FAST_SOUND_PRELOAD:-0}" \
         -e RABBITBOT_UNIFIED_TTS_STARTUP_SPEECH="${RABBITBOT_UNIFIED_TTS_STARTUP_SPEECH:-0}" \
         -e RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE}" \
+        -e RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM}" \
+        -e RABBITBOT_UNIFIED_START_EMBEDDING="${RABBITBOT_UNIFIED_START_EMBEDDING}" \
         -e AUTO_START_WORKFLOW=0 \
         -e WAIT_DEFAULT_SECONDS="${WAIT_DEFAULT_SECONDS}" \
         -e WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS}" \
@@ -182,7 +209,8 @@ create_container_if_needed() {
         -v "${MODELS_DIR}:/models" \
         -v rabbitbot_unified_neo4j_data:/var/lib/neo4j/data \
         -v rabbitbot_unified_neo4j_logs:/var/lib/neo4j/logs \
-        "${IMAGE_NAME}" >/dev/null
+        "${IMAGE_NAME}" \
+        bash "${CONTAINER_RABBITBOT_DIR}/scripts_1/unified_runtime/start_unified_container.sh" >/dev/null
 
     log_info "统一容器创建完成：${CONTAINER_NAME}"
 }

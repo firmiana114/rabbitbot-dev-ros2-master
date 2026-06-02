@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 单容器实验入口：在一个容器内启动 Neo4j、VLM、Embedding、TTS、STT、Memory Agent、Robot Agent 和 workflow。
+# 单容器实验入口：在一个容器内启动 Neo4j、TTS、STT、Memory Agent、Robot Agent 和 workflow；VLM/Embedding 默认跳过。
 
 set -Eeuo pipefail
 
@@ -11,6 +11,8 @@ WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS:-600}"
 AUTO_START_WORKFLOW="${AUTO_START_WORKFLOW:-1}"
 RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE:-0}"
 RABBITBOT_WORKFLOW_NON_INTEGRATION="${RABBITBOT_WORKFLOW_NON_INTEGRATION:-0}"
+RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM:-0}"
+RABBITBOT_UNIFIED_START_EMBEDDING="${RABBITBOT_UNIFIED_START_EMBEDDING:-0}"
 
 mkdir -p "${LOG_DIR}"
 
@@ -90,8 +92,8 @@ start_neo4j() {
 }
 
 start_vlm_and_embedding() {
-    if json_model_ok http://127.0.0.1:8000/v1/models && json_model_ok http://127.0.0.1:8005/v1/models; then
-        log_success "VLM 和 Embedding 已运行"
+    if [ "${RABBITBOT_UNIFIED_START_VLM}" != "1" ] && [ "${RABBITBOT_UNIFIED_START_EMBEDDING}" != "1" ]; then
+        log_info "RABBITBOT_UNIFIED_START_VLM=0 且 RABBITBOT_UNIFIED_START_EMBEDDING=0，跳过 VLM 和 Embedding"
         return 0
     fi
 
@@ -100,25 +102,40 @@ start_vlm_and_embedding() {
     if [ ! -d "${vlm_model}" ] && [ -d "${MODELS_DIR}/Qwen2.5-VL-7B-Instruct" ]; then
         vlm_model="${MODELS_DIR}/Qwen2.5-VL-7B-Instruct"
     fi
-    require_path "${embedding_model}"
-    require_path "${vlm_model}"
 
-    local vlm_gpu_memory_utilization="${RABBITBOT_UNIFIED_VLM_GPU_MEMORY_UTILIZATION:-0.75}"
-    local vlm_max_model_len="${RABBITBOT_UNIFIED_VLM_MAX_MODEL_LEN:-32768}"
-    local vlm_max_num_batched_tokens="${RABBITBOT_UNIFIED_VLM_MAX_NUM_BATCHED_TOKENS:-1024}"
-    start_background "VLM" "${LOG_DIR}/qwen2.5-vl-7b-gptq.log" \
-        /opt/rabbitbot-vllm-venv/bin/python -m vllm.entrypoints.cli.main serve "${vlm_model}" \
-        --seed 42 --gpu-memory-utilization "${vlm_gpu_memory_utilization}" --max-num-seqs 2 \
-        --limit-mm-per-prompt "image=4,video=1" --max-num-batched-tokens "${vlm_max_num_batched_tokens}" \
-        --enable-chunked-prefill --mm-processor-kwargs '{"max_pixels": 802816, "fps": 1}' \
-        --max-model-len "${vlm_max_model_len}" --served-model-name Qwen2.5-VL-7B-Instruct --port 8000
+    if [ "${RABBITBOT_UNIFIED_START_VLM}" = "1" ]; then
+        if json_model_ok http://127.0.0.1:8000/v1/models; then
+            log_success "VLM 已运行"
+        else
+            require_path "${vlm_model}"
+            local vlm_gpu_memory_utilization="${RABBITBOT_UNIFIED_VLM_GPU_MEMORY_UTILIZATION:-0.75}"
+            local vlm_max_model_len="${RABBITBOT_UNIFIED_VLM_MAX_MODEL_LEN:-32768}"
+            local vlm_max_num_batched_tokens="${RABBITBOT_UNIFIED_VLM_MAX_NUM_BATCHED_TOKENS:-1024}"
+            start_background "VLM" "${LOG_DIR}/qwen2.5-vl-7b-gptq.log" \
+                /opt/rabbitbot-vllm-venv/bin/python -m vllm.entrypoints.cli.main serve "${vlm_model}" \
+                --seed 42 --gpu-memory-utilization "${vlm_gpu_memory_utilization}" --max-num-seqs 2 \
+                --limit-mm-per-prompt "image=4,video=1" --max-num-batched-tokens "${vlm_max_num_batched_tokens}" \
+                --enable-chunked-prefill --mm-processor-kwargs '{"max_pixels": 802816, "fps": 1}' \
+                --max-model-len "${vlm_max_model_len}" --served-model-name Qwen2.5-VL-7B-Instruct --port 8000
+            wait_until "VLM 服务 (8000)" "${WAIT_VLM_SECONDS}" json_model_ok http://127.0.0.1:8000/v1/models
+        fi
+    else
+        log_info "RABBITBOT_UNIFIED_START_VLM=0，跳过 VLM"
+    fi
 
-    wait_until "VLM 服务 (8000)" "${WAIT_VLM_SECONDS}" json_model_ok http://127.0.0.1:8000/v1/models
-
-    start_background "Embedding" "${LOG_DIR}/qwen3-embedding-0.6b.log" \
-        /opt/rabbitbot-vllm-venv/bin/python -m vllm.entrypoints.cli.main serve "${embedding_model}" \
-        --served-model-name Qwen3-Embedding-0.6B --task embed --port 8005
-    wait_until "Embedding 服务 (8005)" "${WAIT_DEFAULT_SECONDS}" json_model_ok http://127.0.0.1:8005/v1/models
+    if [ "${RABBITBOT_UNIFIED_START_EMBEDDING}" = "1" ]; then
+        if json_model_ok http://127.0.0.1:8005/v1/models; then
+            log_success "Embedding 已运行"
+        else
+            require_path "${embedding_model}"
+            start_background "Embedding" "${LOG_DIR}/qwen3-embedding-0.6b.log" \
+                /opt/rabbitbot-vllm-venv/bin/python -m vllm.entrypoints.cli.main serve "${embedding_model}" \
+                --served-model-name Qwen3-Embedding-0.6B --task embed --port 8005
+            wait_until "Embedding 服务 (8005)" "${WAIT_DEFAULT_SECONDS}" json_model_ok http://127.0.0.1:8005/v1/models
+        fi
+    else
+        log_info "RABBITBOT_UNIFIED_START_EMBEDDING=0，跳过 Embedding"
+    fi
 }
 
 start_tts() {
