@@ -16,6 +16,7 @@
   - `shake_hand` 现在从 dialogue01 “亚勤院士您好。请把话筒给亚勤院士。”开始时启动。
   - dialogue02 “欢迎您来到滨湖复星人形机器人产业园。”仍在同一个握手动作窗口内播报。
   - `release` 收手仍复用 `_do_arm_during_speech` 的原有流程，在 dialogue02 播报结束后执行。
+- 已将 TTS 默认启动路径切到 Unitree G1 本体音响：未显式设置 `RABBITBOT_TTS_BACKEND` 时默认使用 `unitree`，未显式设置 `RABBITBOT_UNITREE_TTS_VOLUME` 时默认音量为 `100`。
 - 已新增 Unitree G1 本体 TTS 后端：
   - 新增 `scripts/unitree_g1_tts_bridge.cpp`，通过宇树 SDK2 `AudioClient.TtsMaker` 向 G1 发送播报文本。
   - 新增 `scripts/build_unitree_g1_tts_bridge.sh`，自动使用 `/mnt/ssd/navgation/projects/unitree_sdk2` 或 `/workspace/projects/unitree_sdk2` 构建桥接程序。
@@ -42,6 +43,7 @@
 - 已通过检查：`bash -n`、`python3 -m py_compile`、桥接程序构建和帮助输出。
 - 现有本体 TTS 日志会记录初始化、桥接程序构建、请求开始、返回码、耗时、音量、网卡、speaker id 和估算播放时长。
 - 本轮只读调用 Unitree G1 `AudioClient.GetVolume` 查询当前机器人本体音量，返回 `ret=0`、`volume=85`，查询未触发播报，也未调用 `SetVolume`。
+- 本轮已验证默认配置干运行初始化：默认后端为 `unitree`，默认网卡为 `eno1`，默认音量为 `100`；`bash -n` 和 `python3 -m py_compile` 均通过。
 
 ## 阻塞问题
 
@@ -49,9 +51,9 @@
 
 ## 建议的下一步
 
-- 用如下方式启动 unified 模式验证本体播报：`RABBITBOT_TTS_BACKEND=unitree RABBITBOT_UNITREE_TTS_INTERFACE=eno1 RECREATE_CONTAINER=1 bash scripts_1/start_unified_integration_workflow.sh`。
+- 用如下方式启动 unified 模式验证本体播报：`RECREATE_CONTAINER=1 bash scripts_1/start_unified_integration_workflow.sh`；默认会使用 Unitree G1 本体音响、`eno1` 网卡和音量 `100`。
 - 真机跑一次完整开场，重点观察 `shake_hand` 是否从“亚勤院士您好”开始伸手，并确认收手仍发生在“欢迎您来到滨湖复星人形机器人产业园”之后。
-- 当前机器人本体音量实测为 85；如现场觉得过响或过轻，可通过 `RABBITBOT_UNITREE_TTS_VOLUME=85` 调整后重启 TTS/unified 流程。
+- 当前默认音量已改为 100；如现场觉得过响或破音，可通过 `RABBITBOT_UNITREE_TTS_VOLUME=85` 或更低值临时覆盖后重启 TTS/unified 流程。
 - 继续确认 dialogue01 中“上前靠近领导A一步”是否已有机器人动作或底盘接口；当前本轮未实现该靠近动作。
 - 继续按上一轮建议清理重复 `entity` 字段。
 - 明确是否有 OK 手势动作字段；如果有，再把点咖啡后的 `right_hand_up` 改为 OK 动作。
@@ -59,8 +61,9 @@
 
 ## 注意事项
 
-- 默认 TTS 后端仍是 `local`，只有设置 `RABBITBOT_TTS_BACKEND=unitree` 才会走 G1 本体音响。
+- 默认 TTS 后端现在是 `unitree`，默认音量是 `100`；如需回退 Orin 本地外接音箱，需要显式设置 `RABBITBOT_TTS_BACKEND=local`。
 - Unitree 本体 TTS 当前通过 C++ 桥接程序发命令，不依赖 Python 版宇树 SDK。
+- unified 创建容器和容器内启动 TTS 时会打印后端、Unitree 网卡和音量，方便排查是否仍沿用旧容器或旧音量。
 - 如果在容器内使用宿主机构建的桥接程序，`UnitreeG1TTS` 会自动设置 `LD_LIBRARY_PATH` 到 `/workspace/projects/unitree_sdk2/thirdparty/lib/aarch64` 或宿主机对应路径。
 - 如果现场觉得伸手过早或动作时长影响话筒交接，可优先检查动作日志中的 `action=shake_hand` 耗时和随后的 `release` 耗时。
 

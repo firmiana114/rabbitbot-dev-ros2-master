@@ -30,7 +30,7 @@ def env_enabled(name, default):
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-tts_backend = os.environ.get("RABBITBOT_TTS_BACKEND", "local").strip().lower()
+tts_backend = os.environ.get("RABBITBOT_TTS_BACKEND", "unitree").strip().lower()
 if tts_backend in {"g1", "robot"}:
     tts_backend = "unitree"
 print(f"RABBITBOT_TTS_BACKEND: {tts_backend}")

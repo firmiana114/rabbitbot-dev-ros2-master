@@ -36,9 +36,9 @@ WAIT_DEFAULT_SECONDS="${WAIT_DEFAULT_SECONDS:-420}"
 WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS:-600}"
 RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM:-0}"
 RABBITBOT_UNIFIED_START_EMBEDDING="${RABBITBOT_UNIFIED_START_EMBEDDING:-0}"
-RABBITBOT_TTS_BACKEND="${RABBITBOT_TTS_BACKEND:-local}"
+RABBITBOT_TTS_BACKEND="${RABBITBOT_TTS_BACKEND:-unitree}"
 RABBITBOT_UNITREE_TTS_INTERFACE="${RABBITBOT_UNITREE_TTS_INTERFACE:-eno1}"
-RABBITBOT_UNITREE_TTS_VOLUME="${RABBITBOT_UNITREE_TTS_VOLUME:-85}"
+RABBITBOT_UNITREE_TTS_VOLUME="${RABBITBOT_UNITREE_TTS_VOLUME:-100}"
 RABBITBOT_UNITREE_TTS_SPEAKER_ID="${RABBITBOT_UNITREE_TTS_SPEAKER_ID:-0}"
 RABBITBOT_UNITREE_TTS_TIMEOUT="${RABBITBOT_UNITREE_TTS_TIMEOUT:-10}"
 
@@ -157,6 +157,8 @@ ensure_compatible_container() {
     container_tts_backend="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_TTS_BACKEND || true)"
     local container_unitree_interface
     container_unitree_interface="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNITREE_TTS_INTERFACE || true)"
+    local container_unitree_volume
+    container_unitree_volume="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNITREE_TTS_VOLUME || true)"
     local incompatible_reason=""
     if [ "${container_auto_start}" != "0" ]; then
         incompatible_reason="旧的自启动 workflow 模式"
@@ -168,6 +170,8 @@ ensure_compatible_container() {
         incompatible_reason="TTS 后端配置变化：container=${container_tts_backend:-local}, expected=${RABBITBOT_TTS_BACKEND}"
     elif [ "${RABBITBOT_TTS_BACKEND}" = "unitree" ] && [ "${container_unitree_interface:-eno1}" != "${RABBITBOT_UNITREE_TTS_INTERFACE}" ]; then
         incompatible_reason="Unitree TTS 网卡配置变化：container=${container_unitree_interface:-eno1}, expected=${RABBITBOT_UNITREE_TTS_INTERFACE}"
+    elif [ "${RABBITBOT_TTS_BACKEND}" = "unitree" ] && [ "${container_unitree_volume:-85}" != "${RABBITBOT_UNITREE_TTS_VOLUME}" ]; then
+        incompatible_reason="Unitree TTS 音量配置变化：container=${container_unitree_volume:-85}, expected=${RABBITBOT_UNITREE_TTS_VOLUME}"
     fi
 
     if [ -n "${incompatible_reason}" ]; then
@@ -200,6 +204,7 @@ create_container_if_needed() {
     fi
 
     log_info "创建统一容器基础服务底座：${CONTAINER_NAME}"
+    log_info "TTS 默认后端：${RABBITBOT_TTS_BACKEND}，Unitree 网卡：${RABBITBOT_UNITREE_TTS_INTERFACE}，音量：${RABBITBOT_UNITREE_TTS_VOLUME}"
     docker create \
         --name "${CONTAINER_NAME}" \
         --network host \

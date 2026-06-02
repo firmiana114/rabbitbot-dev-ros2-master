@@ -32,7 +32,7 @@ class UnitreeG1TTS:
         self.speaker_id = int(os.getenv("RABBITBOT_UNITREE_TTS_SPEAKER_ID", "0"))
         self.timeout = float(os.getenv("RABBITBOT_UNITREE_TTS_TIMEOUT", "10"))
         self.command_timeout = float(os.getenv("RABBITBOT_UNITREE_TTS_COMMAND_TIMEOUT", str(self.timeout + 5.0)))
-        volume_text = os.getenv("RABBITBOT_UNITREE_TTS_VOLUME", "85").strip()
+        volume_text = os.getenv("RABBITBOT_UNITREE_TTS_VOLUME", "100").strip()
         self.volume = int(volume_text) if volume_text else -1
         self.binary_path = Path(os.getenv("RABBITBOT_UNITREE_TTS_BINARY", "build/unitree_g1_tts_bridge"))
         self.build_script = Path(os.getenv("RABBITBOT_UNITREE_TTS_BUILD_SCRIPT", "scripts/build_unitree_g1_tts_bridge.sh"))
