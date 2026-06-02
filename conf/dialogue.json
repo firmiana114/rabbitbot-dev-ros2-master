@@ -1,12 +1,12 @@
 {
   "variables": {
-    "leader_calling": "亚勤院士"
+    "leader_calling": "姚区长"
   },
   "opening": {
     "short_mode_leader_calling": "{leader_calling}",
-    "short_mode_intro": "欢迎您来到滨湖复星人形机器人产业园。我是小星，可以带您参观展区，也可以回答您的问题。",
+    "short_mode_intro": "欢迎您来到滨湖复星人形机器人产业园。我叫小智，可以带您参观展区，也可以回答您的问题。",
     "short_mode_ready": "如果您想开始参观，可以直接告诉我。",
-    "handshake_greeting": "{leader_calling}您好。",
+    "handshake_greeting": "{leader_calling}您好，我叫小智。",
     "handshake_welcome": "欢迎您来到滨湖复星人形机器人产业园。",
     "group_welcome": "各位朋友，也欢迎你们！",
     "follow_intro": "{leader_calling}，各位，请随我来，我简单的介绍一下园区。"
@@ -79,10 +79,7 @@
       "segments": [
         {
           "action": "right_hand_up",
-          "text": "{leader_calling}、各位领导，下面请移步门外。"
-        },
-        {
-          "text": "请各位乘坐无人驾驶小巴车来深入的了解我们园区。"
+          "text": "{leader_calling}、各位领导，下面请移步门外，乘坐无人驾驶小巴车深入了解我们园区。"
         },
         {
           "action": "high_wave",
