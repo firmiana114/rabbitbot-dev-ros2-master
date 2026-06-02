@@ -1068,28 +1068,10 @@ async def guide_opening_speech(ctx: Any):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
     if await _do_arm_during_speech(ctx.robot, "face_wave", lambda: say("各位朋友，也欢迎你们！")):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
-    raw_visit_text = await _do_arm_during_speech(
-        ctx.robot,
-        "hug",
-        lambda: tts_ask_with_early_stt(
-            ctx.tts_agent,
-            f"{leader_calling}，请问，您是第一次来我们园区吗？",
-            ctx.stt_agent,
-            timeout=8,
-            stop_tts_on_answer=True,
-        ),
-        wait_action_before_return=False,
-    )
-    visit_type = _parse_first_visit_answer(raw_visit_text)
-
-    if visit_type == "repeat":
-        first_visit = False
-        if say("那之前您来的时候，我还没来，我们园区最近做了一些升级，您随我来，我简单的给您介绍一下。"):
-            return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": None}
-    else:
-        first_visit = True
-        if say("好的，那您随我来，我简单的给您介绍一下园区。"):
-            return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": None}
+    raw_visit_text = ""
+    first_visit = True
+    if say("亚勤院士，各位，请随我来，我简单的介绍一下园区。"):
+        return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": None}
 
     start_entity_name = "点位1"
     start_description = ""
@@ -1399,16 +1381,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
             "skip_navigation_if_current": True,
             "segments": [
                 {
-                    "text": "对了，{leader_calling}、各位，我们给各位准备了咖啡还有其他饮料，我让我的小伙伴给送过来？",
-                    "listen_key": "coffee_order",
-                    # 该问句约 9~10 秒且为边说边听(early_listen)，监听超时从问句开播起算；
-                    # 超时须大于问句时长并留出作答窗口，否则用户听完问句后已无时间作答。
-                    "listen_timeout": 16,
-                    "early_listen": True,
+                    "text": "对了，{leader_calling}、各位，我们给各位准备了咖啡还有其他饮料，我让我的小伙伴给送过来。",
                 },
                 {
                     "action": "right_hand_up",
-                    "text": "好的，我来给各位安排。",
+                    "text": "我来给各位安排。",
                     "speak_with_action": True,
                     "background_command": "coffee_delivery_run",
                     "background_command_name": "呼叫AIR咖啡车",
