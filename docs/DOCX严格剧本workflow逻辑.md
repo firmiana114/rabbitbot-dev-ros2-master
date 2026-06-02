@@ -51,7 +51,7 @@ RABBITBOT_WORKFLOW_NON_INTEGRATION=1
 
 DOCX 严格剧本模式使用独立的 `点位1` 到 `点位5` 显式坐标表，不再从 `combined_data.json` 的板块实体读取坐标。普通导览和知识图谱中的板块数据不受影响。
 
-导览台词单独存放在 `docs/june6_guide_dialogue.json`。现场修改台词时优先改这个 JSON 文件，不需要改 `workflow.py`；其中 `variables.leader_calling` 是默认称呼键，台词中的 `{leader_calling}` 会使用该值替换。也可以通过环境变量 `RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE` 指向另一份台词文件。
+导览台词单独存放在 `docs/dialogue.json`。现场修改台词时优先改这个 JSON 文件，不需要改 `workflow.py`；其中 `variables.leader_calling` 是默认称呼键，台词中的 `{leader_calling}` 会使用该值替换。也可以通过环境变量 `RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE` 指向另一份台词文件。
 
 当前点位坐标：
 

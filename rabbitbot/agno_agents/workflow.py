@@ -126,7 +126,7 @@ def _workflow_log(message, verbose=False):
     print(message)
 
 
-DOCX_GUIDE_DIALOGUE_DEFAULT_PATH = Path(__file__).resolve().parents[2] / "docs" / "june6_guide_dialogue.json"
+DOCX_GUIDE_DIALOGUE_DEFAULT_PATH = Path(__file__).resolve().parents[2] / "docs" / "dialogue.json"
 _DOCX_GUIDE_DIALOGUE_CACHE = {"path": None, "data": None}
 
 
