@@ -405,11 +405,17 @@ DOCX_SCRIPT_POINTS = {
             {"x": 0.6906, "y": 0.8284, "z": 0.0262, "ox": -0.0289, "oy": 0.0174, "oz": 0.7443, "ow": -0.6669, "mode": 1},
         ],
     },
+    "1->2过渡点位": {
+        "summary": "1->2过渡点位",
+        "description": "DOCX 剧本点位1前往点位2路径上的过渡点位；该点位只导航，不播报台词。",
+        "location": [
+            {"x": 0.6491, "y": -5.4835, "z": 0.1322, "ox": 0.0042, "oy": -0.0166, "oz": -0.1295, "ow": 0.9914, "mode": 1},
+        ],
+    },
     "点位2": {
         "summary": "点位2",
-        "description": "DOCX 剧本问咖啡点位；从点位1前往点位2时先经过1->2过渡点位。",
+        "description": "DOCX 剧本问咖啡点位；点咖啡台词只允许在该最终点位播报。",
         "location": [
-            {"x": 0.6491, "y": -5.4835, "z": 0.1322, "ox": 0.0042, "oy": -0.0166, "oz": -0.1295, "ow": 0.9914, "mode": 1, "note": "1->2过渡点位"},
             {"x": 3.4825, "y": -6.1762, "z": 0.1261, "ox": 0.0003, "oy": 0.0160, "oz": -0.4162, "ow": -0.9091, "mode": 1},
         ],
     },
@@ -427,12 +433,18 @@ DOCX_SCRIPT_POINTS = {
             {"x": 13.9410, "y": -5.1633, "z": 0.0350, "ox": 0.0140, "oy": 0.0335, "oz": -0.9085, "ow": -0.4163, "mode": 1},
         ],
     },
+    "4->5过渡点位": {
+        "summary": "4->5过渡点位",
+        "description": "DOCX 剧本点位3前往点位5路径上的过渡点位；该点位只导航，不播报台词。",
+        "location": [
+            {"x": 18.1652, "y": -0.4989, "z": -0.0646, "ox": 0.0078, "oy": -0.0295, "oz": 0.0829, "ow": 0.9961, "mode": 1},
+        ],
+    },
     "点位5": {
         "summary": "点位5",
-        "description": "DOCX 剧本告别并指引小巴方向点位；从点位3先到4->5过渡点位，再到达点位5终点。",
+        "description": "DOCX 剧本告别并指引小巴方向点位；告别台词只允许在该最终点位播报。",
         "location": [
-            {"x": 18.1652, "y": -0.4989, "z": -0.0646, "ox": 0.0078, "oy": -0.0295, "oz": 0.0829, "ow": 0.9961, "mode": 1, "note": "4->5过渡点位"},
-            {"x": 23.1982, "y": 0.7291, "z": -0.1104, "ox": 0.0268, "oy": 0.0308, "oz": -0.9758, "ow": -0.2149, "mode": 1, "note": "点位5终点"},
+            {"x": 23.1982, "y": 0.7291, "z": -0.1104, "ox": 0.0268, "oy": 0.0308, "oz": -0.9758, "ow": -0.2149, "mode": 1},
         ],
     },
 }
@@ -1330,14 +1342,21 @@ def create_main_workflow(ctx: Any) -> Workflow:
         "合影板块": "high_wave",
     }
     DOCX_SCRIPT_POINT_ENTITY = {
+        "point_1_to_2_transition": "1->2过渡点位",
         "point_2": "点位2",
         "point_3": "点位3",
         "point_4": "点位4",
+        "point_4_to_5_transition": "4->5过渡点位",
         "point_5": "点位5",
     }
     DOCX_SCRIPT_STEPS = [
         {
-            "scene": "跟随步行",
+            "scene": "1到2过渡",
+            "entity": DOCX_SCRIPT_POINT_ENTITY["point_1_to_2_transition"],
+            "segments": [],
+        },
+        {
+            "scene": "跟随步行到点位2",
             "entity": DOCX_SCRIPT_POINT_ENTITY["point_2"],
             "segments": [],
         },
@@ -1381,6 +1400,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     "text": "我再给各位介绍一下产业园和清华创新中心的合作成果。",
                 },
             ],
+        },
+        {
+            "scene": "前往4到5过渡点",
+            "entity": DOCX_SCRIPT_POINT_ENTITY["point_4_to_5_transition"],
+            "segments": [],
         },
         {
             "scene": "前往点位5",
@@ -1726,6 +1750,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             print(f"DOCX 剧本展点缺少可用导航点位: {entity_name}")
             _profile_end(span_token, step_index=step_index, scene=scene, entity=entity_name, status=NavigationStatus.ABORTED, error="location_missing")
             return NavigationStatus.ABORTED
+        _workflow_log(f"DOCX 剧本导航目标: step={step_index}, scene={scene}, entity={entity_name}, points={len(location_points)}")
 
         guide_text = step.get("guide")
         if guide_text:
