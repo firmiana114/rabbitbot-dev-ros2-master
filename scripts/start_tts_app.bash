@@ -11,15 +11,22 @@ export HF_ENDPOINT=https://hf-mirror.com
 
 source /opt/venv/bin/activate
 
-# TTS_DEVICE_NAME 只在明确指定时作为最高优先级；默认自动选择稳定出现的外接声卡。
-# TTS 实际播放使用 sounddevice，因此启动前也必须用 sounddevice 同源扫描设备。
-# 默认不回退 Orin/HDMI/APE 内置设备，避免服务“正常播放”但现场无声。
-DEVICE_NAME="${TTS_DEVICE_NAME:-}"
-TTS_DEVICE_WAIT_SECONDS="${TTS_DEVICE_WAIT_SECONDS:-20}"
-TTS_DEVICE_STABLE_COUNT="${TTS_DEVICE_STABLE_COUNT:-3}"
-RABBITBOT_TTS_ALLOW_BUILTIN="${RABBITBOT_TTS_ALLOW_BUILTIN:-0}"
+RABBITBOT_TTS_BACKEND="${RABBITBOT_TTS_BACKEND:-local}"
+case "${RABBITBOT_TTS_BACKEND}" in
+    unitree|g1|robot)
+        echo "使用 Unitree G1 本体 TTS 后端，跳过 Orin 本地输出声卡扫描。"
+        export OUTPUT_DEVICE_INDEX=""
+        ;;
+    *)
+        # TTS_DEVICE_NAME 只在明确指定时作为最高优先级；默认自动选择稳定出现的外接声卡。
+        # TTS 实际播放使用 sounddevice，因此启动前也必须用 sounddevice 同源扫描设备。
+        # 默认不回退 Orin/HDMI/APE 内置设备，避免服务“正常播放”但现场无声。
+        DEVICE_NAME="${TTS_DEVICE_NAME:-}"
+        TTS_DEVICE_WAIT_SECONDS="${TTS_DEVICE_WAIT_SECONDS:-20}"
+        TTS_DEVICE_STABLE_COUNT="${TTS_DEVICE_STABLE_COUNT:-3}"
+        RABBITBOT_TTS_ALLOW_BUILTIN="${RABBITBOT_TTS_ALLOW_BUILTIN:-0}"
 
-if [ -d /dev/snd ]; then
+        if [ -d /dev/snd ]; then
     DEVICE_INFO=$(python - <<'PY' 2>/tmp/rabbitbot_tts_sounddevice.err
 import os
 import sys
@@ -151,15 +158,17 @@ else
     echo "未检测到 /dev/snd，无法启动 TTS 输出"
 fi
 
-if [ "${DEVICE_SCAN_STATUS}" -eq 0 ] && [ -n "$DEVICE_INDEX" ]; then
-    export OUTPUT_DEVICE_INDEX=$DEVICE_INDEX
-    echo "使用输出音频设备 ${DEVICE_FOUND_NAME}，index=${OUTPUT_DEVICE_INDEX}"
-else
-    echo "未找到稳定可用的外接输出音频设备，拒绝启动 TTS。"
-    echo "如需临时允许内置声卡回退，请设置 RABBITBOT_TTS_ALLOW_BUILTIN=1。"
-    echo "sounddevice 扫描日志: /tmp/rabbitbot_tts_sounddevice.err"
-    exit 1
-fi
+        if [ "${DEVICE_SCAN_STATUS}" -eq 0 ] && [ -n "$DEVICE_INDEX" ]; then
+            export OUTPUT_DEVICE_INDEX=$DEVICE_INDEX
+            echo "使用输出音频设备 ${DEVICE_FOUND_NAME}，index=${OUTPUT_DEVICE_INDEX}"
+        else
+            echo "未找到稳定可用的外接输出音频设备，拒绝启动 TTS。"
+            echo "如需临时允许内置声卡回退，请设置 RABBITBOT_TTS_ALLOW_BUILTIN=1。"
+            echo "sounddevice 扫描日志: /tmp/rabbitbot_tts_sounddevice.err"
+            exit 1
+        fi
+        ;;
+esac
 
 uvicorn tts_app:app --host 0.0.0.0 --port 28185 --log-level debug --workers 1
 #python tts_app.py

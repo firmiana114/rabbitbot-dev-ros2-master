@@ -1029,9 +1029,12 @@ async def guide_opening_speech(ctx: Any):
     leader_calling = "亚勤院士"
     raw_name_text = "亚勤院士"
 
-    if say("亚勤院士您好。请把话筒给亚勤院士。"):
-        return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
-    if await _do_arm_during_speech(ctx.robot, "shake_hand", lambda: say("欢迎您来到滨湖复星人形机器人产业园。")):
+    def speak_handshake_opening():
+        if say("亚勤院士您好。请把话筒给亚勤院士。"):
+            return True
+        return say("欢迎您来到滨湖复星人形机器人产业园。")
+
+    if await _do_arm_during_speech(ctx.robot, "shake_hand", speak_handshake_opening):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
     if await _do_arm_during_speech(ctx.robot, "face_wave", lambda: say("各位朋友，也欢迎你们！")):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}

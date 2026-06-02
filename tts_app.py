@@ -9,6 +9,7 @@ import random
 import numpy as np
 import soundfile as sf
 from rabbitbot.audio.run_tts_espnet import EspnetTTS
+from rabbitbot.audio.unitree_g1_tts import UnitreeG1TTS
 
 from openai_chat_app import (
     ChatCompletionRequest,
@@ -29,14 +30,23 @@ def env_enabled(name, default):
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-out_device_id = os.environ.get("OUTPUT_DEVICE_INDEX")
-out_device_id = int(out_device_id) if out_device_id and out_device_id.strip() else None
-print(f"out_device_id: {out_device_id}")
+tts_backend = os.environ.get("RABBITBOT_TTS_BACKEND", "local").strip().lower()
+if tts_backend in {"g1", "robot"}:
+    tts_backend = "unitree"
+print(f"RABBITBOT_TTS_BACKEND: {tts_backend}")
 
-print("Initilize EspnetTTS ...")
 lang = "zh"
 print(f"language: {lang}")
-tts_engine = EspnetTTS(lang=lang, device_id=out_device_id, debug_mode=False)
+if tts_backend == "unitree":
+    out_device_id = None
+    print("Initilize UnitreeG1TTS ...")
+    tts_engine = UnitreeG1TTS(lang=lang)
+else:
+    out_device_id = os.environ.get("OUTPUT_DEVICE_INDEX")
+    out_device_id = int(out_device_id) if out_device_id and out_device_id.strip() else None
+    print(f"out_device_id: {out_device_id}")
+    print("Initilize EspnetTTS ...")
+    tts_engine = EspnetTTS(lang=lang, device_id=out_device_id, debug_mode=False)
 tts_engine.init_async_workers()
 preload_fast_sound = env_enabled("RABBITBOT_TTS_FAST_SOUND_PRELOAD", True)
 startup_speech = env_enabled("RABBITBOT_TTS_STARTUP_SPEECH", True)
@@ -73,7 +83,9 @@ class FastSound(object):
 
     def __init__(self, tts_engine, preload=True):
         self.tts_engine = tts_engine
-        self.preload = preload
+        self.preload = preload and getattr(tts_engine, "supports_wav_output", True)
+        if preload and not self.preload:
+            print("FastSound: 当前 TTS 后端不支持本地 wav 预生成，已切换为文本直发模式")
         self.wav_list = {
             "welcome": [],
             "ready": [],
@@ -120,9 +132,13 @@ class FastSound(object):
             print(f"FastSound: lazy rand_num {rand_num}")
             text, speed = text_lst[rand_num]
             if text !=  "，，":
-                wav_data = self.tts_engine.text_to_wav(text, speed)
-                self.wav_list[stype].append((text, wav_data))
-                self.tts_engine.put_wav(wav_data)
+                if getattr(self.tts_engine, "supports_wav_output", True):
+                    wav_data = self.tts_engine.text_to_wav(text, speed)
+                    self.wav_list[stype].append((text, wav_data))
+                    self.tts_engine.put_wav(wav_data)
+                else:
+                    print(f"FastSound: 当前 TTS 后端直接播报文本 stype={stype}, text={text}")
+                    self.tts_engine.put_text(text)
         else:
             print(f"FastSound: 未配置音频类型 {stype}")
 

@@ -8,6 +8,8 @@
 !*.sh
 !*.bash
 !*.launch.py
+!*.cpp
+!*.hpp
 
 # Project metadata, configs, and docs
 !.gitignore
