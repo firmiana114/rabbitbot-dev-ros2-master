@@ -41,6 +41,7 @@
 - 通过 `UnitreeG1TTS` Python 后端发送“后端测试”已成功返回 `ret=0`，并完成本地估算等待。
 - 已通过检查：`bash -n`、`python3 -m py_compile`、桥接程序构建和帮助输出。
 - 现有本体 TTS 日志会记录初始化、桥接程序构建、请求开始、返回码、耗时、音量、网卡、speaker id 和估算播放时长。
+- 本轮只读调用 Unitree G1 `AudioClient.GetVolume` 查询当前机器人本体音量，返回 `ret=0`、`volume=85`，查询未触发播报，也未调用 `SetVolume`。
 
 ## 阻塞问题
 
@@ -50,7 +51,7 @@
 
 - 用如下方式启动 unified 模式验证本体播报：`RABBITBOT_TTS_BACKEND=unitree RABBITBOT_UNITREE_TTS_INTERFACE=eno1 RECREATE_CONTAINER=1 bash scripts_1/start_unified_integration_workflow.sh`。
 - 真机跑一次完整开场，重点观察 `shake_hand` 是否从“亚勤院士您好”开始伸手，并确认收手仍发生在“欢迎您来到滨湖复星人形机器人产业园”之后。
-- 验证本体 TTS 播报音量是否合适；可通过 `RABBITBOT_UNITREE_TTS_VOLUME=85` 调整。
+- 当前机器人本体音量实测为 85；如现场觉得过响或过轻，可通过 `RABBITBOT_UNITREE_TTS_VOLUME=85` 调整后重启 TTS/unified 流程。
 - 继续确认 dialogue01 中“上前靠近领导A一步”是否已有机器人动作或底盘接口；当前本轮未实现该靠近动作。
 - 继续按上一轮建议清理重复 `entity` 字段。
 - 明确是否有 OK 手势动作字段；如果有，再把点咖啡后的 `right_hand_up` 改为 OK 动作。
