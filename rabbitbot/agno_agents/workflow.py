@@ -126,15 +126,27 @@ def _workflow_log(message, verbose=False):
     print(message)
 
 
-DOCX_GUIDE_DIALOGUE_DEFAULT_PATH = Path(__file__).resolve().parents[2] / "conf" / "dialogue.json"
+DOCX_GUIDE_DIALOGUE_DIR = Path(__file__).resolve().parents[2] / "conf"
+DOCX_GUIDE_DIALOGUE_DEFAULT_INDEX = "0"
 _DOCX_GUIDE_DIALOGUE_CACHE = {"path": None, "data": None}
+
+
+def _docx_guide_dialogue_index():
+    raw_index = os.getenv(
+        "RABBITBOT_DIALOGUE_INDEX",
+        os.getenv("RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX", DOCX_GUIDE_DIALOGUE_DEFAULT_INDEX),
+    ).strip()
+    if not re.fullmatch(r"[0-9]+", raw_index):
+        _workflow_log(f"DOCX 导览台词序号非法: RABBITBOT_DIALOGUE_INDEX={raw_index!r}")
+        raise ValueError(f"DOCX 导览台词序号必须是数字: {raw_index!r}")
+    return raw_index
 
 
 def _docx_guide_dialogue_path():
     configured_path = os.getenv("RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE", "").strip()
     if configured_path:
         return Path(configured_path)
-    return DOCX_GUIDE_DIALOGUE_DEFAULT_PATH
+    return DOCX_GUIDE_DIALOGUE_DIR / f"dialogue_{_docx_guide_dialogue_index()}.json"
 
 
 def _load_docx_guide_dialogue():
@@ -174,9 +186,11 @@ def _load_docx_guide_dialogue():
     leader_calling = str(variables.get("leader_calling") or "").strip()
     _DOCX_GUIDE_DIALOGUE_CACHE["path"] = dialogue_path
     _DOCX_GUIDE_DIALOGUE_CACHE["data"] = data
+    configured_path = os.getenv("RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE", "").strip()
+    dialogue_source = "file_env" if configured_path else f"index={_docx_guide_dialogue_index()}"
     _workflow_log(
         "DOCX 导览台词文件加载完成: "
-        f"path={dialogue_path}, steps={len(steps)}, segments={segment_count}, "
+        f"source={dialogue_source}, path={dialogue_path}, steps={len(steps)}, segments={segment_count}, "
         f"leader_calling={leader_calling or '未配置'}, elapsed={elapsed_seconds:.3f}s"
     )
     return data
