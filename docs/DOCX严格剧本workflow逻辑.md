@@ -53,6 +53,8 @@ DOCX 严格剧本模式使用独立的 `点位1` 到 `点位5` 显式坐标表�
 
 导览台词单独存放在 `conf/dialogue_<序号>.json`，当前默认文件为 `conf/dialogue_0.json`。启动 workflow 时可通过 `RABBITBOT_DIALOGUE_INDEX=2` 选择 `conf/dialogue_2.json`；如果需要直接指定完整路径，也可以继续使用 `RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE=/path/to/dialogue.json`。其中 `variables.leader_calling` 是默认称呼键，台词中的 `{leader_calling}` 会使用该值替换。
 
+`conf/dialogue*` 前缀台词文件是现场本地配置，已被 `.gitignore` 忽略，不纳入版本管理；`conf` 目录没有被整体忽略，非 dialogue 前缀的配置文件仍可提交。
+
 当前点位坐标：
 
 ```text

@@ -31,6 +31,10 @@
 !docker-compose*.yml
 !Makefile
 
+# Local workflow configuration files
+!conf/**
+conf/dialogue*
+
 # Python caches and build outputs
 __pycache__/
 *.py[cod]
