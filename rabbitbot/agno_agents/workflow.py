@@ -1037,7 +1037,7 @@ async def guide_opening_speech(ctx: Any):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
     raw_visit_text = await _do_arm_during_speech(
         ctx.robot,
-        "face_wave",
+        "hug",
         lambda: tts_ask_with_early_stt(
             ctx.tts_agent,
             f"{leader_calling}，请问，您是第一次来我们园区吗？",
