@@ -6,6 +6,7 @@ import asyncio
 import threading
 import os
 import subprocess
+import shlex
 from pathlib import Path
 from datetime import datetime
 import difflib
@@ -1376,7 +1377,14 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     "listen_timeout": 16,
                     "early_listen": True,
                 },
-                {"action": "right_hand_up", "text": "好的，我来给各位安排。", "speak_with_action": True},
+                {
+                    "action": "right_hand_up",
+                    "text": "好的，我来给各位安排。",
+                    "speak_with_action": True,
+                    "background_command": "coffee_delivery_run",
+                    "background_command_name": "呼叫AIR咖啡车",
+                    "background_command_once_key": "coffee_delivery_run",
+                },
             ],
         },
         {
@@ -1464,6 +1472,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         ctx.docx_script_nav_done_step = None
         ctx.docx_script_done = False
         ctx.docx_script_answers = {}
+        ctx.docx_background_commands_started = set()
         ctx.docx_total_profile_span = _profile_start("docx_total")
         _workflow_log("初始化 DOCX 剧本演出状态", verbose=True)
 
@@ -1472,6 +1481,132 @@ def create_main_workflow(ctx: Any) -> Workflow:
         leader_calling = leader_info.get("leader_calling") or "各位领导"
         coffee_order = getattr(ctx, "docx_script_answers", {}).get("coffee_order", "")
         return text.format(leader_calling=leader_calling, coffee_order=coffee_order)
+
+    def _format_command_for_log(command):
+        try:
+            return shlex.join([str(item) for item in command])
+        except Exception:
+            return " ".join(str(item) for item in command)
+
+    def _resolve_coffee_delivery_command():
+        configured_command = os.getenv("RABBITBOT_COFFEE_DELIVERY_COMMAND", "").strip()
+        if configured_command:
+            return shlex.split(configured_command), "env"
+
+        candidates = [
+            Path("/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master/send_delivery_task.py"),
+            Path("/workspace/projects/rabbitbot-dev-ros2-master/send_delivery_task.py"),
+        ]
+        for script_path in candidates:
+            if script_path.exists():
+                return ["python3", str(script_path), "run"], str(script_path)
+
+        return ["python3", str(candidates[0]), "run"], "host_default_missing"
+
+    def _resolve_docx_background_command(command_spec):
+        if command_spec == "coffee_delivery_run":
+            return _resolve_coffee_delivery_command()
+        if isinstance(command_spec, (list, tuple)):
+            return [str(item) for item in command_spec], "segment_list"
+        if isinstance(command_spec, str):
+            return shlex.split(command_spec), "segment_string"
+        raise ValueError(f"不支持的后台命令配置: {command_spec!r}")
+
+    def start_docx_segment_background_command(segment, scene, segment_index, formatted_text):
+        command_spec = segment.get("background_command")
+        if not command_spec:
+            return
+
+        command_name = segment.get("background_command_name") or str(command_spec)
+        once_key = segment.get("background_command_once_key")
+        started_commands = getattr(ctx, "docx_background_commands_started", set())
+        if once_key and once_key in started_commands:
+            print(f"DOCX 后台命令跳过重复启动: name={command_name}, scene={scene}, segment={segment_index}, once_key={once_key}")
+            return
+
+        try:
+            command, source = _resolve_docx_background_command(command_spec)
+        except Exception as exc:
+            print(f"DOCX 后台命令解析失败: name={command_name}, scene={scene}, segment={segment_index}, error={type(exc).__name__}: {exc}")
+            _profile_instant(
+                "docx_background_command_resolve_error",
+                span="docx_background_command",
+                name=command_name,
+                scene=scene,
+                segment=segment_index,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return
+
+        command_timeout = float(segment.get("background_command_timeout") or os.getenv("RABBITBOT_COFFEE_DELIVERY_COMMAND_TIMEOUT", "15"))
+        command_text = _format_command_for_log(command)
+        span_token = _profile_start(
+            "docx_background_command",
+            name=command_name,
+            scene=scene,
+            segment=segment_index,
+            command=command_text,
+            source=source,
+            timeout=command_timeout,
+        )
+        start_time = time.perf_counter()
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except Exception as exc:
+            elapsed_seconds = time.perf_counter() - start_time
+            print(f"DOCX 后台命令启动失败: name={command_name}, scene={scene}, segment={segment_index}, command={command_text}, error={type(exc).__name__}: {exc}")
+            _profile_end(
+                span_token,
+                name=command_name,
+                scene=scene,
+                segment=segment_index,
+                status="start_error",
+                elapsed=round(elapsed_seconds, 6),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return
+
+        if once_key:
+            started_commands.add(once_key)
+            ctx.docx_background_commands_started = started_commands
+
+        print(f"DOCX 后台命令已启动: name={command_name}, scene={scene}, segment={segment_index}, pid={process.pid}, command={command_text}, source={source}, timeout={command_timeout}")
+
+        def wait_background_command():
+            try:
+                stdout, stderr = process.communicate(timeout=command_timeout)
+                status = "success" if process.returncode == 0 else "error"
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout, stderr = process.communicate()
+                status = "timeout"
+            elapsed_seconds = time.perf_counter() - start_time
+            stdout_tail = (stdout or "")[-1000:]
+            stderr_tail = (stderr or "")[-1000:]
+            print(
+                "DOCX 后台命令结束: "
+                f"name={command_name}, scene={scene}, segment={segment_index}, "
+                f"pid={process.pid}, status={status}, returncode={process.returncode}, "
+                f"elapsed={elapsed_seconds:.3f}s, stdout={stdout_tail!r}, stderr={stderr_tail!r}"
+            )
+            _profile_end(
+                span_token,
+                name=command_name,
+                scene=scene,
+                segment=segment_index,
+                status=status,
+                returncode=process.returncode,
+                elapsed=round(elapsed_seconds, 6),
+                stdout=stdout_tail,
+                stderr=stderr_tail,
+            )
+
+        threading.Thread(target=wait_background_command, daemon=True).start()
 
     def make_docx_interaction_trace(listen_key, scene, segment_index, trace_id=None):
         trace_id = trace_id or f"{listen_key}-{scene}-{segment_index}-{int(time.time() * 1000)}"
@@ -1668,6 +1803,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             if text:
                 def speak_segment():
                     formatted_text = format_docx_script_text(text)
+                    start_docx_segment_background_command(segment, scene, segment_index, formatted_text)
                     log_docx_feedback_start(scene, segment_index, formatted_text)
                     span_token = _profile_start("tts_segment", scene=scene, segment=segment_index, text=formatted_text)
                     try:
@@ -1857,6 +1993,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             if text:
                 def speak_segment():
                     formatted_text = format_docx_script_text(text)
+                    start_docx_segment_background_command(segment, scene, segment_index, formatted_text)
                     log_docx_feedback_start(scene, segment_index, formatted_text)
                     span_token = _profile_start("tts_segment", scene=scene, segment=segment_index, text=formatted_text)
                     try:
