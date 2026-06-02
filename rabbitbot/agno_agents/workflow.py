@@ -1060,7 +1060,7 @@ async def guide_opening_speech(ctx: Any):
     raw_name_text = "亚勤院士"
 
     def speak_handshake_opening():
-        if say("亚勤院士您好。请把话筒给亚勤院士。"):
+        if say("亚勤院士您好。"):
             return True
         return say("欢迎您来到滨湖复星人形机器人产业园。")
 

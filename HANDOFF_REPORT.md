@@ -13,7 +13,7 @@
 - 已保持 `1->2过渡点位` 和 `4->5过渡点位` 为独立只导航、无台词步骤，避免在过渡点提前播报。
 - 已将开场第三个动作从 `face_wave` 改为 `hug`，对应台词为“亚勤院士，请问，您是第一次来我们园区吗？”。
 - 已调整 dialogue01/dialogue02 的握手动作时序：
-  - `shake_hand` 现在从 dialogue01 “亚勤院士您好。请把话筒给亚勤院士。”开始时启动。
+  - `shake_hand` 现在从 dialogue01 “亚勤院士您好。”开始时启动。
   - dialogue02 “欢迎您来到滨湖复星人形机器人产业园。”仍在同一个握手动作窗口内播报。
   - `release` 收手仍复用 `_do_arm_during_speech` 的原有流程，在 dialogue02 播报结束后执行。
 - 已将 TTS 默认启动路径切到 Unitree G1 本体音响：未显式设置 `RABBITBOT_TTS_BACKEND` 时默认使用 `unitree`，未显式设置 `RABBITBOT_UNITREE_TTS_VOLUME` 时默认音量为 `100`。
