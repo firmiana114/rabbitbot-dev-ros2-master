@@ -126,6 +126,127 @@ def _workflow_log(message, verbose=False):
     print(message)
 
 
+DOCX_GUIDE_DIALOGUE_DEFAULT_PATH = Path(__file__).resolve().parents[2] / "docs" / "june6_guide_dialogue.json"
+_DOCX_GUIDE_DIALOGUE_CACHE = {"path": None, "data": None}
+
+
+def _docx_guide_dialogue_path():
+    configured_path = os.getenv("RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE", "").strip()
+    if configured_path:
+        return Path(configured_path)
+    return DOCX_GUIDE_DIALOGUE_DEFAULT_PATH
+
+
+def _load_docx_guide_dialogue():
+    dialogue_path = _docx_guide_dialogue_path()
+    cache_path = _DOCX_GUIDE_DIALOGUE_CACHE.get("path")
+    if cache_path == dialogue_path and _DOCX_GUIDE_DIALOGUE_CACHE.get("data") is not None:
+        return _DOCX_GUIDE_DIALOGUE_CACHE["data"]
+
+    start_time = time.perf_counter()
+    try:
+        raw_text = dialogue_path.read_text(encoding="utf-8")
+        data = json.loads(raw_text)
+    except FileNotFoundError as exc:
+        _workflow_log(f"DOCX 导览台词文件缺失: path={dialogue_path}")
+        raise FileNotFoundError(f"DOCX 导览台词文件缺失: {dialogue_path}") from exc
+    except json.JSONDecodeError as exc:
+        _workflow_log(
+            "DOCX 导览台词文件 JSON 解析失败: "
+            f"path={dialogue_path}, line={exc.lineno}, column={exc.colno}, message={exc.msg}"
+        )
+        raise ValueError(f"DOCX 导览台词文件 JSON 解析失败: {dialogue_path}") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(f"DOCX 导览台词文件根节点必须是对象: {dialogue_path}")
+    variables = data.get("variables", {})
+    opening = data.get("opening", {})
+    steps = data.get("steps", [])
+    if not isinstance(variables, dict):
+        raise ValueError(f"DOCX 导览台词 variables 必须是对象: {dialogue_path}")
+    if not isinstance(opening, dict):
+        raise ValueError(f"DOCX 导览台词 opening 必须是对象: {dialogue_path}")
+    if not isinstance(steps, list):
+        raise ValueError(f"DOCX 导览台词 steps 必须是数组: {dialogue_path}")
+
+    elapsed_seconds = time.perf_counter() - start_time
+    segment_count = sum(len(step.get("segments", []) or []) for step in steps if isinstance(step, dict))
+    leader_calling = str(variables.get("leader_calling") or "").strip()
+    _DOCX_GUIDE_DIALOGUE_CACHE["path"] = dialogue_path
+    _DOCX_GUIDE_DIALOGUE_CACHE["data"] = data
+    _workflow_log(
+        "DOCX 导览台词文件加载完成: "
+        f"path={dialogue_path}, steps={len(steps)}, segments={segment_count}, "
+        f"leader_calling={leader_calling or '未配置'}, elapsed={elapsed_seconds:.3f}s"
+    )
+    return data
+
+
+def _docx_guide_variables(extra_variables=None):
+    data = _load_docx_guide_dialogue()
+    variables = dict(data.get("variables", {}) or {})
+    if "leader_calling" not in variables or not str(variables.get("leader_calling") or "").strip():
+        raise KeyError(f"DOCX 导览台词 variables 缺少必填称呼键: key=leader_calling, path={_docx_guide_dialogue_path()}")
+    variables["leader_calling"] = str(variables["leader_calling"]).strip()
+    if extra_variables:
+        variables.update(extra_variables)
+        if "leader_calling" in variables:
+            variables["leader_calling"] = str(variables["leader_calling"]).strip()
+    return variables
+
+
+def _docx_guide_leader_calling():
+    return _docx_guide_variables()["leader_calling"]
+
+
+def _format_docx_guide_text(text, variables=None):
+    if text is None:
+        return ""
+    format_variables = _docx_guide_variables(variables)
+    try:
+        return str(text).format(**format_variables)
+    except KeyError as exc:
+        _workflow_log(
+            "DOCX 导览台词占位符缺少变量: "
+            f"missing={exc.args[0]}, available={sorted(format_variables.keys())}"
+        )
+        raise
+
+
+def _docx_opening_text(key, variables=None):
+    opening = _load_docx_guide_dialogue().get("opening", {}) or {}
+    if key not in opening:
+        dialogue_path = _docx_guide_dialogue_path()
+        raise KeyError(f"DOCX 导览台词 opening 缺少键: key={key}, path={dialogue_path}")
+    return _format_docx_guide_text(opening[key], variables)
+
+
+def _load_docx_script_steps(point_entity):
+    data = _load_docx_guide_dialogue()
+    raw_steps = data.get("steps", [])
+    if not raw_steps:
+        raise ValueError(f"DOCX 导览台词 steps 为空: {_docx_guide_dialogue_path()}")
+
+    steps = []
+    for index, raw_step in enumerate(raw_steps):
+        if not isinstance(raw_step, dict):
+            raise ValueError(f"DOCX 导览台词 step 必须是对象: index={index}")
+        step = dict(raw_step)
+        entity_key = step.pop("entity_key", None)
+        if entity_key:
+            if entity_key not in point_entity:
+                raise KeyError(f"DOCX 导览台词 step entity_key 未定义: index={index}, entity_key={entity_key}")
+            step["entity"] = point_entity[entity_key]
+        segments = step.get("segments", [])
+        if segments is None:
+            segments = []
+        if not isinstance(segments, list):
+            raise ValueError(f"DOCX 导览台词 step segments 必须是数组: index={index}, scene={step.get('scene')}")
+        step["segments"] = [dict(segment) for segment in segments]
+        steps.append(step)
+    return steps
+
+
 def _workflow_timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
@@ -1028,8 +1149,9 @@ async def guide_opening_speech(ctx: Any):
     opening_mode = os.getenv("RABBITBOT_OPENING_MODE", "full").strip().lower()
     if opening_mode in {"0", "false", "no", "off", "skip"}:
         print(f"跳过导览开场: RABBITBOT_OPENING_MODE={opening_mode}")
+        default_leader_calling = _docx_guide_leader_calling()
         return {
-            "leader_calling": "领导",
+            "leader_calling": default_leader_calling,
             "raw_name_text": "",
             "raw_visit_text": "",
             "first_visit": True,
@@ -1037,17 +1159,18 @@ async def guide_opening_speech(ctx: Any):
         }
 
     if opening_mode != "full":
-        if say("欢迎您来到滨湖复星人形机器人产业园。我是小星，可以带您参观展区，也可以回答您的问题。"):
+        short_leader_calling = _docx_opening_text("short_mode_leader_calling")
+        if say(_docx_opening_text("short_mode_intro", {"leader_calling": short_leader_calling})):
             return {
-                "leader_calling": "亚勤院士",
+                "leader_calling": short_leader_calling,
                 "raw_name_text": pending_user_text,
                 "raw_visit_text": "",
                 "first_visit": True,
                 "start_entity_name": None,
             }
-        say("如果您想开始参观，可以直接告诉我。", interruptible=False)
+        say(_docx_opening_text("short_mode_ready", {"leader_calling": short_leader_calling}), interruptible=False)
         leader_info = {
-            "leader_calling": "亚勤院士",
+            "leader_calling": short_leader_calling,
             "raw_name_text": "",
             "raw_visit_text": "",
             "first_visit": True,
@@ -1056,21 +1179,21 @@ async def guide_opening_speech(ctx: Any):
         ctx.leader_info = leader_info
         return leader_info
 
-    leader_calling = "亚勤院士"
-    raw_name_text = "亚勤院士"
+    leader_calling = _docx_guide_leader_calling()
+    raw_name_text = leader_calling
 
     def speak_handshake_opening():
-        if say("亚勤院士您好。"):
+        if say(_docx_opening_text("handshake_greeting", {"leader_calling": leader_calling})):
             return True
-        return say("欢迎您来到滨湖复星人形机器人产业园。")
+        return say(_docx_opening_text("handshake_welcome", {"leader_calling": leader_calling}))
 
     if await _do_arm_during_speech(ctx.robot, "shake_hand", speak_handshake_opening):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
-    if await _do_arm_during_speech(ctx.robot, "face_wave", lambda: say("各位朋友，也欢迎你们！")):
+    if await _do_arm_during_speech(ctx.robot, "face_wave", lambda: say(_docx_opening_text("group_welcome", {"leader_calling": leader_calling}))):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
     raw_visit_text = ""
     first_visit = True
-    if say("亚勤院士，各位，请随我来，我简单的介绍一下园区。"):
+    if say(_docx_opening_text("follow_intro", {"leader_calling": leader_calling})):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": None}
 
     start_entity_name = "点位1"
@@ -1364,81 +1487,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
         "point_3_to_5_transition": "3->5过渡点位",
         "point_5": "点位5",
     }
-    DOCX_SCRIPT_STEPS = [
-        {
-            "scene": "1到2过渡",
-            "entity": DOCX_SCRIPT_POINT_ENTITY["point_1_to_2_transition"],
-            "segments": [],
-        },
-        {
-            "scene": "跟随步行到点位2",
-            "entity": DOCX_SCRIPT_POINT_ENTITY["point_2"],
-            "segments": [],
-        },
-        {
-            "scene": "点咖啡",
-            "entity": DOCX_SCRIPT_POINT_ENTITY["point_2"],
-            "skip_navigation_if_current": True,
-            "segments": [
-                {
-                    "text": "对了，{leader_calling}、各位，我们给各位准备了咖啡还有其他饮料，我让我的小伙伴给送过来。",
-                },
-                {
-                    "action": "right_hand_up",
-                    "text": "我来给各位安排。",
-                    "speak_with_action": True,
-                    "background_command": "coffee_delivery_run",
-                    "background_command_name": "呼叫AIR咖啡车",
-                    "background_command_once_key": "coffee_delivery_run",
-                },
-            ],
-        },
-        {
-            "scene": "初步介绍",
-            "entity": DOCX_SCRIPT_POINT_ENTITY["point_3"],
-            "speak_during_navigation": True,
-            "speak_during_navigation_segments": 1,
-            "segments": [
-                {
-                    "text": "我们产业园2025年12月开园后，我们紧扣人形机器人核心赛道，做了大量工作，除了提升园区的软件和硬件水平外，我们还不断加大产业项目招引，目前，签约共创实验室平台1个，签约机器人产研项目20余个，成果十分显著。"
-                },
-            ],
-        },
-        {
-            "scene": "拿取咖啡",
-            "entity": DOCX_SCRIPT_POINT_ENTITY["point_3"],
-            "skip_navigation_if_current": True,
-            "segments": [
-                {
-                    "action": "right_hand_up",
-                    "text": "{leader_calling}，咖啡和饮料来了，请您还有各位朋友自取。",
-                },
-            ],
-        },
-        {
-            "scene": "前往3到5过渡点",
-            "entity": DOCX_SCRIPT_POINT_ENTITY["point_3_to_5_transition"],
-            "segments": [],
-        },
-        {
-            "scene": "前往点位5",
-            "entity": DOCX_SCRIPT_POINT_ENTITY["point_5"],
-            "segments": [],
-        },
-        {
-            "scene": "告别并指引小巴方向",
-            "entity": DOCX_SCRIPT_POINT_ENTITY["point_5"],
-            "skip_navigation_if_current": True,
-            "segments": [
-                {
-                    "action": "right_hand_up",
-                    "text": "{leader_calling}、各位领导，下面请移步门外。",
-                },
-                {"text": "请各位乘坐无人驾驶小巴车来深入的了解我们园区。"},
-                {"action": "high_wave", "text": "各位再会！", "speak_with_action": True},
-            ],
-        },
-    ]
+    DOCX_SCRIPT_STEPS = _load_docx_script_steps(DOCX_SCRIPT_POINT_ENTITY)
 
     def scripted_tour_enabled():
         value = os.getenv("RABBITBOT_SCRIPTED_TOUR", "1").strip().lower()
@@ -1486,9 +1535,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
     def format_docx_script_text(text):
         leader_info = getattr(ctx, "leader_info", {}) or {}
-        leader_calling = leader_info.get("leader_calling") or "各位领导"
+        leader_calling = leader_info.get("leader_calling") or _docx_guide_leader_calling()
         coffee_order = getattr(ctx, "docx_script_answers", {}).get("coffee_order", "")
-        return text.format(leader_calling=leader_calling, coffee_order=coffee_order)
+        return _format_docx_guide_text(text, {"leader_calling": leader_calling, "coffee_order": coffee_order})
 
     def _format_command_for_log(command):
         try:
