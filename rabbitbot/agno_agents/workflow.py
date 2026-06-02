@@ -1511,7 +1511,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
 
     def build_scripted_intro(entity_name):
         leader_info = getattr(ctx, "leader_info", {}) or {}
-        leader_calling = leader_info.get("leader_calling") or "各位领导"
+        leader_calling = leader_info.get("leader_calling") or _docx_guide_leader_calling()
         if entity_name == "合影板块":
             return f"{leader_calling}，请各位移步合影区。"
         return f"{leader_calling}，下面请随我来到{entity_name}。"
@@ -2160,7 +2160,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
         if index >= len(entity_order):
             ctx.scripted_tour_done = True
             await _do_arm_async_timed(ctx.robot, "high_wave")
-            tts_sound(tts_agent, f"{before_text}各位领导再会，欢迎您再次来到我们人形机器人产业园。", "zh")
+            leader_info = getattr(ctx, "leader_info", {}) or {}
+            leader_calling = leader_info.get("leader_calling") or _docx_guide_leader_calling()
+            tts_sound(tts_agent, f"{before_text}{leader_calling}、各位领导再会，欢迎您再次来到我们人形机器人产业园。", "zh")
             tts_wait(tts_agent)
             return "done", SCRIPTED_TOUR_FINISHED
 
