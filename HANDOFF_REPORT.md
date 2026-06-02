@@ -2,7 +2,7 @@
 
 ## 背景和目标
 
-本轮目标是在六月六日 DOCX/PDF 剧本已对齐、过渡点已拆分为独立只导航步骤的基础上，完成两项现场调整：一是调整开场 dialogue01 和 dialogue02 的握手动作时序；二是新增 Unitree G1 本体 TTS 后端，使 Orin 能通过网线和宇树 SDK2 控制机器人本体音响播报。项目主机 `AGX-orin-FX`，路径 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`，分支 `June6_workflow`。
+本轮目标是在六月六日 DOCX/PDF 剧本已对齐、过渡点已拆分为独立只导航步骤、TTS 和咖啡车流程已接入的基础上，按现场要求继续精简拿取咖啡段落：删除“我再给各位介绍一下产业园和清华创新中心的合作成果。”这句台词，确保咖啡自取后直接进入点位5路线。项目主机 `AGX-orin-FX`，路径 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`，分支 `June6_workflow`。
 
 ## 当前状态
 
@@ -27,7 +27,6 @@
 
 未完成：
 
-- dialogue10 在 PDF 中仍标注“此处需补充”，当前仍没有真实合作成果内容。
 - 尚未在完整 unified workflow 中验证 Unitree 本体 TTS 与 STT 打断、`tts_wait`、开场动作并发的整体节奏。
 - 尚未在真机/完整 workflow 中验证提前伸手后的握手距离、收手时机、TTS 节奏和现场观感。
 - 尚未在真机/完整 workflow 中验证 `hug` 动作是否符合现场节奏、动作幅度和收回时机。
@@ -50,6 +49,7 @@
 - 本轮已将 DOCX 剧本点咖啡环节的“我来给各位安排。”配置为播报开始时同步后台呼叫 AIR 咖啡车；后台命令默认解析为 `python3 /mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master/send_delivery_task.py run`，在 unified 容器内会自动改用 `/workspace/projects/rabbitbot-dev-ros2-master/send_delivery_task.py`。
 - 本轮新增 DOCX 剧本总耗时终端打印：严格 DOCX 模式下从开场第一句实际 TTS 前开始计时；若开场被跳过，则从 DOCX 第一段台词前兜底开始；剧本完成时打印 `DOCX 剧本总耗时`，包含开始时间、结束时间和秒级耗时。
 - 本轮按最新剧本删除两处问答交互：开场不再询问“是否第一次来园区”，改为直接播报“亚勤院士，各位，请随我来，我简单的介绍一下园区。”；点咖啡不再等待领导回答，改为直接播报准备咖啡饮料并在“我来给各位安排。”开播时呼叫 AIR 咖啡车。
+- 本轮已从 `拿取咖啡` 场景移除“我再给各位介绍一下产业园和清华创新中心的合作成果。”这句独立播报；该场景现在只保留咖啡和饮料自取提示，随后直接进入 `前往4到5过渡点`。
 
 ## 阻塞问题
 
@@ -67,7 +67,6 @@
 - 继续确认 dialogue01 中“上前靠近领导A一步”是否已有机器人动作或底盘接口；当前本轮未实现该靠近动作。
 - 继续按上一轮建议清理重复 `entity` 字段。
 - 明确是否有 OK 手势动作字段；如果有，再把点咖啡后的 `right_hand_up` 改为 OK 动作。
-- 补齐 dialogue10 的“产业园和清华创新中心合作成果”正式文案。
 
 ## 注意事项
 
@@ -80,6 +79,7 @@
 - DOCX 后台命令日志会记录命令解析来源、启动 PID、超时时间、退出码、耗时、stdout/stderr 摘要，可用于排查 AIR 咖啡车接口是否被调用以及返回结果。
 - DOCX 剧本计时日志会在终端打印 `DOCX 剧本总计时开始` 和 `DOCX 剧本总耗时`，用于现场快速确认整段流程耗时。
 - 当前 DOCX 剧本不再包含“第一次来园区”和“是否送咖啡饮料”的 STT 问答等待；如后续再恢复问答，需要重新配置 `listen_key`/`early_listen` 并验证监听超时。
+- 当前 `拿取咖啡` 场景不再包含合作成果介绍台词；如后续要恢复相关内容，需要先确认正式文案，再重新加入独立播报 segment。
 - 如果在容器内使用宿主机构建的桥接程序，`UnitreeG1TTS` 会自动设置 `LD_LIBRARY_PATH` 到 `/workspace/projects/unitree_sdk2/thirdparty/lib/aarch64` 或宿主机对应路径。
 - 如果现场觉得伸手过早或动作时长影响话筒交接，可优先检查动作日志中的 `action=shake_hand` 耗时和随后的 `release` 耗时。
 

@@ -1413,9 +1413,6 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     "action": "right_hand_up",
                     "text": "{leader_calling}，咖啡和饮料来了，请您还有各位朋友自取。",
                 },
-                {
-                    "text": "我再给各位介绍一下产业园和清华创新中心的合作成果。",
-                },
             ],
         },
         {
