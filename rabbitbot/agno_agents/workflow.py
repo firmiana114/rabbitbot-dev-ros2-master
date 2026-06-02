@@ -967,6 +967,33 @@ def _is_empty_stt_text(text):
     return text is None or text.strip() in {"", "<REC_TIMEOUT>", "<REC_STOP>", "Timeout"}
 
 
+def _start_docx_script_elapsed_timer(ctx, reason="speech_start"):
+    if getattr(ctx, "docx_script_elapsed_start_perf", None) is not None:
+        return
+    ctx.docx_script_elapsed_start_perf = time.perf_counter()
+    ctx.docx_script_elapsed_start_ts = _workflow_timestamp()
+    ctx.docx_script_elapsed_finish_printed = False
+    print(f"DOCX 剧本总计时开始: reason={reason}, start={ctx.docx_script_elapsed_start_ts}")
+
+
+def _finish_docx_script_elapsed_timer(ctx, reason="script_finished"):
+    start_perf = getattr(ctx, "docx_script_elapsed_start_perf", None)
+    if start_perf is None:
+        print(f"DOCX 剧本总计时无法结束: reason={reason}, start_missing=True")
+        return
+    if getattr(ctx, "docx_script_elapsed_finish_printed", False):
+        return
+    elapsed_seconds = time.perf_counter() - start_perf
+    ctx.docx_script_elapsed_finish_printed = True
+    ctx.docx_script_elapsed_seconds = elapsed_seconds
+    start_ts = getattr(ctx, "docx_script_elapsed_start_ts", "")
+    print(
+        "DOCX 剧本总耗时: "
+        f"reason={reason}, start={start_ts}, "
+        f"end={_workflow_timestamp()}, elapsed={elapsed_seconds:.3f}s"
+    )
+
+
 async def guide_opening_speech(ctx: Any):
     """Run the speech-only opening guide flow before the main workflow."""
 
@@ -979,6 +1006,8 @@ async def guide_opening_speech(ctx: Any):
         return True
 
     def say(text, interruptible=True):
+        if _strict_docx_script_enabled():
+            _start_docx_script_elapsed_timer(ctx, reason="opening_speech")
         if _strict_docx_script_enabled() and interruptible:
             tts_sound(ctx.tts_agent, text, "zh")
             tts_wait(ctx.tts_agent)
@@ -1473,6 +1502,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
         ctx.docx_script_done = False
         ctx.docx_script_answers = {}
         ctx.docx_background_commands_started = set()
+        if not hasattr(ctx, "docx_script_elapsed_start_perf"):
+            ctx.docx_script_elapsed_start_perf = None
+            ctx.docx_script_elapsed_start_ts = ""
+            ctx.docx_script_elapsed_finish_printed = False
+            ctx.docx_script_elapsed_seconds = None
         ctx.docx_total_profile_span = _profile_start("docx_total")
         _workflow_log("初始化 DOCX 剧本演出状态", verbose=True)
 
@@ -1802,6 +1836,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             listen_answer_handled = False
             if text:
                 def speak_segment():
+                    _start_docx_script_elapsed_timer(ctx, reason="docx_segment_speech")
                     formatted_text = format_docx_script_text(text)
                     start_docx_segment_background_command(segment, scene, segment_index, formatted_text)
                     log_docx_feedback_start(scene, segment_index, formatted_text)
@@ -1954,6 +1989,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             ctx.docx_script_done = True
             _profile_end(getattr(ctx, "docx_total_profile_span", None), status="finished")
             ctx.docx_total_profile_span = None
+            _finish_docx_script_elapsed_timer(ctx, reason="script_index_finished")
             return "done", SCRIPTED_TOUR_FINISHED
 
         step = DOCX_SCRIPT_STEPS[step_index]
@@ -1992,6 +2028,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             listen_answer_handled = False
             if text:
                 def speak_segment():
+                    _start_docx_script_elapsed_timer(ctx, reason="docx_segment_speech")
                     formatted_text = format_docx_script_text(text)
                     start_docx_segment_background_command(segment, scene, segment_index, formatted_text)
                     log_docx_feedback_start(scene, segment_index, formatted_text)
@@ -2078,6 +2115,7 @@ def create_main_workflow(ctx: Any) -> Workflow:
             ctx.post_docx_chat_mode = True
             _profile_end(getattr(ctx, "docx_total_profile_span", None), status="finished")
             ctx.docx_total_profile_span = None
+            _finish_docx_script_elapsed_timer(ctx, reason="script_finished")
             _workflow_log("DOCX 剧本全部完成")
             return "done", SCRIPTED_TOUR_FINISHED
         return "done", SCRIPTED_TOUR_STEP_DONE
