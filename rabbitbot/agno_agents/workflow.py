@@ -979,11 +979,10 @@ async def guide_opening_speech(ctx: Any):
         return False
 
     if _strict_docx_script_enabled():
-        start_navi_status = await _ensure_start_position(ctx, "点位1")
-        if start_navi_status != NavigationStatus.SUCCEEDED:
-            tts_sound(ctx.tts_agent, "很抱歉，我暂时无法到达点位1，请检查导航状态后重新开始。", "zh")
-            tts_wait(ctx.tts_agent)
-            raise RuntimeError(f"点位1导航未完成: {start_navi_status}")
+        # PDF 剧本的开场发生在点位1现场；严格剧本模式不在开场前额外导航，避免台词被起点导航阻塞。
+        ctx.start_position_confirmed = True
+        ctx.current_entity_name = "点位1"
+        _workflow_log("严格 DOCX 剧本开场：按 PDF 顺序直接在点位1开始台词，不预先执行起点导航")
 
     opening_mode = os.getenv("RABBITBOT_OPENING_MODE", "full").strip().lower()
     if opening_mode in {"0", "false", "no", "off", "skip"}:
@@ -1019,7 +1018,7 @@ async def guide_opening_speech(ctx: Any):
     leader_calling = "亚勤院士"
     raw_name_text = "亚勤院士"
 
-    if say("亚勤院士您好，请把话筒给亚勤院士。"):
+    if say("亚勤院士您好。请把话筒给亚勤院士。"):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
     if await _do_arm_during_speech(ctx.robot, "shake_hand", lambda: say("欢迎您来到滨湖复星人形机器人产业园。")):
         return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": pending_user_text, "first_visit": True, "start_entity_name": None}
@@ -1041,11 +1040,11 @@ async def guide_opening_speech(ctx: Any):
 
     if visit_type == "repeat":
         first_visit = False
-        if say("那之前您来的时候，我还没来，我们园区最近做了一些升级，您随我来，我简单地给您介绍一下。"):
+        if say("那之前您来的时候，我还没来，我们园区最近做了一些升级，您随我来，我简单的给您介绍一下。"):
             return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": None}
     else:
         first_visit = True
-        if say("好的，那您随我来，我简单地给您介绍一下园区。"):
+        if say("好的，那您随我来，我简单的给您介绍一下园区。"):
             return {"leader_calling": leader_calling, "raw_name_text": raw_name_text, "raw_visit_text": raw_visit_text, "first_visit": first_visit, "start_entity_name": None}
 
     start_entity_name = "点位1"
@@ -1339,8 +1338,14 @@ def create_main_workflow(ctx: Any) -> Workflow:
     }
     DOCX_SCRIPT_STEPS = [
         {
+            "scene": "跟随步行",
+            "entity": DOCX_SCRIPT_POINT_ENTITY["point_2"],
+            "segments": [],
+        },
+        {
             "scene": "点咖啡",
             "entity": DOCX_SCRIPT_POINT_ENTITY["point_2"],
+            "skip_navigation_if_current": True,
             "segments": [
                 {
                     "text": "对了，{leader_calling}、各位，我们给各位准备了咖啡还有其他饮料，我让我的小伙伴给送过来？",
@@ -1374,19 +1379,25 @@ def create_main_workflow(ctx: Any) -> Workflow:
                     "text": "{leader_calling}，咖啡和饮料来了，请您还有各位朋友自取。",
                 },
                 {
-                    "text": "我再给各位介绍一下产业园和清华创新中心的合作成果。相关内容还在补充中，后续我会为各位更新更完整的介绍。",
+                    "text": "我再给各位介绍一下产业园和清华创新中心的合作成果。",
                 },
             ],
         },
         {
-            "scene": "前往点位5并指引小巴方向",
+            "scene": "前往点位5",
             "entity": DOCX_SCRIPT_POINT_ENTITY["point_5"],
+            "segments": [],
+        },
+        {
+            "scene": "告别并指引小巴方向",
+            "entity": DOCX_SCRIPT_POINT_ENTITY["point_5"],
+            "skip_navigation_if_current": True,
             "segments": [
                 {
                     "action": "right_hand_up",
                     "text": "{leader_calling}、各位领导，下面请移步门外。",
                 },
-                {"text": "请各位乘坐无人驾驶小巴车来深入地了解我们园区。"},
+                {"text": "请各位乘坐无人驾驶小巴车来深入的了解我们园区。"},
                 {"action": "high_wave", "text": "各位再会！", "speak_with_action": True},
             ],
         },

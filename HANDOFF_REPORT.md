@@ -2,53 +2,62 @@
 
 ## 背景和目标
 
-本轮目标是在当前 `June6_workflow` 分支中先不启动 VLM 和 Embedding，确认当前六月六日脚本化导览主流程是否可以不依赖这两个模型服务运行。项目主机 `AGX-orin-FX`，路径 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`，分支 `June6_workflow`。
+本轮目标是按照 Aaron 提供的原始 PDF `0605-亚勤院士采访参观体验流程(1).pdf` 重新对齐六月六日 DOCX 剧本的点位和台词顺序，修复调试中发现的“剧本台词和点位不对应”问题。项目主机 `AGX-orin-FX`，路径 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`，分支 `June6_workflow`。
 
 ## 当前状态
 
 已完成：
 
-- 已核查当前 workflow：
-  - VLM 仍在视觉问答工具路径中使用，但六月六日 DOCX 脚本化导览主流程不主动调用视觉问答。
-  - Embedding 主要由 Memory Agent 查询路径使用；当前 DOCX 点位导航主流程使用内嵌 `DOCX_SCRIPT_POINTS`，不是 Memory Agent 检索。
-  - 开场里查询 `点位1` 的 Memory Agent fallback 有异常捕获，不会阻断严格 DOCX 脚本。
-- 已将统一容器入口 `scripts_1/unified_runtime/start_unified_container.sh` 改为默认跳过 VLM 和 Embedding：
-  - `RABBITBOT_UNIFIED_START_VLM=0`
-  - `RABBITBOT_UNIFIED_START_EMBEDDING=0`
-- 已将宿主机启动脚本 `scripts_1/start_unified_integration_workflow.sh` 的等待逻辑同步改为默认不等待 8000/8005。
-- 已在容器创建命令中显式执行挂载项目里的 `scripts_1/unified_runtime/start_unified_container.sh`，这样脚本改动无需重建统一镜像即可生效。
-- 如果已有统一容器的 VLM/Embedding 启动配置与当前期望不一致，启动脚本会默认重建容器，避免旧容器继续按旧配置启动 VLM/Embedding。
+- 已重新读取 PDF 原文，确认“小星”列的顺序为：
+  - 点位1：开场对话 dialogue01-05。
+  - 1→2：跟随步行，仅移动。
+  - 点位2：点咖啡 dialogue06-07。
+  - 2→3：初步介绍 dialogue08，边走边说。
+  - 点位3：拿取咖啡 dialogue09-10。
+  - 3→5：前往点位5，仅移动。
+  - 点位5：告别并指引小巴方向 dialogue11-13。
+- 已修改严格 DOCX 剧本开场逻辑：
+  - 不再在开场台词前执行点位1导航。
+  - 直接把当前位置标记为点位1，按 PDF 顺序先说开场台词。
+- 已重排 `DOCX_SCRIPT_STEPS`：
+  - 新增独立“跟随步行”步骤，对应 1→2。
+  - “点咖啡”现在 `skip_navigation_if_current=True`，只在到达点位2后说 dialogue06-07。
+  - “初步介绍”保持 2→3 边走边说 dialogue08。
+  - “拿取咖啡”保持在点位3。
+  - 新增独立“前往点位5”步骤，对应 3→5，仅移动。
+  - 新增独立“告别并指引小巴方向”步骤，在点位5说 dialogue11-13。
+- 已将几处台词改回 PDF 表达：
+  - `简单地` 改为 PDF 中的 `简单的`。
+  - dialogue12 改为 `深入的了解我们园区`。
+  - dialogue10 去掉额外解释句，只保留“我再给各位介绍一下产业园和清华创新中心的合作成果。”
 
 未完成：
 
-- 尚未启动统一容器实测“跳过 VLM/Embedding 后”六月六日 workflow 是否完整可跑。
-- 尚未验证 Memory Agent 在没有 Embedding 服务时如果被用户自由问答路径触发会如何降级；当前只确认脚本化导览主流程不应依赖它。
+- dialogue10 在 PDF 中仍标注“此处需补充”，当前仍没有真实合作成果内容。
+- 尚未在真机/完整 workflow 中验证新顺序是否完全符合现场节奏。
 
 ## 已验证的事实
 
-- `scripts_1/unified_runtime/start_unified_container.sh` 语法检查通过。
-- `scripts_1/start_unified_integration_workflow.sh` 语法检查通过。
-- VLM/Embedding 服务仍可通过环境变量恢复：
-  - `RABBITBOT_UNIFIED_START_VLM=1`
-  - `RABBITBOT_UNIFIED_START_EMBEDDING=1`
-- 当前修改未改剧本文案、点位、动作字段、STT 灵敏度或 TTS 配置。
+- `rabbitbot/agno_agents/workflow.py` 已通过 Python 编译检查。
+- PDF 中没有 1→2 和 3→5 的小星台词，当前对应步骤也不配置 segments。
+- 2→3 的 dialogue08 仍通过 `speak_during_navigation=True` 在导航期间播报。
+- 点位5路径仍使用此前补齐后的三段路径：点位4中转、4→5过渡点位、点位5终点。
 
 ## 阻塞问题
 
-无代码层面的阻塞。运行层面需要实际启动统一容器验证跳过 VLM/Embedding 后，TTS、STT、Robot Agent、workflow 是否都能按预期工作。
+无代码层面的阻塞。内容层面仍缺 dialogue10 的正式文案；运行层面仍需真机验证导航完成状态和 TTS 衔接。
 
 ## 建议的下一步
 
-- 运行非联调 workflow，确认不用 VLM/Embedding 时脚本化导览能走完。
-- 如果用户在导览中触发视觉问答、自由问答中的视觉工具或 Memory Agent 语义检索，再按需恢复：
-  - `RABBITBOT_UNIFIED_START_VLM=1 RABBITBOT_UNIFIED_START_EMBEDDING=1 bash scripts_1/start_unified_integration_workflow.sh`
-- 如果只需要 VLM 不需要 Embedding，也可以只设置 `RABBITBOT_UNIFIED_START_VLM=1`。
+- 先跑非联调 workflow，确认日志中的 DOCX 步骤顺序为：跟随步行、点咖啡、初步介绍、拿取咖啡、前往点位5、告别并指引小巴方向。
+- 再跑联调 workflow，确认开场不再先导航点位1，而是直接开始 dialogue01。
+- 补齐 dialogue10 的“产业园和清华创新中心合作成果”正式文案。
 
 ## 注意事项
 
-- 本轮不是删除 VLM/Embedding 能力，只是默认不启动、不等待。
-- 由于容器入口改为执行挂载项目里的脚本，后续修改 `scripts_1/unified_runtime/start_unified_container.sh` 可以不重建镜像生效，但已有容器仍需要在配置变化时重建。
-- 旧容器如果已经启动了 VLM/Embedding 进程，需要通过停止脚本或重建容器清理；本轮启动脚本会在配置不匹配时自动重建。
+- 本轮只修改 workflow 的开场点位顺序、DOCX 剧本步骤和交接报告。
+- 未改点位坐标、动作字段、STT 灵敏度、TTS 配置或 unified 启动脚本。
+- 如果仍出现“到达后不说话”，需要继续处理导航 `arrived` 后等待 `arm_ready` 的问题；本轮先修复剧本顺序不对应。
 
 ## 其它信息
 
