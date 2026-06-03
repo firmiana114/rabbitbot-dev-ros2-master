@@ -14,3 +14,11 @@ docker exec kuavo-agno-projects-only-test curl --max-time 5 -sS -X POST http://1
 
 # 点位5（含 3->5 过渡）
 docker exec kuavo-agno-projects-only-test curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string 'task=[(5.5507, 14.4097, 0.0779, 0.0578, 0.7806, 0.6174), (4.7039, 20.4749, 0.0876, -0.0269, 0.9076, -0.4096)]'
+
+# 返回点1
+
+docker exec kuavo-agno-projects-only-test curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string 'task=(6.4327, 8.2585, 0.0505, 0.0827, 0.5996, -0.7944)'
+
+# 返回点2
+
+docker exec kuavo-agno-projects-only-test curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string 'task=(9.8023, -3.1366, -0.0442, 0.0674, 0.9944, 0.0684)'
