@@ -43,7 +43,10 @@ WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS:-600}"
 RABBITBOT_WORKFLOW_NON_INTEGRATION="${RABBITBOT_WORKFLOW_NON_INTEGRATION:-0}"
 RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE:-0}"
 RABBITBOT_UNIFIED_ATTACH_STDIN="${RABBITBOT_UNIFIED_ATTACH_STDIN:-0}"
-HOST_WORKFLOW_CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_HOST_CONTROL_DIR:-${HOST_LOG_DIR}/unified_runtime/workflow_control}"
+HOST_WORKFLOW_RUN_DIR="${RABBITBOT_NAV_WORKFLOW_HOST_RUN_DIR:-${RUN_DIR}}"
+CONTAINER_WORKFLOW_RUN_DIR="${RABBITBOT_NAV_WORKFLOW_CONTAINER_RUN_DIR:-${CONTAINER_RABBITBOT_DIR}/logs/nav_workflow_control}"
+HOST_WORKFLOW_CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_HOST_CONTROL_DIR:-${HOST_WORKFLOW_RUN_DIR}/workflow_control}"
+CONTAINER_WORKFLOW_CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_CONTAINER_CONTROL_DIR:-${CONTAINER_WORKFLOW_RUN_DIR}/workflow_control}"
 WORKFLOW_GATE_READY_TIMEOUT_SECONDS="${RABBITBOT_NAV_WORKFLOW_GATE_READY_TIMEOUT_SECONDS:-30}"
 WORKFLOW_GATE_POLL_SECONDS="${RABBITBOT_WORKFLOW_START_GATE_POLL_SECONDS:-0.05}"
 
@@ -171,7 +174,7 @@ trap 'cleanup TERM; exit 143' TERM
 trap 'cleanup EXIT' EXIT
 
 prepare_runtime() {
-    mkdir -p "${CONTROL_DIR}" "${RUN_DIR}" "${HOST_LOG_DIR}" "${HOST_WORKFLOW_CONTROL_DIR}"
+    mkdir -p "${CONTROL_DIR}" "${RUN_DIR}" "${HOST_LOG_DIR}" "${HOST_WORKFLOW_RUN_DIR}" "${HOST_WORKFLOW_CONTROL_DIR}"
     require_path "${NAV_BRIDGE_SCRIPT}"
     require_path "${ROS_SETUP}"
     require_path "${WS_SETUP}"
@@ -264,10 +267,10 @@ launch_workflow_detached() {
     fi
 
     current_run_id="$(date +%Y%m%d_%H%M%S)"
-    current_control_dir="${CONTAINER_LOG_DIR}/workflow_control"
+    current_control_dir="${CONTAINER_WORKFLOW_CONTROL_DIR}"
     current_host_control_dir="${HOST_WORKFLOW_CONTROL_DIR}"
-    current_workflow_log="${CONTAINER_LOG_DIR}/rabbitbot_workflow_${current_run_id}.log"
-    current_host_workflow_log="${HOST_LOG_DIR}/unified_runtime/rabbitbot_workflow_${current_run_id}.log"
+    current_workflow_log="${CONTAINER_WORKFLOW_RUN_DIR}/rabbitbot_workflow_${current_run_id}.log"
+    current_host_workflow_log="${HOST_WORKFLOW_RUN_DIR}/rabbitbot_workflow_${current_run_id}.log"
     current_status_file="${current_host_control_dir}/${current_run_id}.status"
     current_exit_code_file="${current_host_control_dir}/${current_run_id}.exit_code"
     current_pid_file="${current_host_control_dir}/${current_run_id}.pid"
@@ -279,8 +282,11 @@ launch_workflow_detached() {
 
     mkdir -p "${current_host_control_dir}" "$(dirname "${current_host_workflow_log}")"
     rm -f "${current_status_file}" "${current_exit_code_file}" "${current_pid_file}" "${current_finished_at_file}" "${current_host_gate_file}" "${current_host_gate_ready_file}"
-    : >"${current_host_workflow_log}"
-    docker exec "${CONTAINER_NAME}" bash -lc "mkdir -p '${current_control_dir}' && rm -f '${current_control_dir}/${current_run_id}.status' '${current_control_dir}/${current_run_id}.exit_code' '${current_control_dir}/${current_run_id}.pid' '${current_control_dir}/${current_run_id}.finished_at' '${current_gate_file}' '${current_gate_ready_file}'" >/dev/null
+    if ! : >"${current_host_workflow_log}"; then
+        log_error "无法创建 workflow 宿主日志：${current_host_workflow_log}，请检查目录权限"
+        return 1
+    fi
+    docker exec "${CONTAINER_NAME}" bash -lc "mkdir -p '${current_control_dir}' '$(dirname "${current_workflow_log}")' && rm -f '${current_control_dir}/${current_run_id}.status' '${current_control_dir}/${current_run_id}.exit_code' '${current_control_dir}/${current_run_id}.pid' '${current_control_dir}/${current_run_id}.finished_at' '${current_gate_file}' '${current_gate_ready_file}'" >/dev/null
 
     local start_ms
     start_ms="$(now_ms)"
