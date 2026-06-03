@@ -30,6 +30,9 @@
 - 本轮新增可提交入口 `scripts/run_kuavo_agno_workflow.py`，`scripts/start_kuavo_agno_workflow.bash` 已从 ignored 的 `examples/run_kuavo_agno.py` 切到该入口；`scripts/start_all_services.sh` 和编排脚本的运行检测也已补充新 runner 匹配。
 - 本轮修复启动脚本直接退出问题：根因是预启动 workflow 时宿主侧日志被写到 `logs/unified_runtime/rabbitbot_workflow_*.log`，该目录当前为 `root:root 755`，普通用户 `pc` 无法创建文件，`set -e` 触发脚本退出并清理导航桥接。现在宿主日志、ready/go 闸门和状态文件均改到普通用户可写的 `logs/nav_workflow_control`，容器内对应路径为 `/workspace/projects/rabbitbot-dev-ros2-master/logs/nav_workflow_control`。
 - 本轮增强 `scripts/run_kuavo_agno_workflow.py`：启动时主动将项目根目录加入 `sys.path`，避免直接运行或容器内验证时因未设置 `PYTHONPATH` 找不到 `rabbitbot`。
+- 本轮定位 `back` 无法返航的原因：当前脚本处于预启动 workflow 后等待 `go` 的阶段，旧逻辑只接受 `go`，收到 `back` 会被 `wait_command go` 读走并作为非当前阶段命令忽略，因此不会进入返航。
+- 本轮同时发现预启动状态目录不一致：ready/go 闸门已在 `logs/nav_workflow_control`，但 runner 的 `status/pid/exit_code` 仍受 `RABBITBOT_LOG_DIR` 影响写入旧目录，主脚本可能看不到 workflow 完成状态。已将 docker exec 传入的 `RABBITBOT_LOG_DIR` 改为容器内 `logs/nav_workflow_control`，使 ready、go、status、pid、exit_code 统一。
+- 本轮修复等待 `go` 阶段的 `back` 行为：新增 `wait_go_or_back`，等待 go 时收到 back 会停止当前预启动 workflow 和日志 tail，然后直接执行分段返航；同时检测 ready 文件存在但预启动进程已退出的 stale 状态，自动重新预启动。
 - 本轮新增 `scripts_1/send_nav_workflow_command.sh`，供其它终端发送 `go`、`back` 或 `quit` 控制命令；命令通过 `/tmp/rabbitbot_nav_workflow_control/command` 文件传递，不依赖主终端 stdin。
 - 已将默认称呼抽为 `variables.leader_calling`，台词中的 `{leader_calling}` 会在运行时替换；缺少该键时 workflow 会报出明确配置错误，不再静默使用代码内固定称呼。
 - 本轮已按现场要求调整 `conf/dialogue_0.json`：开场问候句改为“{leader_calling}您好，我叫小智。”；点位5小巴引导合并为一个播报段，减少句间 TTS 停顿，最后“各位再会！”仍单独配合挥手动作。
@@ -90,11 +93,13 @@
 - 本轮已验证预启动闸门相关静态检查：`scripts_1/start_nav_bridge_workflow_loop.sh`、`scripts/start_kuavo_agno_workflow.bash`、`scripts/start_all_services.sh` 均通过 `bash -n`，`scripts/run_kuavo_agno_workflow.py` 通过 `python3 -m py_compile`，`git diff --check` 通过。
 - 本轮已验证当前权限事实：宿主 `logs/nav_workflow_control` 为 `pc:pc` 且可写，宿主 `logs/unified_runtime` 为 `root:root 755` 且 `pc` 不可写；这解释了启动脚本在创建 `rabbitbot_workflow_*.log` 时直接退出。
 - 本轮已在当前运行的 `rabbitbot-unified-runtime` 容器内验证 `py310/bin/python scripts/run_kuavo_agno_workflow.py --help` 可正常导入并输出帮助，且容器内 `/workspace/projects/rabbitbot-dev-ros2-master/logs/nav_workflow_control` 可写；未实际启动 workflow。
+- 本轮已验证当前现场状态：`start_nav_bridge_workflow_loop.sh` 仍在运行，28180 正常监听，最新 control 目录只有 `20260603_144523.ready`，无当前 `status/pid` 文件，容器内也无 `run_kuavo_agno_workflow.py` 进程；这说明当前实例已经处于等待 `go` 的旧逻辑阶段，发送 `back` 不会返航。
+- 本轮已验证修复后的 `scripts_1/start_nav_bridge_workflow_loop.sh` 通过 `bash -n`，`git diff --check` 通过；未停止当前脚本实例，未实际触发返航。
 - 本轮只读复查现场状态：`back` 命令文件已写入但当前旧脚本实例仍在等待 workflow 结束，因此不会立即消费；本轮修复对已运行的旧脚本实例不热更新，需下次重启编排脚本生效。
 
 ## 阻塞问题
 
-无代码层面的阻塞。本轮返航分段路径和 go 预启动闸门尚未真机完整验证，且已运行的旧 `start_nav_bridge_workflow_loop.sh` 实例不会热更新，需要重启该编排脚本后新返航逻辑和低延迟 go 才生效。运行层面另有两个待恢复/验证事项：一是上一轮 BT67 外接音响已从 Orin 声卡列表消失且 TTS 当前未运行，需要现场恢复声卡后再启动；二是本轮 AIR 咖啡车呼叫逻辑未实际运行，避免误触发现场配送任务，需在真机 workflow 点咖啡环节验证。Unitree `TtsMaker` 只返回机器人接收状态，当前没有官方播放完成回调；`wait_speech` 使用文本长度估算等待时间，后续如发现台词衔接过快或过慢，需要调节 `UnitreeG1TTS._estimate_duration` 或新增更可靠的播放状态查询。
+无代码层面的阻塞。本轮返航分段路径、go 预启动闸门和等待 go 阶段 back 返航尚未真机完整验证，且已运行的旧 `start_nav_bridge_workflow_loop.sh` 实例不会热更新，需要重启该编排脚本后新返航逻辑、低延迟 go 和等待 go 阶段 back 才生效。运行层面另有两个待恢复/验证事项：一是上一轮 BT67 外接音响已从 Orin 声卡列表消失且 TTS 当前未运行，需要现场恢复声卡后再启动；二是本轮 AIR 咖啡车呼叫逻辑未实际运行，避免误触发现场配送任务，需在真机 workflow 点咖啡环节验证。Unitree `TtsMaker` 只返回机器人接收状态，当前没有官方播放完成回调；`wait_speech` 使用文本长度估算等待时间，后续如发现台词衔接过快或过慢，需要调节 `UnitreeG1TTS._estimate_duration` 或新增更可靠的播放状态查询。
 
 ## 建议的下一步
 
@@ -109,6 +114,7 @@
 - 重启 `start_nav_bridge_workflow_loop.sh` 后，真机重点验证 `back` 是否按点位5、`3->5过渡点位`、点位3、点位2、`1->2过渡点位`、点位1的逆序路径行走，并观察每段日志中的 `返航分段 x/5` 状态和耗时。
 - 重启 `start_nav_bridge_workflow_loop.sh` 后，先观察主终端是否出现 `workflow 已完成预启动并停在 go 闸门`，再发送 `go`，重点确认第一句台词是否在闸门释放后快速开始，并查看 `workflow启动闸门: stage=released` 与 TTS 请求日志的时间差。
 - 如果再次出现启动后直接退出，优先看终端是否有 `Permission denied`，并确认脚本打印的 workflow 日志路径应位于 `logs/nav_workflow_control/rabbitbot_workflow_*.log`，不应再位于 `logs/unified_runtime`。
+- 如果机器人已在点位5但主脚本显示正在等待 `go`，新版本允许直接发送 `back` 进入返航；旧运行实例不会具备该能力，需要重启 `start_nav_bridge_workflow_loop.sh` 后再试。
 - 如需现场修改称呼，直接改当前选中台词文件的 `variables.leader_calling`；如需修改台词，改对应 `opening` 键或 `steps[].segments[].text`。修改后重启 workflow 让进程重新读取台词文件。
 - `conf/dialogue_<序号>.json` 文件已被 Git 忽略；新增或修改现场台词后不会出现在 `git status` 中。如需提交其它配置文件，请避免使用 `dialogue` 前缀。
 - 完整跑完 DOCX 剧本后，确认终端出现 `DOCX 剧本总耗时`，并检查耗时是否覆盖开场第一句到最后一句“各位再会！”结束后的剧本完成时刻。
@@ -138,6 +144,7 @@
 - `start_nav_bridge_workflow_loop.sh` 的返航现在是分段路径，默认顺序为 `3->5过渡点位 -> 点位3 -> 点位2 -> 1->2过渡点位 -> 点位1`；点位可分别通过 `RABBITBOT_NAV_WORKFLOW_POINT_3_TO_5_TRANSITION`、`RABBITBOT_NAV_WORKFLOW_POINT_3`、`RABBITBOT_NAV_WORKFLOW_POINT_2`、`RABBITBOT_NAV_WORKFLOW_POINT_1_TO_2_TRANSITION`、`RABBITBOT_NAV_WORKFLOW_POINT_1` 覆盖，最终点位1仍可用 `RABBITBOT_NAV_WORKFLOW_START_POINT` 兼容覆盖。返航状态通过 28180 `/go_to_status` 轮询，`status=3` 视为当前分段成功。
 - `start_nav_bridge_workflow_loop.sh` 的 `go` 现在使用预启动闸门：可用 `RABBITBOT_NAV_WORKFLOW_GATE_READY_TIMEOUT_SECONDS` 调整等待预启动就绪超时，用 `RABBITBOT_WORKFLOW_START_GATE_POLL_SECONDS` 调整 workflow 内部闸门轮询间隔，用 `RABBITBOT_NAV_WORKFLOW_STATUS_POLL_SECONDS` 调整 workflow 运行期间状态和 back 预接收轮询间隔。
 - `logs/unified_runtime` 当前由 root 拥有，普通用户不要在宿主侧直接写该目录；新的导航 workflow 编排运行日志和闸门控制文件默认放在 `logs/nav_workflow_control`，避免再次触发权限退出。
+- 新版本中 workflow 预启动的 `ready/go/status/pid/exit_code` 都应位于 `logs/nav_workflow_control/workflow_control`；如果只看到 ready 而没有 status/pid，应优先检查是否仍在运行旧脚本实例或旧环境变量。
 - DOCX 后台命令日志会记录命令解析来源、启动 PID、超时时间、退出码、耗时、stdout/stderr 摘要，可用于排查 AIR 咖啡车接口是否被调用以及返回结果。
 - `send_delivery_task.py` 现在会向 stderr 记录 AIR 咖啡车接口请求开始、HTTP 状态、耗时、返回字节数、运行任务 ID 以及失败原因；workflow 捕获后台命令 stderr 后可直接辅助定位网络、接口或模板问题。
 - DOCX 剧本计时日志会在终端打印 `DOCX 剧本总计时开始` 和 `DOCX 剧本总耗时`，用于现场快速确认整段流程耗时。

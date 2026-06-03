@@ -136,6 +136,25 @@ workflow_running() {
     docker exec "${CONTAINER_NAME}" bash -lc 'pgrep -f "[e]xamples/run_kuavo_agno.py" >/dev/null || pgrep -f "[s]cripts/run_kuavo_agno_workflow.py" >/dev/null || pgrep -f "[s]cripts/start_kuavo_agno_workflow.bash" >/dev/null' >/dev/null 2>&1
 }
 
+current_workflow_process_active() {
+    if [ -z "${current_pid_file}" ] || [ ! -s "${current_pid_file}" ]; then
+        return 1
+    fi
+    local workflow_pid=""
+    workflow_pid="$(cat "${current_pid_file}" 2>/dev/null || true)"
+    if [ -z "${workflow_pid}" ]; then
+        return 1
+    fi
+    docker exec "${CONTAINER_NAME}" bash -lc "kill -0 '${workflow_pid}' 2>/dev/null" >/dev/null 2>&1
+}
+
+stop_workflow_tail() {
+    if [ -n "${workflow_tail_pid}" ] && kill -0 "${workflow_tail_pid}" 2>/dev/null; then
+        kill "${workflow_tail_pid}" 2>/dev/null || true
+        workflow_tail_pid=""
+    fi
+}
+
 stop_current_workflow() {
     if [ -z "${current_run_id}" ] || [ -z "${current_pid_file}" ] || [ ! -s "${current_pid_file}" ]; then
         return 0
@@ -157,9 +176,7 @@ stop_current_workflow() {
 cleanup() {
     local reason="${1:-EXIT}"
     trap - INT TERM EXIT
-    if [ -n "${workflow_tail_pid}" ] && kill -0 "${workflow_tail_pid}" 2>/dev/null; then
-        kill "${workflow_tail_pid}" 2>/dev/null || true
-    fi
+    stop_workflow_tail
     stop_current_workflow
     if [ -n "${nav_group_pid}" ] && kill -0 -- "-${nav_group_pid}" 2>/dev/null; then
         log_info "收到 ${reason}，正在停止导航桥接进程组：pgid=${nav_group_pid}"
@@ -295,7 +312,7 @@ launch_workflow_detached() {
         -e RABBITBOT_WORKFLOW_NON_INTEGRATION="${RABBITBOT_WORKFLOW_NON_INTEGRATION}" \
         -e RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE}" \
         -e RABBITBOT_DIR="${CONTAINER_RABBITBOT_DIR}" \
-        -e RABBITBOT_LOG_DIR="${CONTAINER_LOG_DIR}" \
+        -e RABBITBOT_LOG_DIR="${CONTAINER_WORKFLOW_RUN_DIR}" \
         -e RABBITBOT_WORKFLOW_RUN_ID="${current_run_id}" \
         -e RABBITBOT_WORKFLOW_START_GATE_FILE="${current_gate_file}" \
         -e RABBITBOT_WORKFLOW_START_GATE_READY_FILE="${current_gate_ready_file}" \
@@ -343,10 +360,6 @@ wait_workflow_gate_ready() {
     log_info "等待 workflow 预启动完成：run_id=${current_run_id}, timeout=${WORKFLOW_GATE_READY_TIMEOUT_SECONDS}s"
     local i
     for ((i = 0; i < attempts; i++)); do
-        if [ -s "${current_host_gate_ready_file}" ]; then
-            log_info "workflow 已完成预启动并停在 go 闸门：run_id=${current_run_id}, elapsed=$(elapsed_ms_since "${start_ms}")ms"
-            return 0
-        fi
         local status=""
         status="$(cat "${current_status_file}" 2>/dev/null || true)"
         if [ "${status}" = "finished" ]; then
@@ -355,10 +368,44 @@ wait_workflow_gate_ready() {
             log_error "workflow 在等待 go 前已退出：run_id=${current_run_id}, exit_code=${exit_code:-unknown}"
             return 1
         fi
+        if [ -s "${current_host_gate_ready_file}" ]; then
+            if current_workflow_process_active; then
+                log_info "workflow 已完成预启动并停在 go 闸门：run_id=${current_run_id}, elapsed=$(elapsed_ms_since "${start_ms}")ms"
+                return 0
+            fi
+            log_warn "workflow ready 文件存在但进程不在，准备重新预启动：run_id=${current_run_id}"
+            return 1
+        fi
         sleep 0.1
     done
     log_error "workflow 预启动等待超时：run_id=${current_run_id}, timeout=${WORKFLOW_GATE_READY_TIMEOUT_SECONDS}s"
     return 1
+}
+
+wait_go_or_back() {
+    WAITED_COMMAND=""
+    log_info "等待命令：go 启动 workflow；此阶段收到 back 将直接返航"
+    while true; do
+        local command=""
+        command="$(read_pending_command || true)"
+        case "${command}" in
+            go|back)
+                WAITED_COMMAND="${command}"
+                log_info "收到命令：${command}"
+                return 0
+                ;;
+            "")
+                ;;
+            *)
+                handle_unexpected_command "${command}" "go 或 back"
+                ;;
+        esac
+        if ! current_workflow_process_active; then
+            log_warn "等待 go/back 时发现预启动 workflow 已退出，准备重新预启动：run_id=${current_run_id}"
+            return 1
+        fi
+        sleep "${COMMAND_POLL_SECONDS}"
+    done
 }
 
 release_workflow_gate() {
@@ -398,10 +445,7 @@ monitor_workflow_until_finished() {
         sleep "${WORKFLOW_STATUS_POLL_SECONDS}"
     done
 
-    if [ -n "${workflow_tail_pid}" ] && kill -0 "${workflow_tail_pid}" 2>/dev/null; then
-        kill "${workflow_tail_pid}" 2>/dev/null || true
-        workflow_tail_pid=""
-    fi
+    stop_workflow_tail
 
     local exit_code="unknown"
     exit_code="$(cat "${current_exit_code_file}" 2>/dev/null || true)"
@@ -494,8 +538,26 @@ main() {
     while true; do
         queued_back_after_workflow=0
         launch_workflow_detached
-        wait_workflow_gate_ready
-        wait_command go "go 启动 workflow"
+        if ! wait_workflow_gate_ready; then
+            stop_workflow_tail
+            stop_current_workflow
+            log_warn "本轮 workflow 预启动不可用，重新预启动"
+            continue
+        fi
+        if ! wait_go_or_back; then
+            stop_workflow_tail
+            stop_current_workflow
+            log_warn "等待 go/back 阶段检测到预启动 workflow 异常，重新预启动"
+            continue
+        fi
+        if [ "${WAITED_COMMAND}" = "back" ]; then
+            log_info "等待 go 阶段收到 back，停止预启动 workflow 后直接返航"
+            stop_workflow_tail
+            stop_current_workflow
+            return_to_start
+            log_info "返航流程结束，继续预启动下一次 workflow。"
+            continue
+        fi
         release_workflow_gate
         monitor_workflow_until_finished
         if [ "${queued_back_after_workflow}" = "1" ]; then
