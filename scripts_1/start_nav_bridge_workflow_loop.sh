@@ -29,11 +29,11 @@ HOST_LOG_DIR="${HOST_LOG_DIR:-${PROJECT_DIR}/logs}"
 CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_CONTROL_DIR:-/tmp/rabbitbot_nav_workflow_control}"
 COMMAND_FILE="${RABBITBOT_NAV_WORKFLOW_COMMAND_FILE:-${CONTROL_DIR}/command}"
 RUN_DIR="${HOST_LOG_DIR}/nav_workflow_control"
-POINT_1_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_1:-(1.9105, -1.6180, 0.0117, -0.0029, 0.0265, -0.2046, 0.9785)}"
-POINT_1_TO_2_TRANSITION_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_1_TO_2_TRANSITION:-(8.6465, -2.5763, -0.0722, 0.0547, 0.0907, 0.5347, 0.8384)}"
-POINT_2_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_2:-(10.1203, 0.8162, -0.1335, 0.0904, 0.0373, 0.9074, 0.4087)}"
-POINT_3_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_3:-(11.1090, 4.3229, -0.1892, 0.0937, 0.0170, 0.9717, 0.2162)}"
-POINT_3_TO_5_TRANSITION_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_3_TO_5_TRANSITION:-(5.5507, 14.4097, -0.1921, 0.0779, 0.0578, 0.7806, 0.6174)}"
+POINT_1_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_1:-(1.9105, -1.6180, -0.0029, 0.0265, -0.2046, 0.9785)}"
+POINT_1_TO_2_TRANSITION_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_1_TO_2_TRANSITION:-(8.6465, -2.5763, 0.0547, 0.0907, 0.5347, 0.8384)}"
+POINT_2_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_2:-(10.1203, 0.8162, 0.0904, 0.0373, 0.9074, 0.4087)}"
+POINT_3_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_3:-(11.1090, 4.3229, 0.0937, 0.0170, 0.9717, 0.2162)}"
+POINT_3_TO_5_TRANSITION_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_3_TO_5_TRANSITION:-(5.5507, 14.4097, 0.0779, 0.0578, 0.7806, 0.6174)}"
 START_POINT_TASK="${RABBITBOT_NAV_WORKFLOW_START_POINT:-${POINT_1_TASK}}"
 BACK_TIMEOUT_SECONDS="${RABBITBOT_NAV_WORKFLOW_BACK_TIMEOUT_SECONDS:-240}"
 COMMAND_POLL_SECONDS="${RABBITBOT_NAV_WORKFLOW_COMMAND_POLL_SECONDS:-0.2}"
@@ -130,6 +130,33 @@ except Exception:
 else:
     print(data.get(field, ""))
 ' "${field}"
+}
+
+normalize_go_to_task() {
+    local task="$1"
+    python3 - "${task}" <<'PY'
+import ast
+import sys
+
+def convert_pose(value):
+    if isinstance(value, tuple) and len(value) == 7:
+        # 28180 直接 go_to_async 接口使用 (x, y, ox, oy, oz, ow)，不包含 z。
+        return (value[0], value[1], value[3], value[4], value[5], value[6])
+    return value
+
+raw = sys.argv[1]
+try:
+    parsed = ast.literal_eval(raw)
+except Exception:
+    print(raw)
+    raise SystemExit(0)
+
+if isinstance(parsed, list):
+    parsed = [convert_pose(item) for item in parsed]
+else:
+    parsed = convert_pose(parsed)
+print(repr(parsed))
+PY
 }
 
 workflow_running() {
@@ -461,13 +488,18 @@ navigate_back_segment() {
     local segment_index="$3"
     local segment_total="$4"
 
-    log_info "返航分段 ${segment_index}/${segment_total} 开始：${label}，目标=${task}"
+    local task_payload
+    task_payload="$(normalize_go_to_task "${task}")"
+    if [ "${task_payload}" != "${task}" ]; then
+        log_warn "返航分段 ${segment_index}/${segment_total} 任务格式已兼容转换：label=${label}, original=${task}, payload=${task_payload}"
+    fi
+    log_info "返航分段 ${segment_index}/${segment_total} 开始：${label}，目标=${task_payload}"
     local reset_response
     reset_response="$(curl --max-time 5 -sS -X POST http://127.0.0.1:28180/reset_go_to_status --form-string 'task=' 2>&1 || true)"
     log_info "返航分段 ${segment_index}/${segment_total} 重置导航状态返回：${reset_response}"
 
     local response
-    response="$(curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string "task=${task}" 2>&1 || true)"
+    response="$(curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string "task=${task_payload}" 2>&1 || true)"
     log_info "返航分段 ${segment_index}/${segment_total} 命令返回：${response}"
     local success
     success="$(printf '%s' "${response}" | json_field success || true)"
