@@ -34,6 +34,7 @@ POINT_1_TO_2_TRANSITION_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_1_TO_2_TRANSITION:-
 POINT_2_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_2:-(10.1203, 0.8162, 0.0904, 0.0373, 0.9074, 0.4087)}"
 POINT_3_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_3:-(11.1090, 4.3229, 0.0937, 0.0170, 0.9717, 0.2162)}"
 POINT_3_TO_5_TRANSITION_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_3_TO_5_TRANSITION:-(5.5507, 14.4097, 0.0779, 0.0578, 0.7806, 0.6174)}"
+POINT_5_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_5:-(4.7039, 20.4749, 0.0876, -0.0269, 0.9076, -0.4096)}"
 START_POINT_TASK="${RABBITBOT_NAV_WORKFLOW_START_POINT:-${POINT_1_TASK}}"
 BACK_TIMEOUT_SECONDS="${RABBITBOT_NAV_WORKFLOW_BACK_TIMEOUT_SECONDS:-240}"
 COMMAND_POLL_SECONDS="${RABBITBOT_NAV_WORKFLOW_COMMAND_POLL_SECONDS:-0.2}"
@@ -538,13 +539,13 @@ navigate_back_segment() {
 }
 
 return_to_start() {
-    local labels=("3->5过渡点位" "点位3" "点位2" "1->2过渡点位" "点位1")
-    local tasks=("${POINT_3_TO_5_TRANSITION_TASK}" "${POINT_3_TASK}" "${POINT_2_TASK}" "${POINT_1_TO_2_TRANSITION_TASK}" "${START_POINT_TASK}")
+    local labels=("点位5" "3->5过渡点位" "点位3" "点位2" "1->2过渡点位" "点位1")
+    local tasks=("${POINT_5_TASK}" "${POINT_3_TO_5_TRANSITION_TASK}" "${POINT_3_TASK}" "${POINT_2_TASK}" "${POINT_1_TO_2_TRANSITION_TASK}" "${START_POINT_TASK}")
     local segment_total="${#labels[@]}"
     local start_epoch
     start_epoch="$(date +%s)"
 
-    log_info "收到 back 后按逆序路径返航：点位5 -> 3->5过渡点位 -> 点位3 -> 点位2 -> 1->2过渡点位 -> 点位1"
+    log_info "收到 back 后先前往点位5，再按逆序路径返航：点位5 -> 3->5过渡点位 -> 点位3 -> 点位2 -> 1->2过渡点位 -> 点位1"
     log_info "返航最终点位1目标：${START_POINT_TASK}"
 
     local i
