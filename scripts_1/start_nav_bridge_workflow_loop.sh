@@ -23,7 +23,12 @@ HOST_LOG_DIR="${HOST_LOG_DIR:-${PROJECT_DIR}/logs}"
 CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_CONTROL_DIR:-/tmp/rabbitbot_nav_workflow_control}"
 COMMAND_FILE="${RABBITBOT_NAV_WORKFLOW_COMMAND_FILE:-${CONTROL_DIR}/command}"
 RUN_DIR="${HOST_LOG_DIR}/nav_workflow_control"
-START_POINT_TASK="${RABBITBOT_NAV_WORKFLOW_START_POINT:-(0.6906, 0.8284, 0.0262, -0.0289, 0.0174, 0.7443, -0.6669)}"
+POINT_1_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_1:-(1.9105, -1.6180, 0.0117, -0.0029, 0.0265, -0.2046, 0.9785)}"
+POINT_1_TO_2_TRANSITION_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_1_TO_2_TRANSITION:-(8.6465, -2.5763, -0.0722, 0.0547, 0.0907, 0.5347, 0.8384)}"
+POINT_2_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_2:-(10.1203, 0.8162, -0.1335, 0.0904, 0.0373, 0.9074, 0.4087)}"
+POINT_3_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_3:-(11.1090, 4.3229, -0.1892, 0.0937, 0.0170, 0.9717, 0.2162)}"
+POINT_3_TO_5_TRANSITION_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_3_TO_5_TRANSITION:-(5.5507, 14.4097, -0.1921, 0.0779, 0.0578, 0.7806, 0.6174)}"
+START_POINT_TASK="${RABBITBOT_NAV_WORKFLOW_START_POINT:-${POINT_1_TASK}}"
 BACK_TIMEOUT_SECONDS="${RABBITBOT_NAV_WORKFLOW_BACK_TIMEOUT_SECONDS:-240}"
 COMMAND_POLL_SECONDS="${RABBITBOT_NAV_WORKFLOW_COMMAND_POLL_SECONDS:-0.2}"
 WORKFLOW_STATUS_POLL_SECONDS="${RABBITBOT_NAV_WORKFLOW_STATUS_POLL_SECONDS:-1}"
@@ -295,19 +300,24 @@ echo "$!" >"${control_dir}/${run_id}.pid"
     log_info "workflow 已结束：run_id=${run_id}, exit_code=${exit_code}"
 }
 
-return_to_start() {
-    log_info "收到 back 后返回起点：${START_POINT_TASK}"
+navigate_back_segment() {
+    local label="$1"
+    local task="$2"
+    local segment_index="$3"
+    local segment_total="$4"
+
+    log_info "返航分段 ${segment_index}/${segment_total} 开始：${label}，目标=${task}"
     local reset_response
     reset_response="$(curl --max-time 5 -sS -X POST http://127.0.0.1:28180/reset_go_to_status --form-string 'task=' 2>&1 || true)"
-    log_info "重置导航状态返回：${reset_response}"
+    log_info "返航分段 ${segment_index}/${segment_total} 重置导航状态返回：${reset_response}"
 
     local response
-    response="$(curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string "task=${START_POINT_TASK}" 2>&1 || true)"
-    log_info "返航命令返回：${response}"
+    response="$(curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string "task=${task}" 2>&1 || true)"
+    log_info "返航分段 ${segment_index}/${segment_total} 命令返回：${response}"
     local success
     success="$(printf '%s' "${response}" | json_field success || true)"
     if [ "${success}" != "True" ] && [ "${success}" != "true" ]; then
-        log_error "返航命令未成功发送，请检查 28180 bridge 和导航状态。"
+        log_error "返航分段 ${segment_index}/${segment_total} 命令未成功发送：label=${label}，请检查 28180 bridge 和导航状态。"
         return 1
     fi
 
@@ -319,25 +329,49 @@ return_to_start() {
         status="$(printf '%s' "${status_response}" | json_field status || true)"
         sub="$(printf '%s' "${status_response}" | json_field sub || true)"
         if [ "${status}:${sub}" != "${last_status}" ]; then
-            log_info "返航导航状态：status=${status:-未知}, sub=${sub:-空}, waited=${waited}s"
+            log_info "返航分段 ${segment_index}/${segment_total} 状态：label=${label}, status=${status:-未知}, sub=${sub:-空}, waited=${waited}s"
             last_status="${status}:${sub}"
         fi
         case "${status}" in
             3)
-                log_info "已返回起点"
+                log_info "返航分段 ${segment_index}/${segment_total} 完成：${label}，耗时=${waited}s"
                 curl --max-time 5 -sS -X POST http://127.0.0.1:28180/reset_go_to_status --form-string 'task=' >/dev/null 2>&1 || true
                 return 0
                 ;;
             2|4)
-                log_error "返航导航失败或被抢占：status=${status}, response=${status_response}"
+                log_error "返航分段 ${segment_index}/${segment_total} 失败或被抢占：label=${label}, status=${status}, response=${status_response}"
                 return 1
                 ;;
         esac
         sleep 1
         waited=$((waited + 1))
     done
-    log_error "返航等待超时：timeout=${BACK_TIMEOUT_SECONDS}s"
+    log_error "返航分段 ${segment_index}/${segment_total} 等待超时：label=${label}, timeout=${BACK_TIMEOUT_SECONDS}s"
     return 1
+}
+
+return_to_start() {
+    local labels=("3->5过渡点位" "点位3" "点位2" "1->2过渡点位" "点位1")
+    local tasks=("${POINT_3_TO_5_TRANSITION_TASK}" "${POINT_3_TASK}" "${POINT_2_TASK}" "${POINT_1_TO_2_TRANSITION_TASK}" "${START_POINT_TASK}")
+    local segment_total="${#labels[@]}"
+    local start_epoch
+    start_epoch="$(date +%s)"
+
+    log_info "收到 back 后按逆序路径返航：点位5 -> 3->5过渡点位 -> 点位3 -> 点位2 -> 1->2过渡点位 -> 点位1"
+    log_info "返航最终点位1目标：${START_POINT_TASK}"
+
+    local i
+    for i in "${!labels[@]}"; do
+        local segment_index=$((i + 1))
+        if ! navigate_back_segment "${labels[$i]}" "${tasks[$i]}" "${segment_index}" "${segment_total}"; then
+            local elapsed=$(( $(date +%s) - start_epoch ))
+            log_error "返航流程中止：失败分段=${labels[$i]}，已耗时=${elapsed}s"
+            return 1
+        fi
+    done
+
+    local elapsed=$(( $(date +%s) - start_epoch ))
+    log_info "已按逆序路径返回点位1，总耗时=${elapsed}s"
 }
 
 main() {

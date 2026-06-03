@@ -1,5 +1,5 @@
 # 点位1
-docker exec kuavo-agno-projects-only-test curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string 'task=(0.6906, 0.8284, 0.0262, -0.0289, 0.0174, 0.7443, -0.6669)'
+docker exec kuavo-agno-projects-only-test curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string 'task=(1.9105, -1.6180, 0.0117, -0.0029, 0.0265, -0.2046, 0.9785)'
 
 # 点位2（含 1->2 过渡）
 docker exec kuavo-agno-projects-only-test curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_async --form-string 'task=[(8.6465, -2.5763, -0.0722, 0.0547, 0.0907, 0.5347, 0.8384), (10.1203, 0.8162, -0.1335, 0.0904, 0.0373, 0.9074, 0.4087)]'

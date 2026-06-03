@@ -11,7 +11,7 @@
 - 已保持严格 DOCX 剧本开场逻辑：不在开场台词前额外导航点位1，直接从点位1开始台词。
 - 已保持当前 DOCX 剧本步骤顺序：`1到2过渡`、`跟随步行到点位2`、`点咖啡`、`初步介绍`、`拿取咖啡`、`前往3到5过渡点`、`前往点位5`、`告别并指引小巴方向`。
 - 已保持 `1->2过渡点位` 和 `3->5过渡点位` 为独立只导航、无台词步骤，避免在过渡点提前播报。
-- 已按 2026-06-02 现场新采地图更新 DOCX 点位坐标：`1->2过渡点位`、`点位2`、`点位3`、`3->5过渡点位`、`点位5` 已写入 `DOCX_SCRIPT_POINTS`；点位1未重新提供，保持当前 workflow 中原坐标。
+- 已按现场新采地图更新 DOCX 点位坐标：`点位1`、`1->2过渡点位`、`点位2`、`点位3`、`3->5过渡点位`、`点位5` 已写入 `DOCX_SCRIPT_POINTS`；其中本轮按最新反馈将点位1改为 `(1.9105, -1.6180, 0.0117, -0.0029, 0.0265, -0.2046, 0.9785)`。
 - 已将导览台词文件命名格式改为 `conf/dialogue_<序号>.json`，当前默认文件为 `conf/dialogue_0.json`；不显式指定时默认加载 0 号台词；启动 workflow 时可通过 `RABBITBOT_DIALOGUE_INDEX=<序号>` 选择对应台词文件。
 - 本轮已将 `conf/dialogue*` 前缀台词文件加入 `.gitignore`，并从 Git 索引移除 `conf/dialogue_0.json`；Orin 本地文件仍保留，`conf` 目录本身和其它非 dialogue 配置文件不被整体忽略。
 - 本轮已补齐 `workflow.py` 顶部运行环境变量速查注释，覆盖严格剧本、台词序号/文件覆盖、咖啡车后台命令、导航、动作、profile 和 mock 视觉相关变量。
@@ -25,6 +25,7 @@
 - 本轮已将 `start_nav_bridge_workflow_loop.sh` 默认导航地图从 `/home/unitree/test.pcd` 改为 `/home/unitree/test1.pcd`；仍可通过 `NAV_PCD_PATH` 环境变量临时覆盖。
 - 本轮修复 `start_nav_bridge_workflow_loop.sh` 的 `go/back` 控制体验：命令轮询默认从 1 秒降到 0.2 秒；workflow 运行期间提前收到 `back` 时会立即记录并排队，待 workflow 结束后自动返航。
 - 本轮已移除 DOCX 剧本结束后的普通问答模式：严格 DOCX 剧本完成后 workflow 会结束，不再进入“你好，请问你需要我做什么吗”的 STT/TTS 循环；现场本地忽略文件 `examples/run_kuavo_agno.py` 的“流程测试完成”播报也已改为默认关闭。
+- 本轮已修复 `back` 返航路径：`start_nav_bridge_workflow_loop.sh` 不再从点位5直接发送点位1单一目标，而是按 `3->5过渡点位 -> 点位3 -> 点位2 -> 1->2过渡点位 -> 点位1` 分段返航；每段都会重置导航状态、发送目标、轮询状态并打印分段耗时。
 - 本轮新增 `scripts_1/send_nav_workflow_command.sh`，供其它终端发送 `go`、`back` 或 `quit` 控制命令；命令通过 `/tmp/rabbitbot_nav_workflow_control/command` 文件传递，不依赖主终端 stdin。
 - 已将默认称呼抽为 `variables.leader_calling`，台词中的 `{leader_calling}` 会在运行时替换；缺少该键时 workflow 会报出明确配置错误，不再静默使用代码内固定称呼。
 - 本轮已按现场要求调整 `conf/dialogue_0.json`：开场问候句改为“{leader_calling}您好，我叫小智。”；点位5小巴引导合并为一个播报段，减少句间 TTS 停顿，最后“各位再会！”仍单独配合挥手动作。
@@ -71,6 +72,7 @@
 - 上一轮现场释放了导航桥接常用端口 `28180`：当时确认占用方为 `python3` 进程 PID `7283`，执行结束后复查 `ss -ltnp "sport = :28180"` 已无监听进程。
 - 本轮处理旧导航桥接进程：先结束 `start_nav_arm_bridge.sh eno1 /home/unitree/test1.pcd` 的 PID `41946` 进程组；随后复查发现同命令又拉起 PID `42936` 进程组并占用 28180，已继续结束其 `goGoalNavigation66`、`humble_robot_agent_bridge`、`tail`、`tee` 子进程。最终复查 `ss -ltnp "sport = :28180"` 已无监听进程。
 - 本轮同步更新了 `docs/DOCX严格剧本workflow逻辑.md` 和 `docs/直接导航命令.txt` 中的点位坐标说明，直接导航命令中的点位5路径已改为包含 `3->5过渡`。
+- 本轮同步更新了 `docs/DOCX严格剧本workflow逻辑.md` 和 `docs/直接导航命令.txt` 中的点位1坐标，已与 workflow 和返航脚本默认点位1保持一致。
 - 本轮已验证 `conf/dialogue_0.json` 可通过 `python3 -m json.tool` 解析，`rabbitbot/agno_agents/workflow.py` 可通过 `python3 -m py_compile` 语法检查；同时验证未设置环境变量时默认解析到 0 号台词，且 `RABBITBOT_DIALOGUE_INDEX=0` 路径可解析。
 - 本轮已验证 `send_delivery_task.py --help` 可正常输出命令说明，`python3 -m py_compile rabbitbot/agno_agents/workflow.py send_delivery_task.py` 语法检查通过；未在本轮实际触发 `run`，避免误呼叫咖啡车。
 - 本轮停止当前 workflow 后已复查：容器内不再存在 `run_kuavo_agno.py`、`start_kuavo_agno_workflow.bash` 或 workflow 日志 `tee` 进程；unified 容器仍运行，TTS/STT/Memory 服务进程仍在。
@@ -80,11 +82,12 @@
 - 本轮已验证 `scripts_1/start_nav_bridge_workflow_loop.sh` 和 `scripts_1/send_nav_workflow_command.sh` 通过 `bash -n` 语法检查；未实际启动导航桥接、未启动 workflow、未发送返航命令，避免影响现场运行。
 - 本轮已验证普通用户 `pc` 对 `logs` 目录有写权限，但 `logs/unified_runtime` 当前为 `root:root 755`，这是直接运行编排脚本时创建导航控制日志失败的原因；同时验证 ROS 动态库缺失可通过 source Humble 和 `custom_action_ws` 修复。
 - 本轮已验证 `scripts_1/start_nav_bridge_workflow_loop.sh` 通过 `bash -n` 语法检查；未实际启动导航桥接或 workflow。
+- 本轮已验证本次返航修改后的 `scripts_1/start_nav_bridge_workflow_loop.sh` 通过 `bash -n`，`rabbitbot/agno_agents/workflow.py` 通过 `python3 -m py_compile`；未实际发送 `back` 或启动导航，避免影响现场运行。
 - 本轮只读复查现场状态：`back` 命令文件已写入但当前旧脚本实例仍在等待 workflow 结束，因此不会立即消费；本轮修复对已运行的旧脚本实例不热更新，需下次重启编排脚本生效。
 
 ## 阻塞问题
 
-无代码层面的阻塞。运行层面有两个待恢复/验证事项：一是上一轮 BT67 外接音响已从 Orin 声卡列表消失且 TTS 当前未运行，需要现场恢复声卡后再启动；二是本轮 AIR 咖啡车呼叫逻辑未实际运行，避免误触发现场配送任务，需在真机 workflow 点咖啡环节验证。Unitree `TtsMaker` 只返回机器人接收状态，当前没有官方播放完成回调；`wait_speech` 使用文本长度估算等待时间，后续如发现台词衔接过快或过慢，需要调节 `UnitreeG1TTS._estimate_duration` 或新增更可靠的播放状态查询。
+无代码层面的阻塞。本轮返航分段路径尚未真机验证，且已运行的旧 `start_nav_bridge_workflow_loop.sh` 实例不会热更新，需要重启该编排脚本后新返航逻辑才生效。运行层面另有两个待恢复/验证事项：一是上一轮 BT67 外接音响已从 Orin 声卡列表消失且 TTS 当前未运行，需要现场恢复声卡后再启动；二是本轮 AIR 咖啡车呼叫逻辑未实际运行，避免误触发现场配送任务，需在真机 workflow 点咖啡环节验证。Unitree `TtsMaker` 只返回机器人接收状态，当前没有官方播放完成回调；`wait_speech` 使用文本长度估算等待时间，后续如发现台词衔接过快或过慢，需要调节 `UnitreeG1TTS._estimate_duration` 或新增更可靠的播放状态查询。
 
 ## 建议的下一步
 
@@ -96,6 +99,7 @@
 - 真机跑点咖啡环节时，重点观察“我来给各位安排。”开播时是否同时出现 `DOCX 后台命令已启动` 和 `DOCX 后台命令结束` 日志，并确认 stdout 中咖啡车接口返回 `success=true` 和运行时 `task_id`。
 - 重新拉起导航桥接后，先用 `docs/直接导航命令.txt` 中的新坐标逐点验证 `1->2过渡`、`点位2`、`点位3`、`3->5过渡` 和 `点位5` 到点精度。
 - 若使用新的导航 + workflow 编排脚本，主终端执行 `bash scripts_1/start_nav_bridge_workflow_loop.sh`，其它终端用 `bash scripts_1/send_nav_workflow_command.sh go` 启动 workflow，剧本完成后用 `bash scripts_1/send_nav_workflow_command.sh back` 返回点位1。
+- 重启 `start_nav_bridge_workflow_loop.sh` 后，真机重点验证 `back` 是否按点位5、`3->5过渡点位`、点位3、点位2、`1->2过渡点位`、点位1的逆序路径行走，并观察每段日志中的 `返航分段 x/5` 状态和耗时。
 - 如需现场修改称呼，直接改当前选中台词文件的 `variables.leader_calling`；如需修改台词，改对应 `opening` 键或 `steps[].segments[].text`。修改后重启 workflow 让进程重新读取台词文件。
 - `conf/dialogue_<序号>.json` 文件已被 Git 忽略；新增或修改现场台词后不会出现在 `git status` 中。如需提交其它配置文件，请避免使用 `dialogue` 前缀。
 - 完整跑完 DOCX 剧本后，确认终端出现 `DOCX 剧本总耗时`，并检查耗时是否覆盖开场第一句到最后一句“各位再会！”结束后的剧本完成时刻。
@@ -122,7 +126,7 @@
 - `start_nav_bridge_workflow_loop.sh` 运行期间如果提前发送 `back`，新版本会排队到 workflow 完成后返航；旧版本实例不会热更新，需重启脚本后才具备该能力。
 - 严格 DOCX 剧本完成后现在默认不进入剧本后问答；现场本地忽略文件 `examples/run_kuavo_agno.py` 也默认不播报“流程测试完成”，如确需恢复结束播报，可临时设置 `RABBITBOT_WORKFLOW_FINISH_SPEECH=1`。
 - 不建议用 `sudo` 启动 `start_nav_bridge_workflow_loop.sh`；sudo 会切换 Python 用户包和部分 ROS 环境，容易出现 `uvicorn` 或 ROS 动态库找不到的问题。
-- `start_nav_bridge_workflow_loop.sh` 的返航目标默认是当前 workflow 点位1坐标，可用 `RABBITBOT_NAV_WORKFLOW_START_POINT` 覆盖；返航状态通过 28180 `/go_to_status` 轮询，`status=3` 视为成功。
+- `start_nav_bridge_workflow_loop.sh` 的返航现在是分段路径，默认顺序为 `3->5过渡点位 -> 点位3 -> 点位2 -> 1->2过渡点位 -> 点位1`；点位可分别通过 `RABBITBOT_NAV_WORKFLOW_POINT_3_TO_5_TRANSITION`、`RABBITBOT_NAV_WORKFLOW_POINT_3`、`RABBITBOT_NAV_WORKFLOW_POINT_2`、`RABBITBOT_NAV_WORKFLOW_POINT_1_TO_2_TRANSITION`、`RABBITBOT_NAV_WORKFLOW_POINT_1` 覆盖，最终点位1仍可用 `RABBITBOT_NAV_WORKFLOW_START_POINT` 兼容覆盖。返航状态通过 28180 `/go_to_status` 轮询，`status=3` 视为当前分段成功。
 - DOCX 后台命令日志会记录命令解析来源、启动 PID、超时时间、退出码、耗时、stdout/stderr 摘要，可用于排查 AIR 咖啡车接口是否被调用以及返回结果。
 - `send_delivery_task.py` 现在会向 stderr 记录 AIR 咖啡车接口请求开始、HTTP 状态、耗时、返回字节数、运行任务 ID 以及失败原因；workflow 捕获后台命令 stderr 后可直接辅助定位网络、接口或模板问题。
 - DOCX 剧本计时日志会在终端打印 `DOCX 剧本总计时开始` 和 `DOCX 剧本总耗时`，用于现场快速确认整段流程耗时。
