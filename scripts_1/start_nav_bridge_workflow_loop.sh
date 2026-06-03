@@ -25,6 +25,8 @@ COMMAND_FILE="${RABBITBOT_NAV_WORKFLOW_COMMAND_FILE:-${CONTROL_DIR}/command}"
 RUN_DIR="${HOST_LOG_DIR}/nav_workflow_control"
 START_POINT_TASK="${RABBITBOT_NAV_WORKFLOW_START_POINT:-(0.6906, 0.8284, 0.0262, -0.0289, 0.0174, 0.7443, -0.6669)}"
 BACK_TIMEOUT_SECONDS="${RABBITBOT_NAV_WORKFLOW_BACK_TIMEOUT_SECONDS:-240}"
+COMMAND_POLL_SECONDS="${RABBITBOT_NAV_WORKFLOW_COMMAND_POLL_SECONDS:-0.2}"
+WORKFLOW_STATUS_POLL_SECONDS="${RABBITBOT_NAV_WORKFLOW_STATUS_POLL_SECONDS:-1}"
 WAIT_DEFAULT_SECONDS="${WAIT_DEFAULT_SECONDS:-420}"
 WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS:-600}"
 RABBITBOT_WORKFLOW_NON_INTEGRATION="${RABBITBOT_WORKFLOW_NON_INTEGRATION:-0}"
@@ -33,6 +35,7 @@ RABBITBOT_UNIFIED_ATTACH_STDIN="${RABBITBOT_UNIFIED_ATTACH_STDIN:-0}"
 
 nav_group_pid=""
 workflow_tail_pid=""
+queued_back_after_workflow=0
 
 log_info() {
     echo -e "\033[32m[INFO]\033[0m $1"
@@ -153,35 +156,52 @@ ensure_unified_services() {
     )
 }
 
+read_pending_command() {
+    if [ ! -s "${COMMAND_FILE}" ]; then
+        return 1
+    fi
+    local command
+    command="$(head -n 1 "${COMMAND_FILE}" | tr -d $'\r' | xargs || true)"
+    rm -f "${COMMAND_FILE}"
+    if [ -z "${command}" ]; then
+        return 1
+    fi
+    printf '%s\n' "${command}"
+}
+
+handle_unexpected_command() {
+    local command="$1"
+    local expected="$2"
+    case "${command}" in
+        quit|exit)
+            log_info "收到退出命令：${command}"
+            exit 0
+            ;;
+        "")
+            ;;
+        *)
+            log_warn "当前阶段需要 ${expected}，忽略命令：${command}"
+            ;;
+    esac
+}
+
 wait_command() {
     local expected="$1"
     local label="$2"
     log_info "等待命令：${label}"
     while true; do
-        if [ -s "${COMMAND_FILE}" ]; then
-            local command
-            command="$(head -n 1 "${COMMAND_FILE}" | tr -d '\r' | xargs || true)"
-            rm -f "${COMMAND_FILE}"
-            case "${command}" in
-                "${expected}")
-                    log_info "收到命令：${command}"
-                    return 0
-                    ;;
-                quit|exit)
-                    log_info "收到退出命令：${command}"
-                    exit 0
-                    ;;
-                "")
-                    ;;
-                *)
-                    log_warn "当前阶段需要 ${expected}，忽略命令：${command}"
-                    ;;
-            esac
+        local command=""
+        command="$(read_pending_command || true)"
+        if [ -n "${command}" ]; then
+            if [ "${command}" = "${expected}" ]; then
+                log_info "收到命令：${command}"
+                return 0
+            fi
+            handle_unexpected_command "${command}" "${expected}"
         fi
-        sleep 1
+        sleep "${COMMAND_POLL_SECONDS}"
     done
 }
-
 start_workflow_detached() {
     if workflow_running; then
         log_error "检测到已有 workflow 正在运行，拒绝重复启动。"
@@ -234,6 +254,23 @@ echo "$!" >"${control_dir}/${run_id}.pid"
     workflow_tail_pid=$!
 
     while true; do
+        local command=""
+        command="$(read_pending_command || true)"
+        case "${command}" in
+            back)
+                queued_back_after_workflow=1
+                log_info "已预接收 back 命令，workflow 结束后自动返航"
+                ;;
+            go)
+                log_warn "workflow 正在运行，忽略重复 go 命令"
+                ;;
+            "")
+                ;;
+            *)
+                handle_unexpected_command "${command}" "back"
+                ;;
+        esac
+
         local status=""
         status="$(docker exec "${CONTAINER_NAME}" bash -lc "cat '${control_dir}/${run_id}.status' 2>/dev/null || true" 2>/dev/null || true)"
         if [ "${status}" = "finished" ]; then
@@ -242,7 +279,7 @@ echo "$!" >"${control_dir}/${run_id}.pid"
         if [ "${status}" = "running" ] && ! workflow_running; then
             log_warn "workflow 进程已不在，但状态文件尚未标记完成，继续等待状态落盘"
         fi
-        sleep 2
+        sleep "${WORKFLOW_STATUS_POLL_SECONDS}"
     done
 
     if [ -n "${workflow_tail_pid}" ] && kill -0 "${workflow_tail_pid}" 2>/dev/null; then
@@ -311,8 +348,14 @@ main() {
     log_info "导航桥接与基础服务已就绪。命令循环开始。"
     while true; do
         wait_command go "go 启动 workflow"
+        queued_back_after_workflow=0
         start_workflow_detached
-        wait_command back "back 返回起点"
+        if [ "${queued_back_after_workflow}" = "1" ]; then
+            log_info "使用 workflow 运行期间预接收的 back 命令进入返航"
+            queued_back_after_workflow=0
+        else
+            wait_command back "back 返回起点"
+        fi
         return_to_start
         log_info "返航流程结束，继续等待下一次 go。"
     done

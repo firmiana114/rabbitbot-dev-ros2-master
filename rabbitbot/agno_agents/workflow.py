@@ -2175,11 +2175,11 @@ def create_main_workflow(ctx: Any) -> Workflow:
         _workflow_log(f"DOCX 剧本步骤完成: scene={scene}, next_index={ctx.docx_script_step_index}")
         if ctx.docx_script_step_index >= len(DOCX_SCRIPT_STEPS):
             ctx.docx_script_done = True
-            ctx.post_docx_chat_mode = True
+            ctx.post_docx_chat_mode = False
             _profile_end(getattr(ctx, "docx_total_profile_span", None), status="finished")
             ctx.docx_total_profile_span = None
             _finish_docx_script_elapsed_timer(ctx, reason="script_finished")
-            _workflow_log("DOCX 剧本全部完成")
+            _workflow_log("DOCX 剧本全部完成，结束 workflow，不进入剧本后问答")
             return "done", SCRIPTED_TOUR_FINISHED
         return "done", SCRIPTED_TOUR_STEP_DONE
 
@@ -3747,8 +3747,9 @@ def create_main_workflow(ctx: Any) -> Workflow:
             _profile_end(completion_span, skipped=True)
             return result
         if SCRIPTED_TOUR_FINISHED in previous_steps:
-            result = StepOutput(content=CompletionCheckModel(task_completed=False))
-            _profile_end(completion_span, skipped=True)
+            result = StepOutput(content=CompletionCheckModel(task_completed=True))
+            _profile_summary_print(reason="docx_finished_loop_breaker")
+            _profile_end(completion_span, skipped=True, task_completed=True)
             return result
         if SCRIPTED_TOUR_STEP_DONE in previous_steps:
             result = StepOutput(content=CompletionCheckModel(task_completed=False))
