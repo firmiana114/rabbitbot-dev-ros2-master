@@ -14,10 +14,12 @@ NAV_EXAMPLE_DIR="${NAV_EXAMPLE_DIR:-/mnt/ssd/navgation/projects/unitree_slam_exa
 NAV_BRIDGE_SCRIPT="${NAV_BRIDGE_SCRIPT:-${NAV_EXAMPLE_DIR}/start_nav_arm_bridge.sh}"
 NAV_INTERFACE="${NAV_INTERFACE:-eno1}"
 NAV_PCD_PATH="${NAV_PCD_PATH:-/home/unitree/test.pcd}"
+ROS_SETUP="${ROS_SETUP:-/opt/ros/humble/setup.bash}"
+WS_SETUP="${WS_SETUP:-/mnt/ssd/navgation/projects/custom_action_ws/install/setup.bash}"
 CONTAINER_NAME="${CONTAINER_NAME:-rabbitbot-unified-runtime}"
 CONTAINER_RABBITBOT_DIR="${CONTAINER_RABBITBOT_DIR:-/workspace/projects/rabbitbot-dev-ros2-master}"
 CONTAINER_LOG_DIR="${CONTAINER_LOG_DIR:-${CONTAINER_RABBITBOT_DIR}/logs/unified_runtime}"
-HOST_LOG_DIR="${HOST_LOG_DIR:-${PROJECT_DIR}/logs/unified_runtime}"
+HOST_LOG_DIR="${HOST_LOG_DIR:-${PROJECT_DIR}/logs}"
 CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_CONTROL_DIR:-/tmp/rabbitbot_nav_workflow_control}"
 COMMAND_FILE="${RABBITBOT_NAV_WORKFLOW_COMMAND_FILE:-${CONTROL_DIR}/command}"
 RUN_DIR="${HOST_LOG_DIR}/nav_workflow_control"
@@ -113,6 +115,8 @@ trap 'cleanup EXIT' EXIT
 prepare_runtime() {
     mkdir -p "${CONTROL_DIR}" "${RUN_DIR}" "${HOST_LOG_DIR}"
     require_path "${NAV_BRIDGE_SCRIPT}"
+    require_path "${ROS_SETUP}"
+    require_path "${WS_SETUP}"
     require_path "${PROJECT_DIR}/scripts_1/start_unified_integration_workflow.sh"
     rm -f "${COMMAND_FILE}"
     log_info "控制命令文件：${COMMAND_FILE}"
@@ -129,7 +133,7 @@ start_nav_bridge() {
     local nav_log="${RUN_DIR}/nav_bridge_$(date +%Y%m%d_%H%M%S).log"
     log_info "启动导航桥接：${NAV_BRIDGE_SCRIPT} ${NAV_INTERFACE} ${NAV_PCD_PATH}"
     log_info "导航桥接日志：${nav_log}"
-    setsid bash -lc '"$1" "$2" "$3" 2>&1 | tee -a "$4"' bash "${NAV_BRIDGE_SCRIPT}" "${NAV_INTERFACE}" "${NAV_PCD_PATH}" "${nav_log}" &
+    setsid bash -lc 'source "$1" && source "$2" && "$3" "$4" "$5" 2>&1 | tee -a "$6"' bash "${ROS_SETUP}" "${WS_SETUP}" "${NAV_BRIDGE_SCRIPT}" "${NAV_INTERFACE}" "${NAV_PCD_PATH}" "${nav_log}" &
     nav_group_pid=$!
     log_info "导航桥接进程组已启动：pgid=${nav_group_pid}"
     wait_port 28180 60
@@ -186,10 +190,8 @@ start_workflow_detached() {
 
     local run_id="$(date +%Y%m%d_%H%M%S)"
     local control_dir="${CONTAINER_LOG_DIR}/workflow_control"
-    local host_control_dir="${HOST_LOG_DIR}/workflow_control"
-    local workflow_log="${HOST_LOG_DIR}/rabbitbot_workflow_${run_id}.log"
-    mkdir -p "${host_control_dir}"
-    rm -f "${host_control_dir}/${run_id}.status" "${host_control_dir}/${run_id}.exit_code" "${host_control_dir}/${run_id}.pid"
+    local workflow_log="${CONTAINER_LOG_DIR}/rabbitbot_workflow_${run_id}.log"
+    docker exec "${CONTAINER_NAME}" bash -lc "mkdir -p '${control_dir}' && rm -f '${control_dir}/${run_id}.status' '${control_dir}/${run_id}.exit_code' '${control_dir}/${run_id}.pid'" >/dev/null
 
     log_info "后台启动 workflow：run_id=${run_id}"
     docker exec -d \
@@ -228,14 +230,12 @@ echo "$!" >"${control_dir}/${run_id}.pid"
 '
 
     log_info "workflow 日志：${workflow_log}"
-    tail -n +1 -F "${workflow_log}" &
+    docker exec "${CONTAINER_NAME}" bash -lc "tail -n +1 -F '${workflow_log}'" &
     workflow_tail_pid=$!
 
     while true; do
         local status=""
-        if [ -f "${host_control_dir}/${run_id}.status" ]; then
-            status="$(cat "${host_control_dir}/${run_id}.status" 2>/dev/null || true)"
-        fi
+        status="$(docker exec "${CONTAINER_NAME}" bash -lc "cat '${control_dir}/${run_id}.status' 2>/dev/null || true" 2>/dev/null || true)"
         if [ "${status}" = "finished" ]; then
             break
         fi
@@ -251,8 +251,9 @@ echo "$!" >"${control_dir}/${run_id}.pid"
     fi
 
     local exit_code="unknown"
-    if [ -f "${host_control_dir}/${run_id}.exit_code" ]; then
-        exit_code="$(cat "${host_control_dir}/${run_id}.exit_code")"
+    exit_code="$(docker exec "${CONTAINER_NAME}" bash -lc "cat '${control_dir}/${run_id}.exit_code' 2>/dev/null || true" 2>/dev/null || true)"
+    if [ -z "${exit_code}" ]; then
+        exit_code="unknown"
     fi
     log_info "workflow 已结束：run_id=${run_id}, exit_code=${exit_code}"
 }
