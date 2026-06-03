@@ -186,12 +186,57 @@ start_workflow() {
         tail -f /dev/null
     fi
     local workflow_log="${LOG_DIR}/rabbitbot_workflow_$(date +%Y%m%d_%H%M%S).log"
+    local workflow_group_pid=""
     ln -sf "${workflow_log}" "${LOG_DIR}/rabbitbot_workflow_latest.log"
     log_info "前台启动 workflow，日志：${workflow_log}"
     cd "${PROJECT_DIR}"
     export RABBITBOT_WORKFLOW_VERBOSE
     export RABBITBOT_WORKFLOW_NON_INTEGRATION
-    exec bash scripts/start_kuavo_agno_workflow.bash 2>&1 | tee -a "${workflow_log}"
+
+    workflow_group_alive() {
+        [ -n "${workflow_group_pid}" ] && kill -0 -- "-${workflow_group_pid}" 2>/dev/null
+    }
+
+    cleanup_workflow() {
+        local reason="${1:-unknown}"
+        trap - INT TERM EXIT
+        if ! workflow_group_alive; then
+            return 0
+        fi
+
+        log_info "收到 ${reason} 信号，正在停止 workflow 进程组：pgid=${workflow_group_pid}"
+        kill -TERM -- "-${workflow_group_pid}" 2>/dev/null || true
+
+        local waited=0
+        while workflow_group_alive && [ "${waited}" -lt 5 ]; do
+            sleep 1
+            waited=$((waited + 1))
+        done
+
+        if workflow_group_alive; then
+            log_error "workflow 进程组未在 ${waited} 秒内退出，强制停止：pgid=${workflow_group_pid}"
+            kill -KILL -- "-${workflow_group_pid}" 2>/dev/null || true
+        fi
+        log_info "workflow 进程组停止完成：pgid=${workflow_group_pid}, reason=${reason}"
+    }
+
+    trap 'cleanup_workflow INT; exit 130' INT
+    trap 'cleanup_workflow TERM; exit 143' TERM
+    trap 'cleanup_workflow EXIT' EXIT
+
+    setsid bash -lc 'PYTHONUNBUFFERED=1 bash scripts/start_kuavo_agno_workflow.bash 2>&1 | tee -a "$1"' bash "${workflow_log}" &
+    workflow_group_pid=$!
+    log_info "workflow 进程组已启动：pgid=${workflow_group_pid}，日志：${workflow_log}"
+
+    set +e
+    wait "${workflow_group_pid}"
+    local workflow_status=$?
+    set -e
+
+    trap - INT TERM EXIT
+    workflow_group_pid=""
+    log_info "workflow 已退出：status=${workflow_status}"
+    return "${workflow_status}"
 }
 
 main() {
