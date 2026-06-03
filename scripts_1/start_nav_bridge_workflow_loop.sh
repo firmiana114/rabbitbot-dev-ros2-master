@@ -5,6 +5,12 @@
 #   bash scripts_1/send_nav_workflow_command.sh go
 #   bash scripts_1/send_nav_workflow_command.sh back
 # 控制 workflow 开始和剧本结束后的返航。
+#
+# 为降低 go 后开场延迟，本脚本会在等待 go 前预启动 workflow，让 Python 和 AppContext
+# 初始化完成后停在启动闸门；收到 go 时只释放闸门。相关可调变量：
+#   RABBITBOT_NAV_WORKFLOW_GATE_READY_TIMEOUT_SECONDS：等待 workflow 预启动就绪的超时秒数。
+#   RABBITBOT_WORKFLOW_START_GATE_POLL_SECONDS：workflow 内部等待 go 闸门文件的轮询间隔。
+#   RABBITBOT_NAV_WORKFLOW_STATUS_POLL_SECONDS：workflow 运行期间检查状态和预接收 back 的轮询间隔。
 
 set -Eeuo pipefail
 
@@ -31,16 +37,32 @@ POINT_3_TO_5_TRANSITION_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_3_TO_5_TRANSITION:-
 START_POINT_TASK="${RABBITBOT_NAV_WORKFLOW_START_POINT:-${POINT_1_TASK}}"
 BACK_TIMEOUT_SECONDS="${RABBITBOT_NAV_WORKFLOW_BACK_TIMEOUT_SECONDS:-240}"
 COMMAND_POLL_SECONDS="${RABBITBOT_NAV_WORKFLOW_COMMAND_POLL_SECONDS:-0.2}"
-WORKFLOW_STATUS_POLL_SECONDS="${RABBITBOT_NAV_WORKFLOW_STATUS_POLL_SECONDS:-1}"
+WORKFLOW_STATUS_POLL_SECONDS="${RABBITBOT_NAV_WORKFLOW_STATUS_POLL_SECONDS:-0.2}"
 WAIT_DEFAULT_SECONDS="${WAIT_DEFAULT_SECONDS:-420}"
 WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS:-600}"
 RABBITBOT_WORKFLOW_NON_INTEGRATION="${RABBITBOT_WORKFLOW_NON_INTEGRATION:-0}"
 RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE:-0}"
 RABBITBOT_UNIFIED_ATTACH_STDIN="${RABBITBOT_UNIFIED_ATTACH_STDIN:-0}"
+HOST_WORKFLOW_CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_HOST_CONTROL_DIR:-${HOST_LOG_DIR}/unified_runtime/workflow_control}"
+WORKFLOW_GATE_READY_TIMEOUT_SECONDS="${RABBITBOT_NAV_WORKFLOW_GATE_READY_TIMEOUT_SECONDS:-30}"
+WORKFLOW_GATE_POLL_SECONDS="${RABBITBOT_WORKFLOW_START_GATE_POLL_SECONDS:-0.05}"
 
 nav_group_pid=""
 workflow_tail_pid=""
 queued_back_after_workflow=0
+current_run_id=""
+current_control_dir=""
+current_host_control_dir=""
+current_workflow_log=""
+current_host_workflow_log=""
+current_status_file=""
+current_exit_code_file=""
+current_pid_file=""
+current_finished_at_file=""
+current_gate_file=""
+current_gate_ready_file=""
+current_host_gate_file=""
+current_host_gate_ready_file=""
 
 log_info() {
     echo -e "\033[32m[INFO]\033[0m $1"
@@ -52,6 +74,15 @@ log_warn() {
 
 log_error() {
     echo -e "\033[31m[ERROR]\033[0m $1" >&2
+}
+
+now_ms() {
+    date +%s%3N
+}
+
+elapsed_ms_since() {
+    local start_ms="$1"
+    echo $(( $(now_ms) - start_ms ))
 }
 
 require_path() {
@@ -99,7 +130,25 @@ else:
 }
 
 workflow_running() {
-    docker exec "${CONTAINER_NAME}" bash -lc 'pgrep -f "[e]xamples/run_kuavo_agno.py" >/dev/null || pgrep -f "[s]cripts/start_kuavo_agno_workflow.bash" >/dev/null' >/dev/null 2>&1
+    docker exec "${CONTAINER_NAME}" bash -lc 'pgrep -f "[e]xamples/run_kuavo_agno.py" >/dev/null || pgrep -f "[s]cripts/run_kuavo_agno_workflow.py" >/dev/null || pgrep -f "[s]cripts/start_kuavo_agno_workflow.bash" >/dev/null' >/dev/null 2>&1
+}
+
+stop_current_workflow() {
+    if [ -z "${current_run_id}" ] || [ -z "${current_pid_file}" ] || [ ! -s "${current_pid_file}" ]; then
+        return 0
+    fi
+    local status=""
+    status="$(cat "${current_status_file}" 2>/dev/null || true)"
+    if [ "${status}" = "finished" ]; then
+        return 0
+    fi
+    local workflow_pid=""
+    workflow_pid="$(cat "${current_pid_file}" 2>/dev/null || true)"
+    if [ -z "${workflow_pid}" ]; then
+        return 0
+    fi
+    log_info "正在停止当前 workflow 进程组：run_id=${current_run_id}, pgid=${workflow_pid}"
+    docker exec "${CONTAINER_NAME}" bash -lc "if kill -0 '${workflow_pid}' 2>/dev/null; then kill -TERM -- -'${workflow_pid}' 2>/dev/null || kill -TERM '${workflow_pid}' 2>/dev/null || true; sleep 2; kill -KILL -- -'${workflow_pid}' 2>/dev/null || kill -KILL '${workflow_pid}' 2>/dev/null || true; fi" >/dev/null 2>&1 || true
 }
 
 cleanup() {
@@ -108,6 +157,7 @@ cleanup() {
     if [ -n "${workflow_tail_pid}" ] && kill -0 "${workflow_tail_pid}" 2>/dev/null; then
         kill "${workflow_tail_pid}" 2>/dev/null || true
     fi
+    stop_current_workflow
     if [ -n "${nav_group_pid}" ] && kill -0 -- "-${nav_group_pid}" 2>/dev/null; then
         log_info "收到 ${reason}，正在停止导航桥接进程组：pgid=${nav_group_pid}"
         kill -TERM -- "-${nav_group_pid}" 2>/dev/null || true
@@ -121,7 +171,7 @@ trap 'cleanup TERM; exit 143' TERM
 trap 'cleanup EXIT' EXIT
 
 prepare_runtime() {
-    mkdir -p "${CONTROL_DIR}" "${RUN_DIR}" "${HOST_LOG_DIR}"
+    mkdir -p "${CONTROL_DIR}" "${RUN_DIR}" "${HOST_LOG_DIR}" "${HOST_WORKFLOW_CONTROL_DIR}"
     require_path "${NAV_BRIDGE_SCRIPT}"
     require_path "${ROS_SETUP}"
     require_path "${WS_SETUP}"
@@ -207,24 +257,43 @@ wait_command() {
         sleep "${COMMAND_POLL_SECONDS}"
     done
 }
-start_workflow_detached() {
+launch_workflow_detached() {
     if workflow_running; then
         log_error "检测到已有 workflow 正在运行，拒绝重复启动。"
         return 1
     fi
 
-    local run_id="$(date +%Y%m%d_%H%M%S)"
-    local control_dir="${CONTAINER_LOG_DIR}/workflow_control"
-    local workflow_log="${CONTAINER_LOG_DIR}/rabbitbot_workflow_${run_id}.log"
-    docker exec "${CONTAINER_NAME}" bash -lc "mkdir -p '${control_dir}' && rm -f '${control_dir}/${run_id}.status' '${control_dir}/${run_id}.exit_code' '${control_dir}/${run_id}.pid'" >/dev/null
+    current_run_id="$(date +%Y%m%d_%H%M%S)"
+    current_control_dir="${CONTAINER_LOG_DIR}/workflow_control"
+    current_host_control_dir="${HOST_WORKFLOW_CONTROL_DIR}"
+    current_workflow_log="${CONTAINER_LOG_DIR}/rabbitbot_workflow_${current_run_id}.log"
+    current_host_workflow_log="${HOST_LOG_DIR}/unified_runtime/rabbitbot_workflow_${current_run_id}.log"
+    current_status_file="${current_host_control_dir}/${current_run_id}.status"
+    current_exit_code_file="${current_host_control_dir}/${current_run_id}.exit_code"
+    current_pid_file="${current_host_control_dir}/${current_run_id}.pid"
+    current_finished_at_file="${current_host_control_dir}/${current_run_id}.finished_at"
+    current_gate_file="${current_control_dir}/${current_run_id}.go"
+    current_gate_ready_file="${current_control_dir}/${current_run_id}.ready"
+    current_host_gate_file="${current_host_control_dir}/${current_run_id}.go"
+    current_host_gate_ready_file="${current_host_control_dir}/${current_run_id}.ready"
 
-    log_info "后台启动 workflow：run_id=${run_id}"
+    mkdir -p "${current_host_control_dir}" "$(dirname "${current_host_workflow_log}")"
+    rm -f "${current_status_file}" "${current_exit_code_file}" "${current_pid_file}" "${current_finished_at_file}" "${current_host_gate_file}" "${current_host_gate_ready_file}"
+    : >"${current_host_workflow_log}"
+    docker exec "${CONTAINER_NAME}" bash -lc "mkdir -p '${current_control_dir}' && rm -f '${current_control_dir}/${current_run_id}.status' '${current_control_dir}/${current_run_id}.exit_code' '${current_control_dir}/${current_run_id}.pid' '${current_control_dir}/${current_run_id}.finished_at' '${current_gate_file}' '${current_gate_ready_file}'" >/dev/null
+
+    local start_ms
+    start_ms="$(now_ms)"
+    log_info "预启动 workflow 并等待 go 闸门：run_id=${current_run_id}"
     docker exec -d \
         -e RABBITBOT_WORKFLOW_NON_INTEGRATION="${RABBITBOT_WORKFLOW_NON_INTEGRATION}" \
         -e RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE}" \
         -e RABBITBOT_DIR="${CONTAINER_RABBITBOT_DIR}" \
         -e RABBITBOT_LOG_DIR="${CONTAINER_LOG_DIR}" \
-        -e RABBITBOT_WORKFLOW_RUN_ID="${run_id}" \
+        -e RABBITBOT_WORKFLOW_RUN_ID="${current_run_id}" \
+        -e RABBITBOT_WORKFLOW_START_GATE_FILE="${current_gate_file}" \
+        -e RABBITBOT_WORKFLOW_START_GATE_READY_FILE="${current_gate_ready_file}" \
+        -e RABBITBOT_WORKFLOW_START_GATE_POLL_SECONDS="${WORKFLOW_GATE_POLL_SECONDS}" \
         -e PYTHONUNBUFFERED=1 \
         "${CONTAINER_NAME}" bash -lc '
 set -euo pipefail
@@ -242,6 +311,7 @@ set +e
 cd "${RABBITBOT_DIR}"
 echo running >"${control_dir}/${run_id}.status"
 echo "Workflow容器日志: ${log_path}" >>"${log_path}"
+echo "Workflow启动闸门文件: ${RABBITBOT_WORKFLOW_START_GATE_FILE}" >>"${log_path}"
 PYTHONUNBUFFERED=1 bash scripts/start_kuavo_agno_workflow.bash >>"${log_path}" 2>&1
 status=\$?
 echo "\${status}" >"${control_dir}/${run_id}.exit_code"
@@ -250,14 +320,49 @@ echo finished >"${control_dir}/${run_id}.status"
 exit "\${status}"
 RUNNER
 chmod +x "${runner}"
-nohup "${runner}" >/dev/null 2>&1 &
+setsid "${runner}" >/dev/null 2>&1 &
 echo "$!" >"${control_dir}/${run_id}.pid"
 '
 
-    log_info "workflow 日志：${workflow_log}"
-    docker exec "${CONTAINER_NAME}" bash -lc "tail -n +1 -F '${workflow_log}'" &
+    log_info "workflow 预启动命令已发送：run_id=${current_run_id}, elapsed=$(elapsed_ms_since "${start_ms}")ms"
+    log_info "workflow 日志：${current_workflow_log}"
+    tail -n +1 -F "${current_host_workflow_log}" &
     workflow_tail_pid=$!
+}
 
+wait_workflow_gate_ready() {
+    local attempts=$(( WORKFLOW_GATE_READY_TIMEOUT_SECONDS * 10 ))
+    local start_ms
+    start_ms="$(now_ms)"
+    log_info "等待 workflow 预启动完成：run_id=${current_run_id}, timeout=${WORKFLOW_GATE_READY_TIMEOUT_SECONDS}s"
+    local i
+    for ((i = 0; i < attempts; i++)); do
+        if [ -s "${current_host_gate_ready_file}" ]; then
+            log_info "workflow 已完成预启动并停在 go 闸门：run_id=${current_run_id}, elapsed=$(elapsed_ms_since "${start_ms}")ms"
+            return 0
+        fi
+        local status=""
+        status="$(cat "${current_status_file}" 2>/dev/null || true)"
+        if [ "${status}" = "finished" ]; then
+            local exit_code="unknown"
+            exit_code="$(cat "${current_exit_code_file}" 2>/dev/null || true)"
+            log_error "workflow 在等待 go 前已退出：run_id=${current_run_id}, exit_code=${exit_code:-unknown}"
+            return 1
+        fi
+        sleep 0.1
+    done
+    log_error "workflow 预启动等待超时：run_id=${current_run_id}, timeout=${WORKFLOW_GATE_READY_TIMEOUT_SECONDS}s"
+    return 1
+}
+
+release_workflow_gate() {
+    local start_ms
+    start_ms="$(now_ms)"
+    printf 'go\n' >"${current_host_gate_file}"
+    log_info "已释放 workflow go 闸门：run_id=${current_run_id}, elapsed=$(elapsed_ms_since "${start_ms}")ms"
+}
+
+monitor_workflow_until_finished() {
     while true; do
         local command=""
         command="$(read_pending_command || true)"
@@ -277,7 +382,7 @@ echo "$!" >"${control_dir}/${run_id}.pid"
         esac
 
         local status=""
-        status="$(docker exec "${CONTAINER_NAME}" bash -lc "cat '${control_dir}/${run_id}.status' 2>/dev/null || true" 2>/dev/null || true)"
+        status="$(cat "${current_status_file}" 2>/dev/null || true)"
         if [ "${status}" = "finished" ]; then
             break
         fi
@@ -293,11 +398,11 @@ echo "$!" >"${control_dir}/${run_id}.pid"
     fi
 
     local exit_code="unknown"
-    exit_code="$(docker exec "${CONTAINER_NAME}" bash -lc "cat '${control_dir}/${run_id}.exit_code' 2>/dev/null || true" 2>/dev/null || true)"
+    exit_code="$(cat "${current_exit_code_file}" 2>/dev/null || true)"
     if [ -z "${exit_code}" ]; then
         exit_code="unknown"
     fi
-    log_info "workflow 已结束：run_id=${run_id}, exit_code=${exit_code}"
+    log_info "workflow 已结束：run_id=${current_run_id}, exit_code=${exit_code}"
 }
 
 navigate_back_segment() {
@@ -381,9 +486,12 @@ main() {
 
     log_info "导航桥接与基础服务已就绪。命令循环开始。"
     while true; do
-        wait_command go "go 启动 workflow"
         queued_back_after_workflow=0
-        start_workflow_detached
+        launch_workflow_detached
+        wait_workflow_gate_ready
+        wait_command go "go 启动 workflow"
+        release_workflow_gate
+        monitor_workflow_until_finished
         if [ "${queued_back_after_workflow}" = "1" ]; then
             log_info "使用 workflow 运行期间预接收的 back 命令进入返航"
             queued_back_after_workflow=0
@@ -391,7 +499,7 @@ main() {
             wait_command back "back 返回起点"
         fi
         return_to_start
-        log_info "返航流程结束，继续等待下一次 go。"
+        log_info "返航流程结束，继续预启动下一次 workflow。"
     done
 }
 

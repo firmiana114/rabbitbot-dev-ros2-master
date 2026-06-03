@@ -176,6 +176,7 @@ stop_existing_if_requested() {
         pkill -9 -f "uvicorn memory_app:app" 2>/dev/null || true
         pkill -9 -f "scripts/start_memory_agent.sh" 2>/dev/null || true
         pkill -9 -f "examples/run_kuavo_agno.py" 2>/dev/null || true
+        pkill -9 -f "scripts/run_kuavo_agno_workflow.py" 2>/dev/null || true
         pkill -9 -f "scripts/start_kuavo_agno_workflow.bash" 2>/dev/null || true
     ' 2>/dev/null || true
     docker exec "${VLM_CONTAINER}" bash -lc '
