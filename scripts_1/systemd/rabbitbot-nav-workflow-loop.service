@@ -1,0 +1,21 @@
+[Unit]
+Description=RabbitBot 导航桥接与导览 workflow 待命循环
+Documentation=file:/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master/HANDOFF_REPORT.md
+After=docker.service network-online.target
+Wants=docker.service network-online.target
+
+[Service]
+Type=simple
+User=pc
+Group=pc
+WorkingDirectory=/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master
+ExecStart=/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master/scripts_1/start_nav_bridge_workflow_loop.sh
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+SyslogIdentifier=rabbitbot-nav-workflow-loop
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

@@ -198,3 +198,12 @@
 - 已将 `RABBITBOT_TTS_STRICT_FAILURE` 写入 workflow、联调/非联调 unified 脚本和导航 loop 脚本注释；`start_nav_bridge_workflow_loop.sh` 和 `start_unified_integration_workflow.sh` 已透传该变量到容器内 workflow。
 - 已验证：Python 源码编译检查通过，三个启动脚本 `bash -n` 通过；模拟 TTS 空返回、TTS 抛异常、等待失败、队列查询失败、非法 TTS 索引时均不会抛出到 workflow。
 
+## 本轮补充：导航 workflow loop 系统服务
+
+- 本轮新增 `scripts_1/systemd/rabbitbot-nav-workflow-loop.service`，用于将 `scripts_1/start_nav_bridge_workflow_loop.sh` 注册为 systemd 服务。
+- 已将服务安装到 `/etc/systemd/system/rabbitbot-nav-workflow-loop.service`，并执行 `systemctl daemon-reload`。
+- 已执行 `systemctl enable rabbitbot-nav-workflow-loop.service`，服务会在下次开机进入待命；本轮没有执行 `systemctl start`，因此没有启动第二个 loop 实例。
+- 安装后验证：`systemctl status rabbitbot-nav-workflow-loop.service` 显示 `Loaded: enabled`、`Active: inactive (dead)`；当前手动运行的 `start_nav_bridge_workflow_loop.sh` 进程仍在，未被中断。
+- 服务以 `pc` 用户运行，工作目录为 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`，异常退出时 `Restart=on-failure`，重启间隔 5 秒。
+- 常用操作：启动 `sudo systemctl start rabbitbot-nav-workflow-loop.service`；停止 `sudo systemctl stop rabbitbot-nav-workflow-loop.service`；重启 `sudo systemctl restart rabbitbot-nav-workflow-loop.service`；查看日志 `journalctl -u rabbitbot-nav-workflow-loop.service -f`；取消开机自启 `sudo systemctl disable rabbitbot-nav-workflow-loop.service`。
+
