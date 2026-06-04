@@ -207,3 +207,10 @@
 - 服务以 `pc` 用户运行，工作目录为 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`，异常退出时 `Restart=on-failure`，重启间隔 5 秒。
 - 常用操作：启动 `sudo systemctl start rabbitbot-nav-workflow-loop.service`；停止 `sudo systemctl stop rabbitbot-nav-workflow-loop.service`；重启 `sudo systemctl restart rabbitbot-nav-workflow-loop.service`；查看日志 `journalctl -u rabbitbot-nav-workflow-loop.service -f`；取消开机自启 `sudo systemctl disable rabbitbot-nav-workflow-loop.service`。
 
+## 本轮补充：系统服务重命名
+
+- 本轮按现场要求将系统服务名从 `rabbitbot-nav-workflow-loop.service` 改为 `rabbitbot-loop.service`。
+- 项目内服务模板同步重命名为 `scripts_1/systemd/rabbitbot-loop.service`，`SyslogIdentifier` 改为 `rabbitbot-loop`。
+- 操作策略为先安装并启用新服务，再禁用并移除旧服务；全程没有执行 `systemctl start`，当前手动运行的 loop 进程未被中断。
+- 新服务常用命令：`sudo systemctl start rabbitbot-loop.service`、`sudo systemctl stop rabbitbot-loop.service`、`sudo systemctl restart rabbitbot-loop.service`、`systemctl status rabbitbot-loop.service`、`journalctl -u rabbitbot-loop.service -f`。
+
