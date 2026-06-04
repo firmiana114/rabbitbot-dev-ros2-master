@@ -42,6 +42,21 @@ def _remember_tts_text(text):
         ]
 
 
+def _tts_strict_failure_enabled():
+    return os.getenv("RABBITBOT_TTS_STRICT_FAILURE", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _handle_tts_failure(stage, text=None, error=None, fallback=None, **fields):
+    field_text = _format_trace_fields({**fields, "error": error})
+    suffix = f", {field_text}" if field_text else ""
+    print(f"[{_sound_timestamp()}] TTS请求链路: stage={stage}, text={text}{suffix}")
+    if _tts_strict_failure_enabled():
+        if isinstance(error, BaseException):
+            raise RuntimeError(f"TTS失败且启用严格模式: stage={stage}, text={text}") from error
+        raise RuntimeError(f"TTS失败且启用严格模式: stage={stage}, text={text}, error={error}")
+    return fallback
+
+
 def _longest_common_substring(a, b):
     if not a or not b:
         return 0, 0, 0
@@ -123,7 +138,17 @@ def tts_sound(tts_agent, text, lang):
         f"[{_sound_timestamp()}] TTS请求链路: "
         f"stage=workflow_tts_request_start, text={text}"
     )
-    tts_index = tts_agent.run(json.dumps(input_dict))
+    try:
+        tts_index = tts_agent.run(json.dumps(input_dict))
+    except Exception as exc:
+        elapsed = time.perf_counter() - request_start
+        return _handle_tts_failure(
+            "workflow_tts_request_exception",
+            text=text,
+            error=f"{type(exc).__name__}: {exc}",
+            fallback=-1,
+            elapsed=f"{elapsed:.3f}s",
+        )
     elapsed = time.perf_counter() - request_start
     print(
         f"[{_sound_timestamp()}] TTS请求链路: "
@@ -133,12 +158,14 @@ def tts_sound(tts_agent, text, lang):
     try:
         return int(tts_index)
     except (TypeError, ValueError) as exc:
-        print(
-            f"[{_sound_timestamp()}] TTS请求链路: "
-            f"stage=workflow_tts_request_invalid_response, tts_index={tts_index}, "
-            f"elapsed={elapsed:.3f}s, text={text}, error={type(exc).__name__}: {exc}"
+        return _handle_tts_failure(
+            "workflow_tts_request_invalid_response",
+            text=text,
+            error=f"{type(exc).__name__}: {exc}",
+            fallback=-1,
+            tts_index=tts_index,
+            elapsed=f"{elapsed:.3f}s",
         )
-        raise RuntimeError(f"TTS请求失败或返回非法索引: tts_index={tts_index!r}, text={text}") from exc
 
 
 def tts_wait(tts_agent):
@@ -146,7 +173,14 @@ def tts_wait(tts_agent):
     print(input_dict)
     #run_response = tts_agent.run(json.dumps(input_dict))
     #out_text = run_response.content
-    out_text = tts_agent.run(json.dumps(input_dict))
+    try:
+        out_text = tts_agent.run(json.dumps(input_dict))
+    except Exception as exc:
+        return _handle_tts_failure(
+            "workflow_tts_wait_exception",
+            error=f"{type(exc).__name__}: {exc}",
+            fallback="TTS wait skipped",
+        )
     return out_text
 
 
@@ -177,8 +211,15 @@ def tts_get_wav_count(tts_agent):
     #print(input_dict)
     #run_response = tts_agent.run(json.dumps(input_dict))
     #out_text = run_response.content
-    out_text = tts_agent.run(json.dumps(input_dict))
-    wav_count = int(out_text)
+    try:
+        out_text = tts_agent.run(json.dumps(input_dict))
+        wav_count = int(out_text)
+    except Exception as exc:
+        return _handle_tts_failure(
+            "workflow_tts_wav_count_exception",
+            error=f"{type(exc).__name__}: {exc}",
+            fallback=0,
+        )
     return wav_count
 
 
@@ -440,15 +481,36 @@ def tts_long_text(tts_agent, text, stt_agent, robot, before_text=None):
         #tts_wait(tts_agent)
 
 
+def _is_invalid_tts_index(tts_index):
+    try:
+        return tts_index is None or int(tts_index) < 0
+    except (TypeError, ValueError):
+        return True
+
+
 def tts_get_play(tts_agent, tts_index):
+    if _is_invalid_tts_index(tts_index):
+        return 1
     input_dict = {"task": "get_play", "lang": "", "text": f"{tts_index}", "timeout": 30}
     #run_response = tts_agent.run(json.dumps(input_dict))
     #out_text = run_response.content
-    out_text = tts_agent.run(json.dumps(input_dict))
-    return int(float(out_text))
+    try:
+        out_text = tts_agent.run(json.dumps(input_dict))
+        return int(float(out_text))
+    except Exception as exc:
+        return _handle_tts_failure(
+            "workflow_tts_get_play_exception",
+            error=f"{type(exc).__name__}: {exc}",
+            fallback=1,
+            tts_index=tts_index,
+        )
 
 
 def action_with_tts(robot, action_name, tts_agent, tts_index, timeout=30):
+    if _is_invalid_tts_index(tts_index):
+        print(f"action_with_tts: tts_index={tts_index} invalid, skip action {action_name}")
+        return
+
     def _run():
         start_time = time.time()
         while True:

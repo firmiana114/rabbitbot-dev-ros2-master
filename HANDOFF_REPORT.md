@@ -189,3 +189,12 @@
 - 已验证：Python 源码编译检查通过；模拟桥接返回验证第一句带 `--volume`、第二句不带；模拟 `SetVolume` 失败验证会不带音量重试并返回成功索引。
 - 额外状态：复查时 `rabbitbot-unified-runtime` 容器已退出，Docker 状态为 `ExitCode=137`、`OOMKilled=false`，28185 TTS 端口不再监听；本轮未重新拉起容器或 workflow。
 
+## 本轮补充：TTS 失败不再终止 workflow
+
+- 本轮确认：上一版修复后，如果 Unitree TTS 重试后仍失败，`tts_sound` 仍可能抛出异常并导致 workflow 退出，这不满足现场导览“不能因单句 TTS 失败中断”的要求。
+- 本轮已将 `rabbitbot/tools/sound_agno.py` 的 TTS 工具层改为默认可恢复：`text_to_speech` 异常、空 `tts_index`、非法 `tts_index`、`wait_speech` 异常、`get_wav_count/get_play` 异常都会记录 `TTS请求链路` 日志并返回可继续的默认值。
+- 默认策略：单句 TTS 失败返回 `tts_index=-1`，后续台词和导航继续执行；与失败 TTS 绑定的动作会跳过，避免等待不存在的播放索引。
+- 新增 `RABBITBOT_TTS_STRICT_FAILURE` 开关：默认 `0`，表示 TTS 失败只记录并继续；设为 `1/true/yes/on` 时恢复严格模式，把 TTS 失败视为致命错误。
+- 已将 `RABBITBOT_TTS_STRICT_FAILURE` 写入 workflow、联调/非联调 unified 脚本和导航 loop 脚本注释；`start_nav_bridge_workflow_loop.sh` 和 `start_unified_integration_workflow.sh` 已透传该变量到容器内 workflow。
+- 已验证：Python 源码编译检查通过，三个启动脚本 `bash -n` 通过；模拟 TTS 空返回、TTS 抛异常、等待失败、队列查询失败、非法 TTS 索引时均不会抛出到 workflow。
+

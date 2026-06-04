@@ -28,6 +28,7 @@
 # - RABBITBOT_WORKFLOW_PROFILE_LOG：显式指定 workflow profile JSONL 路径。
 # - RABBITBOT_LOG_DIR：未指定 profile 路径时的日志目录。
 # - RABBITBOT_WORKFLOW_SUMMARY：是否在退出时打印 workflow 耗时汇总，默认启用。
+# - RABBITBOT_TTS_STRICT_FAILURE：TTS 请求失败时是否按致命错误终止 workflow，默认 0，即记录错误并继续导览。
 # - RABBITBOT_DIALOGUE_INDEX：选择 conf/dialogue_<序号>.json，未设置时默认 0。
 # - RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX：旧版台词序号变量，仅在 RABBITBOT_DIALOGUE_INDEX 未设置时兜底。
 # - RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE：直接指定台词 JSON 文件完整路径，优先级高于序号。
