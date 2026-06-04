@@ -170,3 +170,12 @@
 ## 其它信息
 
 如需同步到 `feature/unified-runtime-image`，可 cherry-pick 本轮提交。
+
+## 本轮补充：旧日志归档
+
+- 本轮已归档旧日志：将早于 2026-06-04 且未被进程打开、非 `latest` 链接、非 `latest` 目标的历史日志移动到 `logs/archive_20260604_083348_old_logs`。
+- 当前正在写入的 `logs/nav_workflow_control/nav_bridge_20260604_083009.log` 保持原位；今天日志和无日期服务日志保持原位。
+- 本轮归档前通过 `/proc/*/fd` 核实当前打开的项目日志；归档后复查当前打开日志仍在原路径。
+- 旧日期日志剩余项仅为 `logs/unified_runtime/rabbitbot_workflow_20260603_144523.log`，该文件是 `rabbitbot_workflow_latest.log` 的目标文件，故保留以避免破坏 latest 链接。
+- 归档目录内包含 `ARCHIVE_MANIFEST.txt` 和 `ARCHIVE_MANIFEST_ROOT.txt`，分别记录普通用户权限和容器 root 权限归档的文件清单。
+
