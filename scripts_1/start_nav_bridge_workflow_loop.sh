@@ -11,6 +11,9 @@
 #   RABBITBOT_NAV_WORKFLOW_GATE_READY_TIMEOUT_SECONDS：等待 workflow 预启动就绪的超时秒数。
 #   RABBITBOT_WORKFLOW_START_GATE_POLL_SECONDS：workflow 内部等待 go 闸门文件的轮询间隔。
 #   RABBITBOT_NAV_WORKFLOW_STATUS_POLL_SECONDS：workflow 运行期间检查状态和预接收 back 的轮询间隔。
+#   RABBITBOT_DIALOGUE_INDEX：选择 conf/dialogue_<序号>.json，未设置时默认 0。
+#   RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX：旧版台词序号变量，仅在 RABBITBOT_DIALOGUE_INDEX 未设置时兜底。
+#   RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE：直接指定台词 JSON 文件完整路径，优先级高于序号。
 
 set -Eeuo pipefail
 
@@ -46,6 +49,9 @@ WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS:-600}"
 RABBITBOT_WORKFLOW_NON_INTEGRATION="${RABBITBOT_WORKFLOW_NON_INTEGRATION:-0}"
 RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE:-0}"
 RABBITBOT_UNIFIED_ATTACH_STDIN="${RABBITBOT_UNIFIED_ATTACH_STDIN:-0}"
+RABBITBOT_DIALOGUE_INDEX="${RABBITBOT_DIALOGUE_INDEX:-}"
+RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX="${RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX:-}"
+RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE="${RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE:-}"
 HOST_WORKFLOW_RUN_DIR="${RABBITBOT_NAV_WORKFLOW_HOST_RUN_DIR:-${RUN_DIR}}"
 CONTAINER_WORKFLOW_RUN_DIR="${RABBITBOT_NAV_WORKFLOW_CONTAINER_RUN_DIR:-${CONTAINER_RABBITBOT_DIR}/logs/nav_workflow_control}"
 HOST_WORKFLOW_CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_HOST_CONTROL_DIR:-${HOST_WORKFLOW_RUN_DIR}/workflow_control}"
@@ -336,11 +342,25 @@ launch_workflow_detached() {
     docker exec "${CONTAINER_NAME}" bash -lc "mkdir -p '${current_control_dir}' '$(dirname "${current_workflow_log}")' && rm -f '${current_control_dir}/${current_run_id}.status' '${current_control_dir}/${current_run_id}.exit_code' '${current_control_dir}/${current_run_id}.pid' '${current_control_dir}/${current_run_id}.finished_at' '${current_gate_file}' '${current_gate_ready_file}'" >/dev/null
 
     local start_ms
+    local dialogue_config
     start_ms="$(now_ms)"
+    if [ -n "${RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE}" ]; then
+        dialogue_config="文件=${RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE}"
+    elif [ -n "${RABBITBOT_DIALOGUE_INDEX}" ]; then
+        dialogue_config="序号=${RABBITBOT_DIALOGUE_INDEX}"
+    elif [ -n "${RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX}" ]; then
+        dialogue_config="旧变量序号=${RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX}"
+    else
+        dialogue_config="序号=0（默认）"
+    fi
     log_info "预启动 workflow 并等待 go 闸门：run_id=${current_run_id}"
+    log_info "workflow 台词配置：${dialogue_config}"
     docker exec -d \
         -e RABBITBOT_WORKFLOW_NON_INTEGRATION="${RABBITBOT_WORKFLOW_NON_INTEGRATION}" \
         -e RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE}" \
+        -e RABBITBOT_DIALOGUE_INDEX="${RABBITBOT_DIALOGUE_INDEX}" \
+        -e RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX="${RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX}" \
+        -e RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE="${RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE}" \
         -e RABBITBOT_DIR="${CONTAINER_RABBITBOT_DIR}" \
         -e RABBITBOT_LOG_DIR="${CONTAINER_WORKFLOW_RUN_DIR}" \
         -e RABBITBOT_WORKFLOW_RUN_ID="${current_run_id}" \
