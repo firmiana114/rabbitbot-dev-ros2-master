@@ -224,3 +224,11 @@
 - 已验证：Python 源码编译检查通过；空 `RABBITBOT_DIALOGUE_INDEX` 和空旧变量返回默认序号 `0`；显式 `RABBITBOT_DIALOGUE_INDEX=3` 返回 `3`；非法 `abc` 仍报 `DOCX 导览台词序号必须是数字`。
 - 注意：当前正在运行的服务实例已经处于等待 `back` 阶段，本轮未自动发送 `back`、未重启服务、未中断现有 loop。要恢复现场可先发 `back` 完成本轮，或在确认安全后 `sudo systemctl restart rabbitbot-loop.service` 重新进入待命。
 
+## 本轮补充：关闭 rabbitbot-loop 开机自启
+
+- 本轮按现场要求将 `rabbitbot-loop.service` 设为不开机自启：已执行 `systemctl disable rabbitbot-loop.service`，并移除 `multi-user.target.wants` 下的启用链接。
+- 已执行 `systemctl reset-failed rabbitbot-loop.service` 清理此前 TERM 退出留下的 failed 标记；最终状态验证为 `disabled / inactive (dead)`。
+- 本轮没有执行 `systemctl start rabbitbot-loop.service`，系统服务不会在当前会话自动启动，也不会在下次开机自动启动。
+- 复查发现 2026-06-04 15:39:22 有新的手动 `start_nav_bridge_workflow_loop.sh` 实例在运行，父进程不是 systemd；本轮未停止该手动实例。
+- 如后续需要重新启用开机自启，可执行 `sudo systemctl enable rabbitbot-loop.service`；只临时启动则执行 `sudo systemctl start rabbitbot-loop.service`。
+
