@@ -159,13 +159,19 @@ _DOCX_GUIDE_DIALOGUE_CACHE = {"path": None, "data": None}
 
 
 def _docx_guide_dialogue_index():
-    raw_index = os.getenv(
-        "RABBITBOT_DIALOGUE_INDEX",
-        os.getenv("RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX", DOCX_GUIDE_DIALOGUE_DEFAULT_INDEX),
-    ).strip()
+    raw_dialogue_index = os.getenv("RABBITBOT_DIALOGUE_INDEX", "").strip()
+    raw_legacy_index = os.getenv("RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX", "").strip()
+    raw_index = raw_dialogue_index or raw_legacy_index or DOCX_GUIDE_DIALOGUE_DEFAULT_INDEX
     if not re.fullmatch(r"[0-9]+", raw_index):
-        _workflow_log(f"DOCX 导览台词序号非法: RABBITBOT_DIALOGUE_INDEX={raw_index!r}")
+        _workflow_log(
+            "DOCX 导览台词序号非法: "
+            f"RABBITBOT_DIALOGUE_INDEX={raw_dialogue_index!r}, "
+            f"RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX={raw_legacy_index!r}, "
+            f"effective={raw_index!r}"
+        )
         raise ValueError(f"DOCX 导览台词序号必须是数字: {raw_index!r}")
+    if not raw_dialogue_index and not raw_legacy_index:
+        _workflow_log(f"DOCX 导览台词序号未设置，使用默认序号: {DOCX_GUIDE_DIALOGUE_DEFAULT_INDEX}")
     return raw_index
 
 

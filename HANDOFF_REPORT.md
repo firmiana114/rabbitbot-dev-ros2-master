@@ -214,3 +214,13 @@
 - 操作策略为先安装并启用新服务，再禁用并移除旧服务；全程没有执行 `systemctl start`，当前手动运行的 loop 进程未被中断。
 - 新服务常用命令：`sudo systemctl start rabbitbot-loop.service`、`sudo systemctl stop rabbitbot-loop.service`、`sudo systemctl restart rabbitbot-loop.service`、`systemctl status rabbitbot-loop.service`、`journalctl -u rabbitbot-loop.service -f`。
 
+## 本轮补充：systemd 下 go 不触发机器人移动原因
+
+- 本轮定位 systemd 服务状态下发送 `send_nav_workflow_command.sh go` 后机器人不动：`rabbitbot-loop.service` 实际运行正常，导航桥接和统一容器基础服务均已启动，28180/28185/28184/28182 端口可用。
+- 直接原因不是 go 命令未送达；日志显示 2026-06-04 15:35:52 已收到 `go` 并释放 workflow 闸门。
+- workflow 随后立刻异常退出，run_id 为 `20260604_153323`，退出码为 `1`；根因是 systemd 默认环境没有设置台词序号，loop 脚本向容器透传了空字符串 `RABBITBOT_DIALOGUE_INDEX=''`，旧逻辑把空字符串视为非法序号而不是默认 0。
+- workflow 异常退出后，loop 进入“等待 `back` 返回起点”阶段，因此后续再次发送 `go` 会被日志明确记录为 `当前阶段需要 back，忽略命令：go`。
+- 本轮已修复 `rabbitbot/agno_agents/workflow.py`：`RABBITBOT_DIALOGUE_INDEX` 为空时视为未设置，继续读取旧变量 `RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX`；两个都为空时默认使用 `dialogue_0.json`。非法非数字序号仍会记录两个环境变量和最终生效值后报错。
+- 已验证：Python 源码编译检查通过；空 `RABBITBOT_DIALOGUE_INDEX` 和空旧变量返回默认序号 `0`；显式 `RABBITBOT_DIALOGUE_INDEX=3` 返回 `3`；非法 `abc` 仍报 `DOCX 导览台词序号必须是数字`。
+- 注意：当前正在运行的服务实例已经处于等待 `back` 阶段，本轮未自动发送 `back`、未重启服务、未中断现有 loop。要恢复现场可先发 `back` 完成本轮，或在确认安全后 `sudo systemctl restart rabbitbot-loop.service` 重新进入待命。
+
