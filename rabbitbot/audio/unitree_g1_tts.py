@@ -34,6 +34,8 @@ class UnitreeG1TTS:
         self.command_timeout = float(os.getenv("RABBITBOT_UNITREE_TTS_COMMAND_TIMEOUT", str(self.timeout + 5.0)))
         volume_text = os.getenv("RABBITBOT_UNITREE_TTS_VOLUME", "100").strip()
         self.volume = int(volume_text) if volume_text else -1
+        self.set_volume_each_request = _env_enabled("RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST", False)
+        self.volume_applied = False
         self.binary_path = Path(os.getenv("RABBITBOT_UNITREE_TTS_BINARY", "build/unitree_g1_tts_bridge"))
         self.build_script = Path(os.getenv("RABBITBOT_UNITREE_TTS_BUILD_SCRIPT", "scripts/build_unitree_g1_tts_bridge.sh"))
         self.sdk_dir = Path(os.getenv("RABBITBOT_UNITREE_SDK_DIR") or self._default_sdk_dir())
@@ -49,6 +51,7 @@ class UnitreeG1TTS:
             network=self.network_interface,
             speaker=self.speaker_id,
             volume=self.volume,
+            set_volume_each_request=self.set_volume_each_request,
             timeout=self.timeout,
             binary=self.binary_path,
             sdk=self.sdk_dir,
@@ -140,32 +143,54 @@ class UnitreeG1TTS:
             volume=self.volume,
             estimated_duration=f"{duration:.3f}s",
         )
+        used_volume = False
+        volume_attempted = False
         if self.dry_run:
             returncode = 0
             stdout = "dry_run"
             stderr = ""
         else:
-            command = [
-                str(self.binary_path),
-                "--network", self.network_interface,
-                "--speaker", str(self.speaker_id),
-                "--timeout", str(self.timeout),
-                "--text", clean_text,
-            ]
-            if self.volume >= 0:
-                command.extend(["--volume", str(self.volume)])
-            result = subprocess.run(
-                command,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=self.command_timeout,
-                check=False,
-                env=self._subprocess_env(),
-            )
+            def run_bridge(include_volume):
+                command = [
+                    str(self.binary_path),
+                    "--network", self.network_interface,
+                    "--speaker", str(self.speaker_id),
+                    "--timeout", str(self.timeout),
+                    "--text", clean_text,
+                ]
+                if include_volume:
+                    command.extend(["--volume", str(self.volume)])
+                return subprocess.run(
+                    command,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=self.command_timeout,
+                    check=False,
+                    env=self._subprocess_env(),
+                )
+
+            used_volume = self.volume >= 0 and (self.set_volume_each_request or not self.volume_applied)
+            volume_attempted = used_volume
+            result = run_bridge(used_volume)
             returncode = result.returncode
             stdout = result.stdout
             stderr = result.stderr
+            if returncode != 0 and used_volume:
+                _unitree_log(
+                    "tts_request_retry_without_volume",
+                    text=clean_text,
+                    tts_index=tts_index,
+                    returncode=returncode,
+                    stdout=stdout[-1000:],
+                    stderr=stderr[-1000:],
+                    reason="设置音量失败或机器人音频服务忙，保留当前音量并重试播报",
+                )
+                retry_result = run_bridge(False)
+                returncode = retry_result.returncode
+                stdout = retry_result.stdout
+                stderr = retry_result.stderr
+                used_volume = False
         elapsed = time.perf_counter() - start
         if returncode != 0:
             _unitree_log(
@@ -178,6 +203,8 @@ class UnitreeG1TTS:
                 stderr=stderr[-1000:],
             )
             raise RuntimeError(f"Unitree G1 TTS 请求失败: returncode={returncode}")
+        if used_volume or volume_attempted:
+            self.volume_applied = True
         with self.lock:
             now = time.monotonic()
             self.pending_until = max(now, self.pending_until) + duration

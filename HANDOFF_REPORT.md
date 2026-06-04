@@ -179,3 +179,13 @@
 - 旧日期日志剩余项仅为 `logs/unified_runtime/rabbitbot_workflow_20260603_144523.log`，该文件是 `rabbitbot_workflow_latest.log` 的目标文件，故保留以避免破坏 latest 链接。
 - 归档目录内包含 `ARCHIVE_MANIFEST.txt` 和 `ARCHIVE_MANIFEST_ROOT.txt`，分别记录普通用户权限和容器 root 权限归档的文件清单。
 
+## 本轮补充：workflow 开场后提前退出原因
+
+- 本轮定位 2026-06-04 08:46 左右 workflow 提前退出：run_id 为 `20260604_084641`，退出码为 `1`，不是剧本正常结束。
+- 直接原因是第三句开场欢迎语“各位朋友，也欢迎你们！”调用 TTS 时失败；workflow 日志中 `tts_index` 为空，旧逻辑随后执行 `int('')` 抛出 `ValueError`，loop 看到 workflow finished 后进入等待 `back` 阶段。
+- TTS 服务端根因日志显示 Unitree G1 本体 TTS 桥接在该句执行 `SetVolume(100)` 时返回 `ret=3104`，随后 HTTP 返回 500；前两句 TTS 均正常返回。
+- 本轮已修复 `rabbitbot/audio/unitree_g1_tts.py`：默认只在首次 Unitree TTS 请求时设置音量；如果设置音量失败或机器人音频服务忙，会记录 `tts_request_retry_without_volume` 并保留当前音量重试播报。
+- 本轮已修复 `rabbitbot/tools/sound_agno.py`：当 TTS 返回空值或非法索引时记录 `workflow_tts_request_invalid_response`，并抛出带上下文的 `RuntimeError`，避免后续只看到难以定位的 `ValueError`。
+- 已验证：Python 源码编译检查通过；模拟桥接返回验证第一句带 `--volume`、第二句不带；模拟 `SetVolume` 失败验证会不带音量重试并返回成功索引。
+- 额外状态：复查时 `rabbitbot-unified-runtime` 容器已退出，Docker 状态为 `ExitCode=137`、`OOMKilled=false`，28185 TTS 端口不再监听；本轮未重新拉起容器或 workflow。
+

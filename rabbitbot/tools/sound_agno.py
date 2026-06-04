@@ -130,7 +130,15 @@ def tts_sound(tts_agent, text, lang):
         f"stage=workflow_tts_request_done, tts_index={tts_index}, "
         f"elapsed={elapsed:.3f}s, text={text}"
     )
-    return int(tts_index)
+    try:
+        return int(tts_index)
+    except (TypeError, ValueError) as exc:
+        print(
+            f"[{_sound_timestamp()}] TTS请求链路: "
+            f"stage=workflow_tts_request_invalid_response, tts_index={tts_index}, "
+            f"elapsed={elapsed:.3f}s, text={text}, error={type(exc).__name__}: {exc}"
+        )
+        raise RuntimeError(f"TTS请求失败或返回非法索引: tts_index={tts_index!r}, text={text}") from exc
 
 
 def tts_wait(tts_agent):
