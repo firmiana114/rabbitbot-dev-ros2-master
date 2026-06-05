@@ -242,3 +242,12 @@
 - 结合 `g1_arm_official_action_server.cpp` 执行顺序，`Executing official action` 之前会调用 `GetFsmId` 和 `GetFsmMode`；本轮推断约 20 秒耗在这两个 Unitree 状态查询超时/失败上，之后 `face_wave` 本体动作约 4 秒完成。
 - 结论：该次长延迟不是 TTS 合成或播放导致，也不是导航目标导致，而是手臂官方动作服务在执行 `face_wave` 前查询机器人 FSM 状态异常超时。后续若要修复，可考虑减少/跳过动作前 FSM 查询、给查询单独加短超时，或让 workflow 对开场并发动作设置最大等待时间。
 
+## 本轮补充：stop 脚本增强宿主机清理
+
+- 本轮增强 `scripts_1/stop_unified_workflow.sh`，使其除停止统一容器 workflow 和容器内后台服务外，还会清理宿主机导航、手臂动作服务和 `28180` bridge。
+- 新增宿主机清理顺序：先停止 `start_nav_bridge_workflow_loop.sh` 进程组，让 loop 自身 trap 清理；再停止 `start_nav_arm_bridge.sh`；最后按明确进程名兜底清理 `goGoalNavigation66`、`g1ArmOfficialActionServer`、`humble_robot_agent_bridge:app` 和导航日志 tail。
+- 新增 pid 文件兜底清理：扫描 `/mnt/ssd/navgation/projects/unitree_slam_example_new/example/run_logs` 下历史启动脚本记录的 `.pid` 文件，并在命令行匹配预期进程名时才停止，避免 PID 复用导致误杀。
+- 新增清理日志：脚本会打印每类宿主机进程的发现/停止情况、PID、命令行、强制停止原因，以及最终 `28180` 端口是否释放，便于排查停止不彻底的问题。
+- 已验证 `bash -n scripts_1/stop_unified_workflow.sh` 通过；本轮未实际执行 stop 脚本，避免中断现场可能存在的服务。
+- 当前已知未跟踪文件仍为 `conf/dialogue_1500.json`、`conf/dialogue_1600.json`、`conf/dialogue_2000.json`，本轮未处理这些现场台词文件。
+
