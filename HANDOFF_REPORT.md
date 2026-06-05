@@ -232,3 +232,13 @@
 - 复查发现 2026-06-04 15:39:22 有新的手动 `start_nav_bridge_workflow_loop.sh` 实例在运行，父进程不是 systemd；本轮未停止该手动实例。
 - 如后续需要重新启用开机自启，可执行 `sudo systemctl enable rabbitbot-loop.service`；只临时启动则执行 `sudo systemctl start rabbitbot-loop.service`。
 
+## 本轮补充：开场欢迎后长延迟定位
+
+- 本轮只读排查 2026-06-05 运行中“各位朋友，也欢迎你们！”之后长时间停顿的问题，未修改代码。
+- 最近几轮对比显示异常集中在 `logs/nav_workflow_control/rabbitbot_workflow_20260605_115910.log`：该轮 `face_wave` 动作耗时 `24.048s`，到下一句“各位领导，各位，请随我来...”开始间隔 `24.249s`；其它相邻轮次同一动作约 `4.1s`、到下一句约 `4.3s`。
+- workflow 日志显示 TTS 请求本身正常：该句 TTS `elapsed=0.346s`，随后 `wait_speech` 约 3 秒完成；长延迟发生在等待并发动作 `face_wave` 的 action 线程 join。
+- 导航桥接日志 `logs/nav_workflow_control/nav_bridge_20260605_115805.log` 显示 `/do_arm_async task=face_wave` 的 `goal_response=22.02ms`，但 `wait_result=24012.32ms`，说明 HTTP 和 ROS goal 接收很快，卡在等待手臂 action 结果。
+- 手臂 action server 日志 `/mnt/ssd/navgation/projects/unitree_slam_example_new/example/run_logs/nav_arm_bridge_20260605_115806/02_g1ArmOfficialActionServer.log` 显示 `face_wave` 接收后约 20 秒才打印 `Executing official action [face_wave] at fsm_id=-1 fsm_mode=-1`，最终 `receive_to_success=23997.30ms`。
+- 结合 `g1_arm_official_action_server.cpp` 执行顺序，`Executing official action` 之前会调用 `GetFsmId` 和 `GetFsmMode`；本轮推断约 20 秒耗在这两个 Unitree 状态查询超时/失败上，之后 `face_wave` 本体动作约 4 秒完成。
+- 结论：该次长延迟不是 TTS 合成或播放导致，也不是导航目标导致，而是手臂官方动作服务在执行 `face_wave` 前查询机器人 FSM 状态异常超时。后续若要修复，可考虑减少/跳过动作前 FSM 查询、给查询单独加短超时，或让 workflow 对开场并发动作设置最大等待时间。
+
