@@ -132,24 +132,52 @@ function showError(message){
   setText('overall','读取失败');
   setText('message',message);
 }
+function servicesReady(data){
+  return data&&data.main_loop==='running'&&data.nav_bridge&&data.nav_bridge.ready&&data.workflow&&data.workflow.ready;
+}
+function renderStatus(data){
+  setText('map','地图：'+data.map_path);
+  if(!mapPathTouched&&data.map_path){document.getElementById('mapPathInput').value=data.map_path;}
+  setText('overall',servicesReady(data)?'全部就绪':(data.nav_bridge.ready?'在线':'导航未就绪'));
+  setText('mainLoop',data.main_loop);
+  setText('navBridge',data.nav_bridge.ready?'28180 就绪':'未就绪');
+  setText('workflow',data.workflow.status||'unknown');
+  document.getElementById('guideBtn').disabled=!data.nav_bridge.ready;
+  setText('poseStatus',(data.pose&&data.pose.status_message)||(data.pose&&data.pose.localized?'定位成功':'定位未成功：程序会持续重定位，需要遥控机器人的位姿，帮助机器人完成定位'));
+  if(data.pose&&data.pose.available){
+    var newline=String.fromCharCode(10);
+    setText('pose','x '+data.pose.x+' / y '+data.pose.y+' / z '+data.pose.z+newline+'ox '+data.pose.ox+' / oy '+data.pose.oy+' / oz '+data.pose.oz+' / ow '+data.pose.ow);
+  }else{
+    setText('pose',(data.pose&&data.pose.message)||'暂无定位位姿数据');
+  }
+}
 function refresh(){
   requestJson('GET','/api/status',null,function(error,data){
     if(error){showError(error.message);return;}
-    setText('map','地图：'+data.map_path);
-    if(!mapPathTouched&&data.map_path){document.getElementById('mapPathInput').value=data.map_path;}
-    setText('overall',data.nav_bridge.ready?'在线':'导航未就绪');
-    setText('mainLoop',data.main_loop);
-    setText('navBridge',data.nav_bridge.ready?'28180 就绪':'未就绪');
-    setText('workflow',data.workflow.status||'unknown');
-    document.getElementById('guideBtn').disabled=!data.nav_bridge.ready;
-    setText('poseStatus',(data.pose&&data.pose.status_message)||(data.pose&&data.pose.localized?'定位成功':'定位未成功：程序会持续重定位，需要遥控机器人的位姿，帮助机器人完成定位'));
-    if(data.pose&&data.pose.available){
-      var newline=String.fromCharCode(10);
-      setText('pose','x '+data.pose.x+' / y '+data.pose.y+' / z '+data.pose.z+newline+'ox '+data.pose.ox+' / oy '+data.pose.oy+' / oz '+data.pose.oz+' / ow '+data.pose.ow);
-    }else{
-      setText('pose',(data.pose&&data.pose.message)||'暂无定位位姿数据');
-    }
+    renderStatus(data);
     if(logsVisible){refreshLogs();}
+  });
+}
+function waitForServicesReady(button,startedAt){
+  requestJson('GET','/api/status',null,function(error,data){
+    if(error){
+      setText('message','正在等待服务就绪：'+error.message);
+    }else{
+      renderStatus(data);
+      if(servicesReady(data)){
+        setText('message','所有服务已加载成功，可执行相关操作');
+        button.disabled=false;
+        if(logsVisible){refreshLogs();}
+        return;
+      }
+      setText('message','正在等待所有服务加载完成...');
+    }
+    if(Date.now()-startedAt>90000){
+      setText('message','服务仍未全部就绪，请查看状态或打开日志排查');
+      button.disabled=false;
+      return;
+    }
+    setTimeout(function(){waitForServicesReady(button,startedAt);},2000);
   });
 }
 function refreshLogs(){
@@ -231,8 +259,9 @@ function startProgram(){
   setText('overall','启动中');
   setText('message','正在启动导航主程序...');
   requestJson('POST','/api/start',{},function(error,body){
-    setText('message',error?error.message:body.message);
-    setTimeout(function(){button.disabled=false;refresh();},3000);
+    if(error){setText('message',error.message);button.disabled=false;refresh();return;}
+    setText('message',body.message+'，正在等待所有服务加载完成...');
+    waitForServicesReady(button,Date.now());
   });
 }
 
@@ -255,8 +284,9 @@ function restartProgram(){
   setText('message','正在重新启动导航主程序...');
   var mapPath=document.getElementById('mapPathInput').value;
   requestJson('POST','/api/restart',{map_path:mapPath},function(error,body){
-    setText('message',error?error.message:body.message);
-    setTimeout(function(){button.disabled=false;refresh();},3000);
+    if(error){setText('message',error.message);button.disabled=false;refresh();return;}
+    setText('message',body.message+'，正在等待所有服务加载完成...');
+    waitForServicesReady(button,Date.now());
   });
 }
 refresh();

@@ -267,6 +267,9 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '关闭程序' in response.text
     assert '/api/start' in response.text
     assert 'startProgram' in response.text
+    assert 'waitForServicesReady' in response.text
+    assert '所有服务已加载成功，可执行相关操作' in response.text
+    assert '服务仍未全部就绪，请查看状态或打开日志排查' in response.text
     assert '/api/stop' in response.text
     assert 'stopProgram' in response.text
     assert '/api/restart' in response.text
