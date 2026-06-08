@@ -1,6 +1,6 @@
 import pytest
 
-from rabbitbot.control_console.commands import CommandError, read_map_path, restart_loop_service, send_workflow_command, start_task, stop_loop_service, write_map_path
+from rabbitbot.control_console.commands import CommandError, read_map_path, restart_loop_service, send_workflow_command, start_loop_service, start_task, stop_loop_service, write_map_path
 
 
 def test_send_workflow_command_allows_go_and_invokes_script(tmp_path):
@@ -61,6 +61,34 @@ def test_send_workflow_command_reports_script_failure(tmp_path):
         send_workflow_command("go", script)
 
     assert "failure" in str(excinfo.value)
+
+
+def test_start_loop_service_invokes_systemctl_start(tmp_path):
+    systemctl = tmp_path / "systemctl"
+    record = tmp_path / "record.txt"
+    systemctl.write_text(
+        f"#!/usr/bin/env bash\nprintf '%s\n' \"$@\" > {record}\n",
+        encoding="utf-8",
+    )
+    systemctl.chmod(0o755)
+
+    result = start_loop_service(systemctl_path=systemctl, sudo_path=None)
+
+    assert result["ok"] is True
+    assert result["service"] == "rabbitbot-loop.service"
+    assert result["message"] == "已启动导航主程序"
+    assert record.read_text(encoding="utf-8").splitlines() == ["start", "rabbitbot-loop.service"]
+
+
+def test_start_loop_service_rejects_other_services(tmp_path):
+    systemctl = tmp_path / "systemctl"
+    systemctl.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    systemctl.chmod(0o755)
+
+    with pytest.raises(CommandError) as excinfo:
+        start_loop_service("ssh.service", systemctl_path=systemctl, sudo_path=None)
+
+    assert "不支持启动的服务" in str(excinfo.value)
 
 
 def test_restart_loop_service_invokes_systemctl_restart(tmp_path):

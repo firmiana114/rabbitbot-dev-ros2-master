@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from .commands import CommandError, read_map_path, restart_loop_service, send_workflow_command, start_task, stop_loop_service
+from .commands import CommandError, read_map_path, restart_loop_service, send_workflow_command, start_loop_service, start_task, stop_loop_service
 from .config import ConsoleConfig
 from .dialogue import DialogueError, read_dialogue_editor, resolve_dialogue_path, write_dialogue_config
 from .status import (
@@ -68,6 +68,7 @@ def _html() -> str:
           <div class="actions">
             <button class="back" onclick="sendCommand('back')">返航</button>
             <button class="refresh" onclick="refresh()">刷新状态</button>
+            <button id="startBtn" class="go" onclick="startProgram()">开始程序</button>
             <button id="restartBtn" class="restart" onclick="restartProgram()">一键重启</button>
             <button id="stopBtn" class="back" onclick="stopProgram()">关闭程序</button>
           </div>
@@ -224,6 +225,17 @@ function startTask(task){
     refresh();
   });
 }
+function startProgram(){
+  var button=document.getElementById('startBtn');
+  button.disabled=true;
+  setText('overall','启动中');
+  setText('message','正在启动导航主程序...');
+  requestJson('POST','/api/start',{},function(error,body){
+    setText('message',error?error.message:body.message);
+    setTimeout(function(){button.disabled=false;refresh();},3000);
+  });
+}
+
 function stopProgram(){
   if(!window.confirm('确定关闭导航主程序吗？网页控制台会继续运行。')){return;}
   var button=document.getElementById('stopBtn');
@@ -292,6 +304,18 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
         except CommandError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+
+
+    @app.post("/api/start")
+    def start() -> dict:
+        try:
+            return start_loop_service(
+                config.loop_service_name,
+                systemctl_path=config.systemctl_path,
+                sudo_path=config.sudo_path,
+            )
+        except CommandError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/restart")
     def restart(payload: RestartRequest) -> dict:

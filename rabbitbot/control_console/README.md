@@ -4,8 +4,8 @@
 
 ## 代码位置
 
-- `app.py`：FastAPI 应用入口，包含页面 HTML/CSS/JS 的 `_html()` 函数，以及 `/api/status`、`/api/task`、`/api/command`、`/api/restart`、`/api/dialogue`、`/api/logs` 接口。
-- `commands.py`：发送 workflow 命令、一键重启 `rabbitbot-loop.service`、写入运行时地图环境文件。
+- `app.py`：FastAPI 应用入口，包含页面 HTML/CSS/JS 的 `_html()` 函数，以及 `/api/status`、`/api/task`、`/api/command`、`/api/start`、`/api/restart`、`/api/stop`、`/api/dialogue`、`/api/logs` 接口。
+- `commands.py`：发送 workflow 命令，启动、重启、停止 `rabbitbot-loop.service`，写入运行时地图环境文件。
 - `dialogue.py`：导览讲解词 JSON 的读取、结构校验、保存和自动备份。
 - `config.py`：控制台配置来源，包括端口、地图默认值、台词文件路径、systemd 服务名。
 - `status.py`：读取主循环状态、导航桥接端口、workflow 状态、定位位姿和日志尾部。
@@ -43,9 +43,9 @@ sudo systemctl status rabbitbot-loop.service
 sudo systemctl restart rabbitbot-loop.service
 ```
 
-网页上的“一键重启”调用后端 `/api/restart`，实际执行的是重启 `rabbitbot-loop.service`。网页上的“关闭程序”调用后端 `/api/stop`，实际执行的是停止 `rabbitbot-loop.service`，不会关闭网页控制台服务。
+网页上的“开始程序”调用后端 `/api/start`，实际执行的是启动 `rabbitbot-loop.service`。网页上的“一键重启”调用后端 `/api/restart`，实际执行的是重启 `rabbitbot-loop.service`。网页上的“关闭程序”调用后端 `/api/stop`，实际执行的是停止 `rabbitbot-loop.service`，不会关闭网页控制台服务。
 
-网页后端以 `pc` 用户运行，停止/重启 systemd 服务需要 sudoers 免密授权。交付部署时应安装仓库内的模板：
+网页后端以 `pc` 用户运行，启动/停止/重启 systemd 服务需要 sudoers 免密授权。交付部署时应安装仓库内的模板：
 
 ```bash
 sudo install -m 0440 scripts_1/systemd/rabbitbot-control-console.sudoers /etc/sudoers.d/rabbitbot-control-console
@@ -55,8 +55,20 @@ sudo visudo -cf /etc/sudoers.d/rabbitbot-control-console
 该模板只允许 `pc` 免密执行以下固定命令：
 
 ```text
+/usr/bin/systemctl start rabbitbot-loop.service
 /usr/bin/systemctl restart rabbitbot-loop.service
 /usr/bin/systemctl stop rabbitbot-loop.service
+```
+
+## 开机启动策略
+
+交付模式下只保留网页控制台开机自启动，导航主程序不再开机自启动。开机后先访问网页控制台，再点击“开始程序”启动导航主程序。
+
+当前策略对应：
+
+```bash
+sudo systemctl enable rabbitbot-control-console.service
+sudo systemctl disable rabbitbot-loop.service
 ```
 
 ## 地图切换和一键重启
@@ -99,7 +111,7 @@ EnvironmentFile=-/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master/runtime/r
 1. 点击“关闭程序”。
 2. 浏览器会弹出确认框。
 3. 确认后后端执行 `systemctl stop rabbitbot-loop.service`。
-4. 网页控制台仍会继续运行，可继续查看状态，或后续点击“一键重启”重新启动导航主程序。
+4. 网页控制台仍会继续运行，可继续查看状态，或后续点击“开始程序”启动导航主程序。
 
 ## 导览讲解词编辑
 

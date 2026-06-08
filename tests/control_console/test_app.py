@@ -135,6 +135,19 @@ def test_task_placeholders_return_message_without_login(tmp_path):
     assert vision.json()["message"] == "视觉导航任务暂未接入"
 
 
+def test_start_starts_loop_service_without_login(tmp_path):
+    config = make_config(tmp_path)
+    client = TestClient(create_app(config))
+
+    response = client.post("/api/start")
+
+    assert response.status_code == 200
+    assert response.json()["service"] == "rabbitbot-loop.service"
+    assert response.json()["message"] == "已启动导航主程序"
+    record = config.project_root / "systemctl_args.txt"
+    assert record.read_text(encoding="utf-8").splitlines() == ["start", "rabbitbot-loop.service"]
+
+
 def test_restart_restarts_loop_service_without_login(tmp_path):
     config = make_config(tmp_path)
     client = TestClient(create_app(config))
@@ -249,8 +262,11 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '返航' in response.text
     assert '定位状态' in response.text
     assert '当前位姿' in response.text
+    assert '开始程序' in response.text
     assert '一键重启' in response.text
     assert '关闭程序' in response.text
+    assert '/api/start' in response.text
+    assert 'startProgram' in response.text
     assert '/api/stop' in response.text
     assert 'stopProgram' in response.text
     assert '/api/restart' in response.text

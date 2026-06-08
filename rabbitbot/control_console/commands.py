@@ -110,7 +110,7 @@ def _run_loop_service_action(
 ) -> str:
     if service_name != LOOP_SERVICE_NAME:
         raise CommandError(f"不支持操作的服务：{service_name}")
-    if action not in {"restart", "stop"}:
+    if action not in {"start", "restart", "stop"}:
         raise CommandError(f"不支持的服务操作：{action}")
     if not systemctl_path.exists():
         raise CommandError(f"systemctl 不存在：{systemctl_path}")
@@ -132,6 +132,17 @@ def _run_loop_service_action(
     if result.returncode != 0:
         raise CommandError(output or f"{failure_label}失败，退出码：{result.returncode}")
     return output
+
+
+def start_loop_service(
+    service_name: str = LOOP_SERVICE_NAME,
+    systemctl_path: Path = Path("/usr/bin/systemctl"),
+    sudo_path: Path | None = Path("/usr/bin/sudo"),
+) -> dict:
+    if service_name != LOOP_SERVICE_NAME:
+        raise CommandError(f"不支持启动的服务：{service_name}")
+    output = _run_loop_service_action("start", service_name, systemctl_path, sudo_path, "启动")
+    return {"ok": True, "service": service_name, "message": output or "已启动导航主程序"}
 
 
 def restart_loop_service(
