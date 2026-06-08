@@ -131,6 +131,23 @@ def test_parse_latest_pose_marks_unlocalized_after_new_relocation_attempt(tmp_pa
     assert pose.ow == 0.9
 
 
+def test_parse_latest_pose_does_not_treat_ready_as_localization_success(tmp_path):
+    log = tmp_path / "nav_bridge_20260609.log"
+    log.write_text(
+        "[INFO] [1] [hybrid_navigation_node_66]: [Ready] Navigation system ready for commands!\n"
+        "[INFO] [2] [hybrid_navigation_node_66]: [Pose] x: 4.0000  y: 5.0000  z: 6.0000  ox: 0.4000  oy: 0.5000  oz: 0.6000  ow: 0.7000\n",
+        encoding="utf-8",
+    )
+
+    pose = parse_latest_pose(log)
+
+    assert pose.available is True
+    assert pose.localized is False
+    assert pose.status_message == "当前位姿已读取，定位状态待确认"
+    assert pose.x == 4.0
+    assert pose.ow == 0.7
+
+
 def test_parse_latest_pose_does_not_treat_pose_line_as_localization_success(tmp_path):
     log = tmp_path / "nav_bridge_20260609.log"
     log.write_text(
@@ -144,5 +161,27 @@ def test_parse_latest_pose_does_not_treat_pose_line_as_localization_success(tmp_
     assert pose.available is True
     assert pose.localized is False
     assert "需要遥控机器人的位姿" in pose.status_message
+    assert pose.x == 4.0
+    assert pose.ow == 0.7
+
+
+def test_parse_latest_pose_does_not_keep_old_success_forever(tmp_path):
+    log = tmp_path / "nav_bridge_20260609.log"
+    noisy_lines = "".join(f"dds noise {index}\n" for index in range(320))
+    log.write_text(
+        "[INFO] [1] [hybrid_navigation_node_66]: [Auto-Relocation] Success! Current pose:\n"
+        "[INFO] [1] [hybrid_navigation_node_66]:   x: 1.0000  y: 2.0000  z: 3.0000\n"
+        "[INFO] [1] [hybrid_navigation_node_66]:   ox: 0.1000  oy: 0.2000  oz: 0.3000  ow: 0.9000\n"
+        + noisy_lines
+        + "[INFO] [2] [hybrid_navigation_node_66]: [Pose] x: 4.0000  y: 5.0000  z: 6.0000  ox: 0.4000  oy: 0.5000  oz: 0.6000  ow: 0.7000\n",
+        encoding="utf-8",
+    )
+
+    pose = parse_latest_pose(log)
+
+    assert pose.available is True
+    assert pose.localized is False
+    assert pose.status_message == "当前位姿已读取，定位状态待确认"
+    assert pose.source == "pose_log"
     assert pose.x == 4.0
     assert pose.ow == 0.7

@@ -88,7 +88,7 @@ def test_status_returns_map_and_pose_without_login(tmp_path):
     assert body["workflow"]["status"] == "waiting_for_go"
     assert body["pose"]["available"] is True
     assert body["pose"]["localized"] is False
-    assert "需要遥控机器人的位姿" in body["pose"]["status_message"]
+    assert body["pose"]["status_message"] == "当前位姿已读取，定位状态待确认"
     assert body["pose"]["x"] == 1.0
 
 

@@ -18,6 +18,8 @@ ORIENTATION_RE = re.compile(rf"ox:\s*{FLOAT}\s+oy:\s*{FLOAT}\s+oz:\s*{FLOAT}\s+o
 RUN_ID_RE = re.compile(r"^(\d{8}_\d{6})\.(status|pid|ready|exit_code|finished_at)$")
 LOCALIZATION_SUCCESS_MESSAGE = "定位成功"
 LOCALIZATION_HELP_MESSAGE = "定位未成功：程序会持续重定位，需要遥控机器人的位姿，帮助机器人完成定位"
+LOCALIZATION_UNKNOWN_MESSAGE = "当前位姿已读取，定位状态待确认"
+LOCALIZATION_STATE_WINDOW_LINES = 300
 
 
 @dataclass(frozen=True)
@@ -85,12 +87,13 @@ def get_tail_lines(path: Path, limit: int = 120) -> list[str]:
 
 def _localization_state(lines: list[str]) -> tuple[bool, str]:
     localized = False
-    message = LOCALIZATION_HELP_MESSAGE
-    for line in lines:
+    message = LOCALIZATION_UNKNOWN_MESSAGE
+    recent_lines = lines[-LOCALIZATION_STATE_WINDOW_LINES:]
+    for line in recent_lines:
         if "Waiting for localization" in line or "start relocation with map" in line:
             localized = False
             message = LOCALIZATION_HELP_MESSAGE
-        if "[Auto-Relocation] Success! Current pose:" in line or "[Ready] Navigation system ready for commands!" in line:
+        if "[Auto-Relocation] Success! Current pose:" in line:
             localized = True
             message = LOCALIZATION_SUCCESS_MESSAGE
     return localized, message
