@@ -71,9 +71,21 @@ def latest_file(directory: Path, pattern: str) -> Path | None:
         matches = [path for path in directory.glob(pattern) if path.is_file()]
     except OSError:
         return None
-    if not matches:
+    candidates: list[tuple[float, str, Path]] = []
+    for path in matches:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        candidates.append((mtime, path.name, path))
+    if not candidates:
         return None
-    return max(matches, key=lambda path: (path.stat().st_mtime, path.name))
+
+    now = time.time()
+    non_future_candidates = [item for item in candidates if item[0] <= now + 300]
+    if non_future_candidates:
+        candidates = non_future_candidates
+    return max(candidates, key=lambda item: (item[0], item[1]))[2]
 
 
 def get_tail_lines(path: Path, limit: int = 120) -> list[str]:

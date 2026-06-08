@@ -4,6 +4,7 @@ import time
 from rabbitbot.control_console.config import ConsoleConfig
 from rabbitbot.control_console.status import (
     get_latest_workflow_status,
+    latest_file,
     get_tail_lines,
     parse_latest_pose,
     strip_ansi,
@@ -120,6 +121,18 @@ def test_get_latest_workflow_status_handles_missing_directory(tmp_path):
     assert workflow.run_id is None
     assert workflow.status == "unknown"
     assert workflow.ready is False
+
+
+def test_latest_file_ignores_future_mtime_when_current_log_exists(tmp_path):
+    old_future = tmp_path / "nav_bridge_20260609_152348.log"
+    current = tmp_path / "nav_bridge_20260608_204412.log"
+    old_future.write_text("old future\n", encoding="utf-8")
+    current.write_text("current\n", encoding="utf-8")
+    now = time.time()
+    os.utime(old_future, (now + 86400, now + 86400))
+    os.utime(current, (now, now))
+
+    assert latest_file(tmp_path, "nav_bridge_*.log") == current
 
 
 def test_get_tail_lines_strips_ansi_and_limits_count(tmp_path):
