@@ -1,3 +1,6 @@
+import os
+import time
+
 from rabbitbot.control_console.config import ConsoleConfig
 from rabbitbot.control_console.status import (
     get_latest_workflow_status,
@@ -70,7 +73,7 @@ def test_parse_latest_pose_returns_unavailable_for_missing_log(tmp_path):
     assert pose.message == "暂无定位位姿数据"
 
 
-def test_get_latest_workflow_status_prefers_newest_run_id(tmp_path):
+def test_get_latest_workflow_status_prefers_latest_running_status_mtime(tmp_path):
     control = tmp_path / "workflow_control"
     control.mkdir()
     (control / "20260608_090000.status").write_text("finished\n", encoding="utf-8")
@@ -86,6 +89,29 @@ def test_get_latest_workflow_status_prefers_newest_run_id(tmp_path):
     assert workflow.ready is True
     assert workflow.pid == "1234"
     assert workflow.exit_code is None
+
+
+def test_get_latest_workflow_status_ignores_future_stale_run_id(tmp_path):
+    control = tmp_path / "workflow_control"
+    control.mkdir()
+    stale = control / "20260609_152359.status"
+    stale.write_text("running\n", encoding="utf-8")
+    (control / "20260609_152359.ready").write_text("ready\n", encoding="utf-8")
+    (control / "20260609_152359.pid").write_text("old\n", encoding="utf-8")
+    current = control / "20260608_202907.status"
+    current.write_text("running\n", encoding="utf-8")
+    (control / "20260608_202907.ready").write_text("ready\n", encoding="utf-8")
+    (control / "20260608_202907.pid").write_text("new\n", encoding="utf-8")
+    now = time.time()
+    os.utime(stale, (now + 86400, now + 86400))
+    os.utime(current, (now, now))
+
+    workflow = get_latest_workflow_status(control)
+
+    assert workflow.run_id == "20260608_202907"
+    assert workflow.status == "waiting_for_go"
+    assert workflow.ready is True
+    assert workflow.pid == "new"
 
 
 def test_get_latest_workflow_status_handles_missing_directory(tmp_path):

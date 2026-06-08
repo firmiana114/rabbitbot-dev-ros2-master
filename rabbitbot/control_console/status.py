@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 import re
 import socket
+import time
 from typing import Iterable
 
 
@@ -162,16 +163,33 @@ def parse_latest_pose(path: Path) -> PoseStatus:
 
 def get_latest_workflow_status(control_dir: Path) -> WorkflowStatus:
     try:
-        names = [path.name for path in control_dir.iterdir() if path.is_file()]
+        files = [path for path in control_dir.iterdir() if path.is_file()]
     except OSError:
         return WorkflowStatus(run_id=None, status="unknown", ready=False)
 
-    run_ids = sorted({match.group(1) for name in names if (match := RUN_ID_RE.match(name))})
-    if not run_ids:
+    candidates: list[tuple[int, float, str, str]] = []
+    for path in files:
+        match = RUN_ID_RE.match(path.name)
+        if not match or match.group(2) != "status":
+            continue
+        run_id = match.group(1)
+        status = _read_text(path) or "unknown"
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        running_rank = 1 if status == "running" else 0
+        candidates.append((running_rank, mtime, run_id, status))
+
+    if not candidates:
         return WorkflowStatus(run_id=None, status="unknown", ready=False)
 
-    run_id = run_ids[-1]
-    status = _read_text(control_dir / f"{run_id}.status") or "unknown"
+    now = time.time()
+    non_future_candidates = [item for item in candidates if item[1] <= now + 300]
+    if non_future_candidates:
+        candidates = non_future_candidates
+
+    _, _, run_id, status = max(candidates, key=lambda item: (item[0], item[1], item[2]))
     ready = (control_dir / f"{run_id}.ready").exists()
     if status == "running" and ready:
         status = "waiting_for_go"
