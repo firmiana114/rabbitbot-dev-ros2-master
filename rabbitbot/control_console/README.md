@@ -45,6 +45,20 @@ sudo systemctl restart rabbitbot-loop.service
 
 网页上的“一键重启”调用后端 `/api/restart`，实际执行的是重启 `rabbitbot-loop.service`。网页上的“关闭程序”调用后端 `/api/stop`，实际执行的是停止 `rabbitbot-loop.service`，不会关闭网页控制台服务。
 
+网页后端以 `pc` 用户运行，停止/重启 systemd 服务需要 sudoers 免密授权。交付部署时应安装仓库内的模板：
+
+```bash
+sudo install -m 0440 scripts_1/systemd/rabbitbot-control-console.sudoers /etc/sudoers.d/rabbitbot-control-console
+sudo visudo -cf /etc/sudoers.d/rabbitbot-control-console
+```
+
+该模板只允许 `pc` 免密执行以下固定命令：
+
+```text
+/usr/bin/systemctl restart rabbitbot-loop.service
+/usr/bin/systemctl stop rabbitbot-loop.service
+```
+
 ## 地图切换和一键重启
 
 页面左侧有“重启地图”输入框。
