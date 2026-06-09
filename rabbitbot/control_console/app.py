@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from .commands import CommandError, read_map_path, restart_loop_service, send_workflow_command, start_task
+from .commands import CommandError, read_map_path, restart_loop_service, send_workflow_command, start_task, stop_loop_service
 from .config import ConsoleConfig
 from .dialogue import DialogueError, read_dialogue_editor, resolve_dialogue_path, write_dialogue_config
 from .status import (
@@ -69,6 +69,7 @@ def _html() -> str:
             <button class="back" onclick="sendCommand('back')">返航</button>
             <button class="refresh" onclick="refresh()">刷新状态</button>
             <button id="restartBtn" class="restart" onclick="restartProgram()">一键重启</button>
+            <button id="stopBtn" class="back" onclick="stopProgram()">关闭程序</button>
           </div>
           <div class="field">
             <div class="label">重启地图</div>
@@ -223,6 +224,17 @@ function startTask(task){
     refresh();
   });
 }
+function stopProgram(){
+  if(!window.confirm('确定关闭导航主程序吗？网页控制台会继续运行。')){return;}
+  var button=document.getElementById('stopBtn');
+  button.disabled=true;
+  setText('overall','关闭中');
+  setText('message','正在关闭导航主程序...');
+  requestJson('POST','/api/stop',{},function(error,body){
+    setText('message',error?error.message:body.message);
+    setTimeout(function(){button.disabled=false;refresh();},1500);
+  });
+}
 function restartProgram(){
   if(!window.confirm('确定重新启动导航主程序吗？')){return;}
   var button=document.getElementById('restartBtn');
@@ -290,6 +302,17 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
                 sudo_path=config.sudo_path,
                 map_path=payload.map_path,
                 map_env_file=config.map_env_file,
+            )
+        except CommandError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/stop")
+    def stop() -> dict:
+        try:
+            return stop_loop_service(
+                config.loop_service_name,
+                systemctl_path=config.systemctl_path,
+                sudo_path=config.sudo_path,
             )
         except CommandError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

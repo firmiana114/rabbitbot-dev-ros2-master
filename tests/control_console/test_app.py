@@ -149,6 +149,19 @@ def test_restart_restarts_loop_service_without_login(tmp_path):
     assert record.read_text(encoding="utf-8").splitlines() == ["restart", "rabbitbot-loop.service"]
 
 
+def test_stop_stops_loop_service_without_login(tmp_path):
+    config = make_config(tmp_path)
+    client = TestClient(create_app(config))
+
+    response = client.post("/api/stop")
+
+    assert response.status_code == 200
+    assert response.json()["service"] == "rabbitbot-loop.service"
+    assert response.json()["message"] == "已关闭导航主程序"
+    record = config.project_root / "systemctl_args.txt"
+    assert record.read_text(encoding="utf-8").splitlines() == ["stop", "rabbitbot-loop.service"]
+
+
 def test_dialogue_loads_current_config(tmp_path):
     client = TestClient(create_app(make_config(tmp_path)))
 
@@ -237,6 +250,9 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '定位状态' in response.text
     assert '当前位姿' in response.text
     assert '一键重启' in response.text
+    assert '关闭程序' in response.text
+    assert '/api/stop' in response.text
+    assert 'stopProgram' in response.text
     assert '/api/restart' in response.text
     assert '重启地图' in response.text
     assert 'mapPathInput' in response.text

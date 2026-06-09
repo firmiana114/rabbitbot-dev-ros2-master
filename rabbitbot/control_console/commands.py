@@ -101,30 +101,26 @@ def start_task(task: str, script: Path, extra_args: list[str] | None = None) -> 
     }
 
 
-def restart_loop_service(
-    service_name: str = LOOP_SERVICE_NAME,
-    systemctl_path: Path = Path("/usr/bin/systemctl"),
-    sudo_path: Path | None = Path("/usr/bin/sudo"),
-    map_path: str | None = None,
-    map_env_file: Path | None = None,
-) -> dict:
+def _run_loop_service_action(
+    action: str,
+    service_name: str,
+    systemctl_path: Path,
+    sudo_path: Path | None,
+    failure_label: str,
+) -> str:
     if service_name != LOOP_SERVICE_NAME:
-        raise CommandError(f"不支持重启的服务：{service_name}")
+        raise CommandError(f"不支持操作的服务：{service_name}")
+    if action not in {"restart", "stop"}:
+        raise CommandError(f"不支持的服务操作：{action}")
     if not systemctl_path.exists():
         raise CommandError(f"systemctl 不存在：{systemctl_path}")
     if sudo_path is not None and not sudo_path.exists():
         raise CommandError(f"sudo 不存在：{sudo_path}")
 
-    active_map_path = None
-    if map_path is not None:
-        if map_env_file is None:
-            raise CommandError("缺少地图配置文件路径")
-        active_map_path = write_map_path(map_env_file, map_path)
-
     args: list[str] = []
     if sudo_path is not None:
         args.extend([str(sudo_path), "-n"])
-    args.extend([str(systemctl_path), "restart", service_name])
+    args.extend([str(systemctl_path), action, service_name])
 
     result = subprocess.run(
         args,
@@ -134,10 +130,41 @@ def restart_loop_service(
     )
     output = (result.stdout or result.stderr or "").strip()
     if result.returncode != 0:
-        raise CommandError(output or f"重启失败，退出码：{result.returncode}")
+        raise CommandError(output or f"{failure_label}失败，退出码：{result.returncode}")
+    return output
+
+
+def restart_loop_service(
+    service_name: str = LOOP_SERVICE_NAME,
+    systemctl_path: Path = Path("/usr/bin/systemctl"),
+    sudo_path: Path | None = Path("/usr/bin/sudo"),
+    map_path: str | None = None,
+    map_env_file: Path | None = None,
+) -> dict:
+    if service_name != LOOP_SERVICE_NAME:
+        raise CommandError(f"不支持重启的服务：{service_name}")
+
+    active_map_path = None
+    if map_path is not None:
+        if map_env_file is None:
+            raise CommandError("缺少地图配置文件路径")
+        active_map_path = write_map_path(map_env_file, map_path)
+
+    output = _run_loop_service_action("restart", service_name, systemctl_path, sudo_path, "重启")
 
     response = {"ok": True, "service": service_name, "message": output or "已重新启动导航主程序"}
     if active_map_path is not None:
         response["map_path"] = active_map_path
         response["message"] = f"已使用地图 {active_map_path} 重新启动导航主程序"
     return response
+
+
+def stop_loop_service(
+    service_name: str = LOOP_SERVICE_NAME,
+    systemctl_path: Path = Path("/usr/bin/systemctl"),
+    sudo_path: Path | None = Path("/usr/bin/sudo"),
+) -> dict:
+    if service_name != LOOP_SERVICE_NAME:
+        raise CommandError(f"不支持关闭的服务：{service_name}")
+    output = _run_loop_service_action("stop", service_name, systemctl_path, sudo_path, "关闭")
+    return {"ok": True, "service": service_name, "message": output or "已关闭导航主程序"}

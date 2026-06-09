@@ -43,7 +43,7 @@ sudo systemctl status rabbitbot-loop.service
 sudo systemctl restart rabbitbot-loop.service
 ```
 
-网页上的“一键重启”调用后端 `/api/restart`，实际执行的是重启 `rabbitbot-loop.service`。
+网页上的“一键重启”调用后端 `/api/restart`，实际执行的是重启 `rabbitbot-loop.service`。网页上的“关闭程序”调用后端 `/api/stop`，实际执行的是停止 `rabbitbot-loop.service`，不会关闭网页控制台服务。
 
 ## 地图切换和一键重启
 
@@ -79,6 +79,13 @@ EnvironmentFile=-/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master/runtime/r
 - “视觉导航”：当前为占位按钮，只返回提示，不执行外部脚本。
 
 “返航”按钮发送 workflow 的 `back` 命令。
+
+“关闭程序”按钮用于停止导航主程序：
+
+1. 点击“关闭程序”。
+2. 浏览器会弹出确认框。
+3. 确认后后端执行 `systemctl stop rabbitbot-loop.service`。
+4. 网页控制台仍会继续运行，可继续查看状态，或后续点击“一键重启”重新启动导航主程序。
 
 ## 导览讲解词编辑
 
