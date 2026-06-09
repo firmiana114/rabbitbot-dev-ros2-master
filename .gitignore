@@ -94,3 +94,6 @@ rabbitbot/robots/image_buffer/
 *.pt
 *.pth
 *.ckpt
+
+# Superpowers brainstorming scratch files
+.superpowers/
