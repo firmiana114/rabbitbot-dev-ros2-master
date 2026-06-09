@@ -167,3 +167,7 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '当前位姿' in response.text
     assert '一键重启' in response.text
     assert '/api/restart' in response.text
+    assert '显示日志' in response.text
+    assert '关闭日志' in response.text
+    assert 'logsVisible=false' in response.text
+    assert '<pre id="logs" class="log" hidden>' in response.text

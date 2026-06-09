@@ -71,12 +71,16 @@ def _html() -> str:
         </section>
       </div>
       <section class="panel" style="margin-top:16px">
-        <div class="label">最近日志</div>
-        <pre id="logs" class="log">读取中...</pre>
+        <div class="top" style="margin-bottom:10px">
+          <div class="label">最近日志</div>
+          <button id="logsToggleBtn" class="refresh" onclick="toggleLogs()">显示日志</button>
+        </div>
+        <pre id="logs" class="log" hidden></pre>
       </section>
     </div>
   </div>
 <script>
+var logsVisible=false;
 function setText(id,text){document.getElementById(id).textContent=text;}
 function requestJson(method,url,payload,callback){
   var xhr=new XMLHttpRequest();
@@ -113,11 +117,26 @@ function refresh(){
     }else{
       setText('pose',(data.pose&&data.pose.message)||'暂无定位位姿数据');
     }
-    requestJson('GET','/api/logs?target=nav&lines=120',null,function(logError,body){
-      if(logError){setText('logs',logError.message);return;}
-      setText('logs',(body.lines&&body.lines.join(String.fromCharCode(10)))||'暂无日志');
-    });
+    if(logsVisible){refreshLogs();}
   });
+}
+function refreshLogs(){
+  if(!logsVisible){return;}
+  requestJson('GET','/api/logs?target=nav&lines=120',null,function(logError,body){
+    if(logError){setText('logs',logError.message);return;}
+    setText('logs',(body.lines&&body.lines.join(String.fromCharCode(10)))||'暂无日志');
+  });
+}
+function toggleLogs(){
+  logsVisible=!logsVisible;
+  document.getElementById('logs').hidden=!logsVisible;
+  setText('logsToggleBtn',logsVisible?'关闭日志':'显示日志');
+  if(logsVisible){
+    setText('logs','读取中...');
+    refreshLogs();
+  }else{
+    setText('logs','');
+  }
 }
 function sendCommand(command){
   requestJson('POST','/api/command',{command:command},function(error,body){
