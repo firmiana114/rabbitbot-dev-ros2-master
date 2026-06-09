@@ -117,8 +117,22 @@ def test_login_button_uses_non_conflicting_handler_name(tmp_path):
     response = client.get("/")
 
     assert response.status_code == 200
-    assert 'id="loginPanel"' in response.text
-    assert 'onclick="submitLogin()"' in response.text
-    assert 'function submitLogin()' in response.text
+    assert 'id="loginForm"' in response.text
+    assert 'function submitLogin(' in response.text
     assert 'onclick="login()"' not in response.text
+    assert 'onclick="submitLogin()"' not in response.text
     assert 'id="login"' not in response.text
+
+
+
+def test_login_page_uses_form_submit_and_no_cache(tmp_path):
+    client = TestClient(create_app(make_config(tmp_path)))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert 'id="loginForm"' in response.text
+    assert '<button class="refresh" type="submit">登录</button>' in response.text
+    assert "addEventListener('submit', submitLogin)" in response.text
+    assert 'onclick="submitLogin()"' not in response.text

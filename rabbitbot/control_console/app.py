@@ -42,13 +42,13 @@ def _html() -> str:
 </head>
 <body>
   <div class="wrap">
-    <div id="loginPanel" class="panel login">
+    <form id="loginForm" class="panel login">
       <h2>RabbitBot 控制台</h2>
       <div class="label">请输入访问密码</div>
       <input id="password" class="input" type="password" autocomplete="current-password" placeholder="密码">
-      <button class="refresh" onclick="submitLogin()">登录</button>
+      <button class="refresh" type="submit">登录</button>
       <p id="loginError" class="error"></p>
-    </div>
+    </form>
     <div id="app" style="display:none">
       <div class="top">
         <div><h2>RabbitBot 控制台</h2><div id="map" class="label">地图：-</div></div>
@@ -80,18 +80,19 @@ def _html() -> str:
     </div>
   </div>
 <script>
-async function submitLogin(){
+async function submitLogin(event){
+  if(event){event.preventDefault();}
   const password=document.getElementById('password').value;
   const res=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
   if(!res.ok){document.getElementById('loginError').textContent='密码错误';return;}
-  document.getElementById('loginPanel').style.display='none';
+  document.getElementById('loginForm').style.display='none';
   document.getElementById('app').style.display='block';
   refresh();
 }
 function setText(id,text){document.getElementById(id).textContent=text;}
 async function refresh(){
   const res=await fetch('/api/status');
-  if(res.status===401){document.getElementById('loginPanel').style.display='block';document.getElementById('app').style.display='none';return;}
+  if(res.status===401){document.getElementById('loginForm').style.display='block';document.getElementById('app').style.display='none';return;}
   const data=await res.json();
   setText('map','地图：'+data.map_path);
   setText('overall',data.nav_bridge.ready?'在线':'导航未就绪');
@@ -110,6 +111,7 @@ async function sendCommand(command){
   refresh();
 }
 setInterval(()=>{if(document.getElementById('app').style.display!=='none')refresh();},2000);
+document.getElementById('loginForm').addEventListener('submit', submitLogin);
 </script>
 </body>
 </html>"""
@@ -125,8 +127,8 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="未登录")
 
     @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
-        return _html()
+    def index() -> HTMLResponse:
+        return HTMLResponse(_html(), headers={"Cache-Control": "no-store"})
 
     @app.post("/api/login")
     def login(payload: LoginRequest, response: Response) -> dict:
