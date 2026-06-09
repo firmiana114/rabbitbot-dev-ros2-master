@@ -18,6 +18,8 @@
 #   RABBITBOT_DIALOGUE_INDEX：选择 conf/dialogue_<序号>.json，未设置时默认 0。
 #   RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX：旧版台词序号变量，仅在 RABBITBOT_DIALOGUE_INDEX 未设置时兜底。
 #   RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE：直接指定台词 JSON 文件完整路径，优先级高于序号。
+#   NAV_PCD_PATH：显式指定导航桥接地图；未设置时优先读取当前台词 JSON 的 map_file。
+#   NAV_MAP_BASE_DIR：台词 map_file 为相对文件名时拼接的地图目录，默认 /home/unitree。
 
 set -Eeuo pipefail
 
@@ -26,7 +28,14 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 NAV_EXAMPLE_DIR="${NAV_EXAMPLE_DIR:-/mnt/ssd/navgation/projects/unitree_slam_example_new/example}"
 NAV_BRIDGE_SCRIPT="${NAV_BRIDGE_SCRIPT:-${NAV_EXAMPLE_DIR}/start_nav_arm_bridge.sh}"
 NAV_INTERFACE="${NAV_INTERFACE:-eno1}"
-NAV_PCD_PATH="${NAV_PCD_PATH:-/home/unitree/test1.pcd}"
+NAV_PCD_PATH_WAS_EXPLICIT=0
+if [ -n "${NAV_PCD_PATH+x}" ] && [ -n "${NAV_PCD_PATH}" ]; then
+    NAV_PCD_PATH_WAS_EXPLICIT=1
+else
+    NAV_PCD_PATH=""
+fi
+DEFAULT_NAV_PCD_PATH="${DEFAULT_NAV_PCD_PATH:-/home/unitree/test1.pcd}"
+NAV_MAP_BASE_DIR="${NAV_MAP_BASE_DIR:-/home/unitree}"
 ROS_SETUP="${ROS_SETUP:-/opt/ros/humble/setup.bash}"
 WS_SETUP="${WS_SETUP:-/mnt/ssd/navgation/projects/custom_action_ws/install/setup.bash}"
 CONTAINER_NAME="${CONTAINER_NAME:-rabbitbot-unified-runtime}"
@@ -112,6 +121,57 @@ require_path() {
     if [ ! -e "$1" ]; then
         log_error "缺少必要路径：$1"
         exit 1
+    fi
+}
+
+dialogue_path_for_nav_map() {
+    if [ -n "${RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE}" ]; then
+        if [[ "${RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE}" == "${CONTAINER_RABBITBOT_DIR}"/* ]]; then
+            echo "${PROJECT_DIR}${RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE#${CONTAINER_RABBITBOT_DIR}}"
+        else
+            echo "${RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE}"
+        fi
+        return
+    fi
+
+    local dialogue_index="${RABBITBOT_DIALOGUE_INDEX:-${RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX:-0}}"
+    echo "${PROJECT_DIR}/conf/dialogue_${dialogue_index}.json"
+}
+
+read_dialogue_map_file() {
+    local dialogue_path="$1"
+    python3 - "$dialogue_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+if not path.exists():
+    raise SystemExit(2)
+data = json.loads(path.read_text(encoding="utf-8"))
+print(str(data.get("map_file") or "").strip())
+PY
+}
+
+resolve_nav_pcd_path() {
+    if [ "${NAV_PCD_PATH_WAS_EXPLICIT}" -eq 1 ]; then
+        log_info "使用显式导航地图：NAV_PCD_PATH=${NAV_PCD_PATH}"
+        return
+    fi
+
+    local dialogue_path
+    local map_file
+    dialogue_path="$(dialogue_path_for_nav_map)"
+    if map_file="$(read_dialogue_map_file "${dialogue_path}" 2>/dev/null)" && [ -n "${map_file}" ]; then
+        if [[ "${map_file}" = /* ]]; then
+            NAV_PCD_PATH="${map_file}"
+        else
+            NAV_PCD_PATH="${NAV_MAP_BASE_DIR%/}/${map_file}"
+        fi
+        log_info "根据台词文件设置导航地图：dialogue=${dialogue_path}, map_file=${map_file}, NAV_PCD_PATH=${NAV_PCD_PATH}"
+    else
+        NAV_PCD_PATH="${DEFAULT_NAV_PCD_PATH}"
+        log_warn "未能从台词文件读取 map_file，使用默认导航地图：dialogue=${dialogue_path}, NAV_PCD_PATH=${NAV_PCD_PATH}"
     fi
 }
 
@@ -322,6 +382,7 @@ trap 'cleanup EXIT' EXIT
 
 prepare_runtime() {
     mkdir -p "${CONTROL_DIR}" "${RUN_DIR}" "${HOST_LOG_DIR}" "${HOST_WORKFLOW_RUN_DIR}" "${HOST_WORKFLOW_CONTROL_DIR}"
+    resolve_nav_pcd_path
     require_path "${NAV_BRIDGE_SCRIPT}"
     require_path "${ROS_SETUP}"
     require_path "${WS_SETUP}"

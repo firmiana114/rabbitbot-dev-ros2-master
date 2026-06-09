@@ -364,3 +364,58 @@
 
 - `dialogue_1.json` 的 `point_1` 和 `point_4` 坐标仍保留旧值；当前 steps 未引用它们。如后续剧本增加引用或现场需要完整 test9 点位表，应补充这两个点位的新坐标。
 - 台词 JSON 修改后需要重启 workflow 才会重新加载。
+
+## 本轮补充：排查 workflow 启动后机器人未移动
+
+### 背景和目标
+
+本轮目标是排查现场刚启动 workflow 后机器人未移动的原因。现场使用 `dialogue_1.json`，该台词文件已配置 `map_file=test9.pcd` 和 test9 点位。
+
+### 当前状态
+
+已完成：
+
+- 已查看最新运行日志：run_id 为 `20260609_110301`，导航桥接日志为 `logs/nav_workflow_control/nav_bridge_20260609_110145.log`，workflow 日志为 `logs/nav_workflow_control/rabbitbot_workflow_20260609_110301.log`。
+- 已确认 workflow 侧加载的是 `dialogue_1.json` 的 test9 配置，日志显示 `map_file=test9.pcd`，点位来自台词文件。
+- 已确认导航桥接实际启动时仍使用 `/home/unitree/test1.pcd`，与 `dialogue_1.json` 的 `test9.pcd` 不一致。
+- 已确认第一段导航请求已发出，目标为 test9 的 `1->2过渡点位`：`x=0.1797, y=-0.1793, ox=0.0022, oy=0.1118, oz=0.0196, ow=0.9935`。
+- 已确认导航底层返回 `statusCode=4`、`errorCode=4`、`info=Failed to obtain the current pose information.`，机器人因此没有开始移动，workflow 随后一直轮询到 `status=1, sub=navigating`。
+- 已修复 `scripts_1/start_nav_bridge_workflow_loop.sh`：如果未显式设置 `NAV_PCD_PATH`，脚本会从当前台词 JSON 的 `map_file` 自动推导导航地图路径；例如 `RABBITBOT_DIALOGUE_INDEX=1` 会使用 `/home/unitree/test9.pcd`。
+- 已保留显式覆盖能力：如果启动时设置了 `NAV_PCD_PATH`，脚本仍优先使用该显式路径。
+
+未完成：
+
+- 本轮未重新启动导航桥接、workflow 或 systemd 服务。
+- 本轮未验证 `/home/unitree/test9.pcd` 在导航底层是否可成功重定位。
+- 本轮未做真机移动复测。
+
+### 已验证的事实
+
+- `rabbitbot-loop.service` 当前为 `disabled / inactive`，本次不是 systemd 服务启动。
+- 当前无 `start_nav_bridge_workflow_loop.sh`、workflow runner、`goGoalNavigation66` 或 28180 监听进程；28182、28184、28185 和 7687 基础服务端口仍在监听。
+- 最新导航桥接启动日志显示使用 `/home/unitree/test1.pcd`，并在 test1 上重定位成功，当前位姿约为 `x=0.8586, y=0.1355`。
+- 最新 workflow 日志显示加载 `dialogue_1.json` 的 `map_file=test9.pcd` 和 test9 点位。
+- `bash -n scripts_1/start_nav_bridge_workflow_loop.sh` 已通过。
+- `dialogue_1.json` 的 `map_file` 可解析为 `/home/unitree/test9.pcd`。
+
+### 阻塞问题
+
+无代码层面阻塞。剩余运行风险是：如果导航底层无法读取或重定位 `/home/unitree/test9.pcd`，机器人仍不会移动；需要现场用新脚本重新启动后观察导航桥接启动日志。
+
+### 建议的下一步
+
+- 重新启动 loop 时使用 `RABBITBOT_DIALOGUE_INDEX=1 bash scripts_1/start_nav_bridge_workflow_loop.sh`，不要额外设置旧的 `NAV_PCD_PATH=/home/unitree/test1.pcd`。
+- 启动后先确认终端出现 `根据台词文件设置导航地图`，并显示 `map_file=test9.pcd, NAV_PCD_PATH=/home/unitree/test9.pcd`。
+- 再确认导航桥接日志中 `Loading map` 和 `start relocation with map` 均为 `/home/unitree/test9.pcd`。
+- 如仍出现 `Failed to obtain the current pose information`，优先检查 test9 地图是否可被导航底层读取、当前位置是否能在 test9 地图中完成重定位。
+
+### 注意事项
+
+- 台词文件 `map_file` 与导航桥接实际 `NAV_PCD_PATH` 必须一致；只修改台词 JSON 不会让旧版本脚本自动换地图。
+- 新版本脚本只在 `NAV_PCD_PATH` 未显式设置时自动读取台词地图；显式设置仍会覆盖台词地图。
+- 当前 workflow 状态文件仍显示 `20260609_110301.status=running`，但对应进程和 28180 已不存在，这是本次中途退出后的陈旧状态；重新启动新 run 时会生成新的 run_id。
+
+### 其它信息
+
+- 本轮新增日志点：loop 启动准备阶段会打印使用显式导航地图，或打印根据台词文件推导出的 `dialogue`、`map_file` 和最终 `NAV_PCD_PATH`。
+- 该日志用于快速诊断台词点位与导航桥接地图是否一致。
