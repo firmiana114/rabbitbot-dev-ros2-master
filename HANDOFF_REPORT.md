@@ -550,3 +550,49 @@
 
 - `back_points` 修改后需要重启导航 loop 才会被新预启动 workflow/返航逻辑读取。
 - 返回点1、返回点2是 28180 直接接口六元组格式，不包含 workflow go 点位中的 `z` 和 `mode`。
+
+## 本轮补充：接手阅读与状态确认
+
+### 背景和目标
+
+本轮目标是按 Aaron 要求读取 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master/HANDOFF_REPORT.md`，接手当前 `rabbitbot-dev-ros2-master` 项目状态，并确认后续应优先关注的运行风险。
+
+### 当前状态
+
+已完成：
+
+- 已完整读取当前交接报告，确认最近工作集中在导航 workflow loop、台词 JSON 点位配置、test9 地图切换、默认关闭 STT、返航路线支持台词配置，以及 `dialogue_fuxing.json` 显式返航点位。
+- 已确认远端 Git 分支为 `June6_workflow`，读取前工作区干净。
+- 已确认最新提交为 `dc398ae fix: ignore future log files in console status`。
+
+未完成：
+
+- 本轮未启动 workflow、导航桥接、systemd 服务或容器。
+- 本轮未发送 `go/back`，未触发机器人移动或语音播报。
+- 本轮未修改业务代码或运行脚本。
+
+### 已验证的事实
+
+- 交接报告中最新风险点仍是运行验证类风险：`dialogue_1.json` 的 `map_file=test9.pcd` 需要与导航桥接实际 `NAV_PCD_PATH=/home/unitree/test9.pcd` 保持一致。
+- `RABBITBOT_UNIFIED_START_STT` 当前默认应为 `0`，严格 DOCX 剧本不依赖 STT 服务启动。
+- `back_points` 已支持从台词 JSON 读取；未配置时会按 go 点位反序生成返航路线。
+- `conf/dialogue_fuxing.json` 已配置显式返航路线：点位5、返回点1、返回点2、点位1。
+
+### 阻塞问题
+
+无接手层面的阻塞。本轮未进行真机或服务重启验证，因此运行层面的剩余风险仍以原交接报告记录为准。
+
+### 建议的下一步
+
+- 如需继续验证 test9 路线，优先使用 `RABBITBOT_DIALOGUE_INDEX=1 bash scripts_1/start_nav_bridge_workflow_loop.sh`，并确认日志打印 `map_file=test9.pcd` 和 `NAV_PCD_PATH=/home/unitree/test9.pcd`。
+- 如需验证返航，重启新版本 loop 后观察返航开始日志中的 `source`、`dialogue`、`segments` 和 `route`，确认实际使用台词显式返航点或 go 点位反序路线。
+- 如需让当前运行实例关闭 STT，需要重建容器或手动停止旧 STT 进程；脚本改动不会热更新已运行容器。
+
+### 注意事项
+
+- 本轮只进行了只读接手和交接报告更新；没有更改日志逻辑、服务配置或台词内容。
+- 后续任何台词 JSON、地图、导航脚本或服务启动逻辑变更后，仍需同步更新本交接报告并提交。
+
+### 其它信息
+
+- 本轮没有新增或调整代码日志点；仅确认已有交接报告中记录的关键日志点，包括台词文件地图/点位加载日志、导航 loop 地图推导日志、返航来源与路线日志、STT 跳过日志。
