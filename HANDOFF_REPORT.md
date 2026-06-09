@@ -509,3 +509,44 @@
 
 - 本轮新增/调整的日志点包括：返航开始时打印返航来源、台词文件路径、分段数和完整路线；读取台词返航配置失败时打印失败原因和兜底来源；最终目标日志打印最后一段返航目标。
 - 这些日志用于排查现场到底使用了台词显式返航点、go 点位反序，还是因配置错误回退到了旧环境变量点位。
+
+## 本轮补充：dialogue_fuxing 增加显式返航点位
+
+### 背景和目标
+
+本轮目标是按现场要求更新备份台词文件 `conf/dialogue_fuxing.json`：该文件由原始 0 号台词复制而来，用于复星原始路线备份；历史返航点位曾写在脚本环境变量中，但没有进入台词文件，本轮需要补入台词 JSON。
+
+### 当前状态
+
+已完成：
+
+- 已在 `conf/dialogue_fuxing.json` 顶层新增 `back_points`。
+- 返航路线配置为 `点位5 -> 返回点1 -> 返回点2 -> 点位1`。
+- `返回点1` 坐标为 `(6.4327, 8.2585, 0.0505, 0.0827, 0.5996, -0.7944)`。
+- `返回点2` 坐标为 `(9.8023, -3.1366, -0.0442, 0.0674, 0.9944, 0.0684)`。
+- `点位5` 和 `点位1` 通过 `point_key` 引用台词文件已有 `points`，避免复制已有 go 点位坐标。
+
+未完成：
+
+- 本轮未启动 workflow、导航桥接、systemd 服务或容器。
+- 本轮未发送 `go/back`，未触发机器人移动。
+
+### 已验证的事实
+
+- `python3 -m json.tool conf/dialogue_fuxing.json` 通过。
+- 使用 `start_nav_bridge_workflow_loop.sh` 的 `read_dialogue_back_route` 只读解析 `conf/dialogue_fuxing.json`，输出来源为 `dialogue_back_points`，路线为点位5、返回点1、返回点2、点位1。
+- `conf/dialogue_fuxing.json` 当前不被 Git 忽略，可纳入提交。
+
+### 阻塞问题
+
+无代码层面阻塞。剩余风险是运行层面尚未真机验证返航路线。
+
+### 建议的下一步
+
+- 如需使用该备份台词启动 workflow，设置 `RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE=/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master/conf/dialogue_fuxing.json` 或容器内对应路径。
+- 真机验证时观察返航开始日志，确认 `source=dialogue_back_points` 且路线为 `点位5 -> 返回点1 -> 返回点2 -> 点位1`。
+
+### 注意事项
+
+- `back_points` 修改后需要重启导航 loop 才会被新预启动 workflow/返航逻辑读取。
+- 返回点1、返回点2是 28180 直接接口六元组格式，不包含 workflow go 点位中的 `z` 和 `mode`。
