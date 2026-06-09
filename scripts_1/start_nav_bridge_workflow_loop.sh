@@ -12,6 +12,9 @@
 #   RABBITBOT_WORKFLOW_START_GATE_POLL_SECONDS：workflow 内部等待 go 闸门文件的轮询间隔。
 #   RABBITBOT_NAV_WORKFLOW_STATUS_POLL_SECONDS：workflow 运行期间检查状态和预接收 back 的轮询间隔。
 #   RABBITBOT_TTS_STRICT_FAILURE：TTS 失败是否终止 workflow，默认 0，即记录错误并继续。
+#   RABBITBOT_NAV_WORKFLOW_HEALTH_CHECK_INTERVAL_SECONDS：等待命令和运行期间的健康检查间隔秒数。
+#   RABBITBOT_NAV_WORKFLOW_LOST_PROCESS_GRACE_SECONDS：workflow 进程丢失后等待状态文件落盘的宽限秒数。
+#   RABBITBOT_NAV_WORKFLOW_BACK_RETRY_LIMIT：返航失败后自动恢复导航桥接并重试的次数，默认 1。
 #   RABBITBOT_DIALOGUE_INDEX：选择 conf/dialogue_<序号>.json，未设置时默认 0。
 #   RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX：旧版台词序号变量，仅在 RABBITBOT_DIALOGUE_INDEX 未设置时兜底。
 #   RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE：直接指定台词 JSON 文件完整路径，优先级高于序号。
@@ -60,6 +63,11 @@ HOST_WORKFLOW_CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_HOST_CONTROL_DIR:-${HOST_WOR
 CONTAINER_WORKFLOW_CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_CONTAINER_CONTROL_DIR:-${CONTAINER_WORKFLOW_RUN_DIR}/workflow_control}"
 WORKFLOW_GATE_READY_TIMEOUT_SECONDS="${RABBITBOT_NAV_WORKFLOW_GATE_READY_TIMEOUT_SECONDS:-30}"
 WORKFLOW_GATE_POLL_SECONDS="${RABBITBOT_WORKFLOW_START_GATE_POLL_SECONDS:-0.05}"
+HEALTH_CHECK_INTERVAL_SECONDS="${RABBITBOT_NAV_WORKFLOW_HEALTH_CHECK_INTERVAL_SECONDS:-5}"
+WORKFLOW_LOST_PROCESS_GRACE_SECONDS="${RABBITBOT_NAV_WORKFLOW_LOST_PROCESS_GRACE_SECONDS:-5}"
+NAV_BRIDGE_RESTART_WAIT_SECONDS="${RABBITBOT_NAV_WORKFLOW_NAV_RESTART_WAIT_SECONDS:-3}"
+BACK_RETRY_LIMIT="${RABBITBOT_NAV_WORKFLOW_BACK_RETRY_LIMIT:-1}"
+RETURN_FAILURE_WAIT_SECONDS="${RABBITBOT_NAV_WORKFLOW_RETURN_FAILURE_WAIT_SECONDS:-2}"
 
 nav_group_pid=""
 workflow_tail_pid=""
@@ -77,6 +85,7 @@ current_gate_file=""
 current_gate_ready_file=""
 current_host_gate_file=""
 current_host_gate_ready_file=""
+last_runtime_health_check_ms=0
 
 log_info() {
     echo -e "\033[32m[INFO]\033[0m $1"
@@ -109,6 +118,94 @@ require_path() {
 port_open() {
     local port="$1"
     timeout 2 bash -lc "</dev/tcp/127.0.0.1/${port}" >/dev/null 2>&1
+}
+
+http_ok() {
+    local url="$1"
+    local code
+    code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${url}" 2>/dev/null || true)"
+    [ "${code}" = "200" ]
+}
+
+container_running() {
+    docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "${CONTAINER_NAME}"
+}
+
+nav_bridge_group_alive() {
+    [ -n "${nav_group_pid}" ] && kill -0 -- "-${nav_group_pid}" 2>/dev/null
+}
+
+nav_bridge_health_ok() {
+    local problems=()
+    if ! nav_bridge_group_alive; then
+        problems+=("导航桥接进程组未运行")
+    fi
+    if ! port_open 28180; then
+        problems+=("28180端口未监听")
+    else
+        local status_response=""
+        status_response="$(curl --max-time 5 -sS -X POST http://127.0.0.1:28180/go_to_status --form-string 'task=' 2>&1 || true)"
+        if [ -z "${status_response}" ]; then
+            problems+=("28180状态接口无响应")
+        fi
+    fi
+    if [ "${#problems[@]}" -gt 0 ]; then
+        log_warn "导航桥接健康检查失败：$(IFS='；'; echo "${problems[*]}")"
+        return 1
+    fi
+    return 0
+}
+
+base_services_health_ok() {
+    local problems=()
+    if ! container_running; then
+        problems+=("统一容器未运行")
+    fi
+    if ! port_open 7687; then
+        problems+=("Neo4j(7687)")
+    fi
+    if ! http_ok http://127.0.0.1:28185/docs; then
+        problems+=("TTS(28185)")
+    fi
+    if ! http_ok http://127.0.0.1:28184/docs; then
+        problems+=("STT(28184)")
+    fi
+    if ! http_ok http://127.0.0.1:28182/docs; then
+        problems+=("Memory(28182)")
+    fi
+    if [ "${#problems[@]}" -gt 0 ]; then
+        log_warn "统一基础服务健康检查失败：$(IFS='；'; echo "${problems[*]}")"
+        return 1
+    fi
+    return 0
+}
+
+runtime_health_ok() {
+    local stage="${1:-未知阶段}"
+    local failed=0
+    if ! base_services_health_ok; then
+        failed=1
+    fi
+    if ! nav_bridge_health_ok; then
+        failed=1
+    fi
+    if [ "${failed}" = "1" ]; then
+        log_warn "运行时健康检查未通过：stage=${stage}"
+        return 1
+    fi
+    return 0
+}
+
+check_runtime_health_periodic() {
+    local stage="$1"
+    local now
+    now="$(now_ms)"
+    if [ "${last_runtime_health_check_ms}" = "0" ] || [ $((now - last_runtime_health_check_ms)) -ge $((HEALTH_CHECK_INTERVAL_SECONDS * 1000)) ]; then
+        last_runtime_health_check_ms="${now}"
+        runtime_health_ok "${stage}"
+        return $?
+    fi
+    return 0
 }
 
 wait_port() {
@@ -216,12 +313,7 @@ cleanup() {
     trap - INT TERM EXIT
     stop_workflow_tail
     stop_current_workflow
-    if [ -n "${nav_group_pid}" ] && kill -0 -- "-${nav_group_pid}" 2>/dev/null; then
-        log_info "收到 ${reason}，正在停止导航桥接进程组：pgid=${nav_group_pid}"
-        kill -TERM -- "-${nav_group_pid}" 2>/dev/null || true
-        sleep 2
-        kill -KILL -- "-${nav_group_pid}" 2>/dev/null || true
-    fi
+    stop_nav_bridge "${reason}"
 }
 
 trap 'cleanup INT; exit 130' INT
@@ -240,6 +332,17 @@ prepare_runtime() {
     log_info "其它终端发送 back：bash ${PROJECT_DIR}/scripts_1/send_nav_workflow_command.sh back"
 }
 
+stop_nav_bridge() {
+    local reason="${1:-未知原因}"
+    if nav_bridge_group_alive; then
+        log_info "正在停止导航桥接进程组：pgid=${nav_group_pid}, reason=${reason}"
+        kill -TERM -- "-${nav_group_pid}" 2>/dev/null || true
+        sleep 2
+        kill -KILL -- "-${nav_group_pid}" 2>/dev/null || true
+    fi
+    nav_group_pid=""
+}
+
 start_nav_bridge() {
     if port_open 28180; then
         log_error "28180 端口已被占用，无法由本脚本统一拉起导航桥接。请先停止旧导航桥接或占用进程。"
@@ -253,6 +356,46 @@ start_nav_bridge() {
     nav_group_pid=$!
     log_info "导航桥接进程组已启动：pgid=${nav_group_pid}"
     wait_port 28180 60
+    nav_bridge_health_ok
+}
+
+restart_nav_bridge() {
+    local reason="${1:-健康检查失败}"
+    log_warn "准备重启导航桥接：reason=${reason}"
+    stop_nav_bridge "${reason}"
+    sleep "${NAV_BRIDGE_RESTART_WAIT_SECONDS}"
+    start_nav_bridge
+}
+
+restart_unified_services() {
+    local reason="${1:-健康检查失败}"
+    log_warn "准备恢复 unified 基础服务：reason=${reason}"
+    if container_running; then
+        log_warn "基础服务不健康，重启统一容器：${CONTAINER_NAME}"
+        docker restart "${CONTAINER_NAME}" >/dev/null
+    fi
+    ensure_unified_services
+}
+
+recover_runtime_services() {
+    local reason="${1:-健康检查失败}"
+    local recovered=0
+    log_warn "开始运行时恢复：reason=${reason}"
+    if ! base_services_health_ok; then
+        restart_unified_services "${reason}"
+        recovered=1
+    fi
+    if ! nav_bridge_health_ok; then
+        restart_nav_bridge "${reason}"
+        recovered=1
+    fi
+    if runtime_health_ok "恢复后复查"; then
+        log_info "运行时恢复完成：reason=${reason}, recovered=${recovered}"
+        last_runtime_health_check_ms="$(now_ms)"
+        return 0
+    fi
+    log_error "运行时恢复后健康检查仍失败：reason=${reason}"
+    return 1
 }
 
 ensure_unified_services() {
@@ -311,6 +454,10 @@ wait_command() {
                 return 0
             fi
             handle_unexpected_command "${command}" "${expected}"
+        fi
+        if ! check_runtime_health_periodic "等待命令:${label}"; then
+            log_warn "等待命令阶段运行时健康检查失败，尝试恢复服务：label=${label}"
+            recover_runtime_services "等待命令阶段健康检查失败：${label}" || sleep "${RETURN_FAILURE_WAIT_SECONDS}"
         fi
         sleep "${COMMAND_POLL_SECONDS}"
     done
@@ -453,6 +600,10 @@ wait_go_or_back() {
                 handle_unexpected_command "${command}" "go 或 back"
                 ;;
         esac
+        if ! check_runtime_health_periodic "等待go/back"; then
+            log_warn "等待 go/back 阶段运行时健康检查失败，准备重新恢复服务并预启动 workflow：run_id=${current_run_id}"
+            return 1
+        fi
         if ! current_workflow_process_active; then
             log_warn "等待 go/back 时发现预启动 workflow 已退出，准备重新预启动：run_id=${current_run_id}"
             return 1
@@ -469,6 +620,7 @@ release_workflow_gate() {
 }
 
 monitor_workflow_until_finished() {
+    local lost_process_since_ms=""
     while true; do
         local command=""
         command="$(read_pending_command || true)"
@@ -492,8 +644,22 @@ monitor_workflow_until_finished() {
         if [ "${status}" = "finished" ]; then
             break
         fi
-        if [ "${status}" = "running" ] && ! workflow_running; then
-            log_warn "workflow 进程已不在，但状态文件尚未标记完成，继续等待状态落盘"
+        if ! check_runtime_health_periodic "workflow运行"; then
+            log_warn "workflow 运行期间运行时健康检查失败，等待 workflow 自身收敛：run_id=${current_run_id}"
+        fi
+        if [ "${status}" = "running" ] && ! current_workflow_process_active; then
+            if [ -z "${lost_process_since_ms}" ]; then
+                lost_process_since_ms="$(now_ms)"
+                log_warn "workflow 进程已不在，但状态文件尚未标记完成，等待状态落盘：run_id=${current_run_id}, grace=${WORKFLOW_LOST_PROCESS_GRACE_SECONDS}s"
+            elif [ $(( $(now_ms) - lost_process_since_ms )) -ge $((WORKFLOW_LOST_PROCESS_GRACE_SECONDS * 1000)) ]; then
+                log_error "workflow 进程丢失且状态未落盘，标记为异常结束：run_id=${current_run_id}, grace=${WORKFLOW_LOST_PROCESS_GRACE_SECONDS}s"
+                printf '127\n' >"${current_exit_code_file}"
+                date "+%Y-%m-%d %H:%M:%S" >"${current_finished_at_file}"
+                printf 'finished\n' >"${current_status_file}"
+                break
+            fi
+        else
+            lost_process_since_ms=""
         fi
         sleep "${WORKFLOW_STATUS_POLL_SECONDS}"
     done
@@ -587,24 +753,71 @@ return_to_start() {
     log_info "已按返航点序列返回点位1，总耗时=${elapsed}s"
 }
 
+return_to_start_with_recovery() {
+    local reason="${1:-back返航}"
+    local attempt=0
+    while true; do
+        if ! runtime_health_ok "返航前检查"; then
+            recover_runtime_services "返航前健康检查失败：${reason}" || true
+        fi
+        if return_to_start; then
+            return 0
+        fi
+        if [ "${attempt}" -ge "${BACK_RETRY_LIMIT}" ]; then
+            log_error "返航失败已达到自动重试上限：reason=${reason}, retry_limit=${BACK_RETRY_LIMIT}"
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        log_warn "返航失败，准备恢复导航桥接后自动重试：reason=${reason}, attempt=${attempt}/${BACK_RETRY_LIMIT}"
+        restart_nav_bridge "返航失败自动重试：${reason}" || true
+        sleep "${RETURN_FAILURE_WAIT_SECONDS}"
+    done
+}
+
+complete_return_to_start_or_wait_retry() {
+    local reason="${1:-back返航}"
+    while true; do
+        if return_to_start_with_recovery "${reason}"; then
+            return 0
+        fi
+        log_warn "返航未完成，保持返航阶段；请确认现场安全后再次发送 back 重试。"
+        wait_command back "back 重试返回起点"
+        reason="back重试"
+    done
+}
+
 main() {
     prepare_runtime
     start_nav_bridge
     ensure_unified_services
+    runtime_health_ok "启动完成复查"
 
     log_info "导航桥接与基础服务已就绪。命令循环开始。"
     while true; do
         queued_back_after_workflow=0
-        launch_workflow_detached
+        if ! check_runtime_health_periodic "循环开始"; then
+            log_warn "循环开始前健康检查失败，尝试恢复后重新进入循环"
+            recover_runtime_services "循环开始健康检查失败" || sleep "${RETURN_FAILURE_WAIT_SECONDS}"
+            continue
+        fi
+        if ! launch_workflow_detached; then
+            stop_workflow_tail
+            stop_current_workflow
+            recover_runtime_services "workflow预启动命令发送失败" || sleep "${RETURN_FAILURE_WAIT_SECONDS}"
+            log_warn "workflow 预启动命令发送失败，重新进入循环"
+            continue
+        fi
         if ! wait_workflow_gate_ready; then
             stop_workflow_tail
             stop_current_workflow
+            recover_runtime_services "workflow预启动不可用" || sleep "${RETURN_FAILURE_WAIT_SECONDS}"
             log_warn "本轮 workflow 预启动不可用，重新预启动"
             continue
         fi
         if ! wait_go_or_back; then
             stop_workflow_tail
             stop_current_workflow
+            recover_runtime_services "等待go/back阶段异常" || sleep "${RETURN_FAILURE_WAIT_SECONDS}"
             log_warn "等待 go/back 阶段检测到预启动 workflow 异常，重新预启动"
             continue
         fi
@@ -612,7 +825,7 @@ main() {
             log_info "等待 go 阶段收到 back，停止预启动 workflow 后直接返航"
             stop_workflow_tail
             stop_current_workflow
-            return_to_start
+            complete_return_to_start_or_wait_retry "等待go阶段收到back"
             log_info "返航流程结束，继续预启动下一次 workflow。"
             continue
         fi
@@ -624,7 +837,7 @@ main() {
         else
             wait_command back "back 返回起点"
         fi
-        return_to_start
+        complete_return_to_start_or_wait_retry "workflow结束后back"
         log_info "返航流程结束，继续预启动下一次 workflow。"
     done
 }

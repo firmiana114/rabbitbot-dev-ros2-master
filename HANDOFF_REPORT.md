@@ -251,3 +251,25 @@
 - 已验证 `bash -n scripts_1/stop_unified_workflow.sh` 通过；本轮未实际执行 stop 脚本，避免中断现场可能存在的服务。
 - 当前已知未跟踪文件仍为 `conf/dialogue_1500.json`、`conf/dialogue_1600.json`、`conf/dialogue_2000.json`，本轮未处理这些现场台词文件。
 
+## 本轮补充：增强导航 workflow loop 健壮性
+
+- 本轮增强 `scripts_1/start_nav_bridge_workflow_loop.sh`，目标是在后续做成 systemd 开机服务前，先提升长期待命和异常恢复能力。
+- 新增运行时健康检查配置：
+  - `RABBITBOT_NAV_WORKFLOW_HEALTH_CHECK_INTERVAL_SECONDS`：等待命令和 workflow 运行期间的健康检查间隔，默认 5 秒。
+  - `RABBITBOT_NAV_WORKFLOW_LOST_PROCESS_GRACE_SECONDS`：workflow 进程丢失但状态文件未落盘时的宽限时间，默认 5 秒。
+  - `RABBITBOT_NAV_WORKFLOW_NAV_RESTART_WAIT_SECONDS`：重启导航桥接前等待时间，默认 3 秒。
+  - `RABBITBOT_NAV_WORKFLOW_BACK_RETRY_LIMIT`：返航失败后自动恢复导航桥接并重试的次数，默认 1。
+  - `RABBITBOT_NAV_WORKFLOW_RETURN_FAILURE_WAIT_SECONDS`：返航失败恢复间隔，默认 2 秒。
+- 新增基础服务健康检查：定期检查 unified 容器、Neo4j `7687`、TTS `28185`、STT `28184` 和 Memory `28182`；如果基础服务不健康，会记录失败项并尝试通过统一入口恢复，运行中容器不健康时会先重启容器。
+- 新增导航桥接健康检查：检查本脚本启动的导航桥接进程组、`28180` 端口和 `/go_to_status` 状态接口；失败时会记录具体原因并可重启导航桥接。
+- 等待 `go/back` 阶段如果健康检查失败，会停止当前预启动 workflow，恢复基础服务或导航桥接后重新预启动，避免旧 ready 状态卡住。
+- 等待普通 `back` 命令阶段也会做周期性健康检查，避免 workflow 已结束但返航前服务已经下线。
+- workflow 运行期间如果健康检查失败，只记录并等待 workflow 自身收敛，不在导览过程中主动重启服务，避免中途干扰导航或播报。
+- workflow 运行期间如果状态文件仍为 `running`，但当前 run 的 workflow 进程已经丢失，超过宽限时间后会写入 `exit_code=127`、`finished_at` 和 `status=finished`，避免 loop 无限等待。
+- 返航失败不再直接让脚本因 `set -e` 退出；脚本会按重试上限恢复导航桥接并重试，超过上限后保持返航阶段，等待现场确认后再次发送 `back` 重试。
+- workflow 预启动命令发送失败现在会进入恢复分支，不再直接退出 loop。
+- 新增和调整的日志点覆盖：健康检查失败项、运行阶段、服务恢复原因、导航桥接重启原因、workflow 进程丢失宽限时间、异常状态落盘、返航失败分段、自动重试次数和返航重试等待。
+- 已验证：`bash -n scripts_1/start_nav_bridge_workflow_loop.sh` 通过，`git diff --check` 通过。
+- 本轮未启动 `start_nav_bridge_workflow_loop.sh`，未启动 systemd 服务，未发送 `go/back` 命令，未触发机器人移动或播报。
+- 当前仍未处理现场未跟踪台词文件：`conf/dialogue_1500.json`、`conf/dialogue_1600.json`、`conf/dialogue_2000.json`。
+- 下一步建议：更新并启用 `rabbitbot-loop.service` 前，先用当前脚本做一次短时手动启动验证，确认只进入待命；再验证 `go`、workflow 完成、`back` 和异常恢复路径。
