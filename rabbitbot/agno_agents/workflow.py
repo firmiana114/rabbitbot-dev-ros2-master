@@ -207,23 +207,34 @@ def _load_docx_guide_dialogue():
     variables = data.get("variables", {})
     opening = data.get("opening", {})
     steps = data.get("steps", [])
+    map_file = data.get("map_file", "")
+    points = data.get("points", {})
     if not isinstance(variables, dict):
         raise ValueError(f"DOCX 导览台词 variables 必须是对象: {dialogue_path}")
     if not isinstance(opening, dict):
         raise ValueError(f"DOCX 导览台词 opening 必须是对象: {dialogue_path}")
     if not isinstance(steps, list):
         raise ValueError(f"DOCX 导览台词 steps 必须是数组: {dialogue_path}")
+    if map_file is not None and not isinstance(map_file, str):
+        raise ValueError(f"DOCX 导览台词 map_file 必须是字符串: {dialogue_path}")
+    if points is None:
+        points = {}
+        data["points"] = points
+    if not isinstance(points, dict):
+        raise ValueError(f"DOCX 导览台词 points 必须是对象: {dialogue_path}")
 
     elapsed_seconds = time.perf_counter() - start_time
     segment_count = sum(len(step.get("segments", []) or []) for step in steps if isinstance(step, dict))
     leader_calling = str(variables.get("leader_calling") or "").strip()
+    map_file_summary = str(map_file or "").strip() or "未配置"
     _DOCX_GUIDE_DIALOGUE_CACHE["path"] = dialogue_path
     _DOCX_GUIDE_DIALOGUE_CACHE["data"] = data
     configured_path = os.getenv("RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE", "").strip()
     dialogue_source = "file_env" if configured_path else f"index={_docx_guide_dialogue_index()}"
     _workflow_log(
         "DOCX 导览台词文件加载完成: "
-        f"source={dialogue_source}, path={dialogue_path}, steps={len(steps)}, segments={segment_count}, "
+        f"source={dialogue_source}, path={dialogue_path}, map_file={map_file_summary}, "
+        f"points={len(points)}, steps={len(steps)}, segments={segment_count}, "
         f"leader_calling={leader_calling or '未配置'}, elapsed={elapsed_seconds:.3f}s"
     )
     return data
@@ -244,6 +255,74 @@ def _docx_guide_variables(extra_variables=None):
 
 def _docx_guide_leader_calling():
     return _docx_guide_variables()["leader_calling"]
+
+
+def _docx_guide_map_file():
+    return str(_load_docx_guide_dialogue().get("map_file") or "").strip()
+
+
+DOCX_POINT_LOCATION_REQUIRED_FIELDS = ("x", "y", "z", "ox", "oy", "oz", "ow", "mode")
+DOCX_POINT_LOCATION_FLOAT_FIELDS = ("x", "y", "z", "ox", "oy", "oz", "ow")
+
+
+def _normalize_docx_point_entity(point_key, raw_point):
+    dialogue_path = _docx_guide_dialogue_path()
+    if not isinstance(raw_point, dict):
+        raise ValueError(f"DOCX 导览台词 points 条目必须是对象: key={point_key}, path={dialogue_path}")
+    name = str(raw_point.get("name") or point_key).strip()
+    if not name:
+        raise ValueError(f"DOCX 导览台词 points 条目缺少 name: key={point_key}, path={dialogue_path}")
+    raw_location = raw_point.get("location", [])
+    if raw_location is None:
+        raw_location = []
+    if not isinstance(raw_location, list):
+        raise ValueError(f"DOCX 导览台词 points.location 必须是数组: key={point_key}, path={dialogue_path}")
+    location = []
+    for index, item in enumerate(raw_location):
+        if not isinstance(item, dict):
+            raise ValueError(f"DOCX 导览台词 points.location 条目必须是对象: key={point_key}, index={index}, path={dialogue_path}")
+        location_item = dict(item)
+        missing_fields = [field for field in DOCX_POINT_LOCATION_REQUIRED_FIELDS if field not in location_item]
+        if missing_fields:
+            raise ValueError(
+                "DOCX 导览台词 points.location 缺少坐标字段: "
+                f"key={point_key}, index={index}, missing={missing_fields}, path={dialogue_path}"
+            )
+        for field in DOCX_POINT_LOCATION_FLOAT_FIELDS:
+            try:
+                location_item[field] = float(location_item[field])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "DOCX 导览台词 points.location 坐标字段必须是数字: "
+                    f"key={point_key}, index={index}, field={field}, path={dialogue_path}"
+                ) from exc
+        try:
+            location_item["mode"] = int(location_item["mode"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "DOCX 导览台词 points.location mode 必须是整数: "
+                f"key={point_key}, index={index}, path={dialogue_path}"
+            ) from exc
+        location.append(location_item)
+    return {
+        "name": name,
+        "summary": str(raw_point.get("summary") or name),
+        "description": str(raw_point.get("description") or ""),
+        "location": location,
+    }
+
+
+def _docx_guide_point_entities():
+    raw_points = _load_docx_guide_dialogue().get("points", {}) or {}
+    entities = {}
+    for point_key, raw_point in raw_points.items():
+        key = str(point_key).strip()
+        if not key:
+            raise ValueError(f"DOCX 导览台词 points 存在空 key: path={_docx_guide_dialogue_path()}")
+        entity = _normalize_docx_point_entity(key, raw_point)
+        entities[key] = entity
+        entities.setdefault(entity["name"], entity)
+    return entities
 
 
 def _format_docx_guide_text(text, variables=None):
@@ -281,9 +360,12 @@ def _load_docx_script_steps(point_entity):
         step = dict(raw_step)
         entity_key = step.pop("entity_key", None)
         if entity_key:
-            if entity_key not in point_entity:
+            entity = _load_docx_point_entity(str(entity_key))
+            if entity is None and entity_key in point_entity:
+                entity = _load_docx_point_entity(point_entity[entity_key])
+            if entity is None:
                 raise KeyError(f"DOCX 导览台词 step entity_key 未定义: index={index}, entity_key={entity_key}")
-            step["entity"] = point_entity[entity_key]
+            step["entity"] = entity["name"]
         segments = step.get("segments", [])
         if segments is None:
             segments = []
@@ -620,9 +702,20 @@ DOCX_SCRIPT_POINTS = {
 
 
 def _load_docx_point_entity(name):
+    dialogue_points = _docx_guide_point_entities()
+    if name in dialogue_points:
+        entity = dict(dialogue_points[name])
+        _workflow_log(
+            "DOCX 导览点位使用台词文件配置: "
+            f"key={name}, entity={entity.get('name')}, points={len(entity.get('location', []) or [])}, "
+            f"map_file={_docx_guide_map_file() or '未配置'}"
+        )
+        return entity
+
     point = DOCX_SCRIPT_POINTS.get(name)
     if not point:
         return None
+    _workflow_log(f"DOCX 导览点位使用代码兜底配置: name={name}")
     return {
         "name": name,
         "summary": point.get("summary", name),

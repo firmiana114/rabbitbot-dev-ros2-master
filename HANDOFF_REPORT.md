@@ -273,3 +273,53 @@
 - 本轮未启动 `start_nav_bridge_workflow_loop.sh`，未启动 systemd 服务，未发送 `go/back` 命令，未触发机器人移动或播报。
 - 当前仍未处理现场未跟踪台词文件：`conf/dialogue_1500.json`、`conf/dialogue_1600.json`、`conf/dialogue_2000.json`。
 - 下一步建议：更新并启用 `rabbitbot-loop.service` 前，先用当前脚本做一次短时手动启动验证，确认只进入待命；再验证 `go`、workflow 完成、`back` 和异常恢复路径。
+
+## 本轮补充：台词 JSON 增加地图和点位配置
+
+### 背景和目标
+
+本轮目标是按现场要求调整 `conf/dialogue_<序号>.json` 台词配置：在台词文件中记录当前使用的地图文件名，并把 DOCX 严格剧本点位列表从 workflow 代码侧抽到台词 JSON 中；workflow 需要优先使用台词文件中的点位，同时保留旧代码点位作为兜底。
+
+### 当前状态
+
+已完成：
+
+- 已在 `conf/dialogue_0.json`、`conf/dialogue_1.json`、`conf/dialogue_2.json`、`conf/dialogue_3.json` 顶层新增 `map_file`，当前值为 `test1.pcd`。
+- 已在上述 4 个台词 JSON 顶层新增 `points`，包含 `point_1`、`point_1_to_2_transition`、`point_2`、`point_3`、`point_4`、`point_3_to_5_transition`、`point_5` 共 7 个点位。
+- 已将点位条目统一为 `name`、`summary`、`description`、`location` 结构；`location` 中包含 workflow 使用的 `x/y/z/ox/oy/oz/ow/mode` 字段。
+- 已适配 `rabbitbot/agno_agents/workflow.py`：加载台词 JSON 时会读取并校验 `map_file` 和 `points`；DOCX 严格剧本步骤解析 `entity_key` 时优先使用台词文件点位。
+- 已保留 `DOCX_SCRIPT_POINTS` 代码兜底：如果台词文件没有配置对应点位，workflow 仍会尝试使用旧的代码内点位。
+- 已更新 `conf/README.md`，说明 `map_file`、`points`、点位字段和重启 workflow 后生效的要求。
+
+未完成：
+
+- 本轮未启动 systemd 服务、导航桥接或 workflow，未进行真机移动验证，避免影响现场运行。
+- `map_file` 当前用于配置记录和日志排查；导航桥接实际加载的地图仍由 `NAV_PCD_PATH` 控制，现场需要确认两者一致。
+
+### 已验证的事实
+
+- `conf/dialogue_0.json` 到 `conf/dialogue_3.json` 均可通过 `python3 -m json.tool` 解析。
+- 4 个台词 JSON 均已通过结构校验：`map_file=test1.pcd`，每个文件 `points=7`，所有点位均包含完整 `x/y/z/ox/oy/oz/ow/mode` 坐标字段。
+- `rabbitbot/agno_agents/workflow.py` 已通过 `python3 -m py_compile` 语法检查。
+- `git diff --check` 已通过。
+
+### 阻塞问题
+
+无代码层面的阻塞。剩余风险是运行层面尚未实测：需要在重启 workflow 后确认台词文件点位被正确加载，并确认 `NAV_PCD_PATH` 与台词文件 `map_file` 指向同一张地图。
+
+### 建议的下一步
+
+- 重启 workflow 或 `rabbitbot-loop.service` 后观察日志中 `DOCX 导览台词文件加载完成`，确认 `map_file=test1.pcd`、`points=7`。
+- 发送 `go` 前确认导航桥接启动参数中的 `NAV_PCD_PATH` 仍为 `/home/unitree/test1.pcd` 或其它与台词 `map_file` 一致的路径。
+- 真机完整跑一遍 DOCX 严格剧本，重点观察各 `entity_key` 对应的点位是否从台词 JSON 加载，并确认返航和过渡点行为没有回退到旧配置。
+
+### 注意事项
+
+- 台词 JSON 修改后需要重启 workflow；当前 workflow 会缓存台词配置，同一进程内不会自动热更新。
+- 若现场新增台词文件，应复制现有 `dialogue_<序号>.json` 并保留 `map_file` 与完整 `points` 结构，否则 workflow 可能回退到代码内旧点位或在配置校验阶段报错。
+- 坐标校验会在点位加载阶段报出文件路径、点位 key、location 序号和缺失/非法字段，便于快速定位台词文件配置错误。
+
+### 其它信息
+
+- 本轮新增/调整的日志点包括：台词文件加载完成时输出 `map_file` 和 `points` 数量；点位加载时输出使用台词文件配置或代码兜底配置、点位名、坐标数量和地图文件名。
+- 这些日志用于区分导航失败时到底是台词文件点位未生效、回退到了代码兜底，还是地图文件与导航桥接实际加载地图不一致。

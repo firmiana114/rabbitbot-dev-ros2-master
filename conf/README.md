@@ -11,3 +11,19 @@
 `dialogue*` 前缀的台词文件属于现场本地配置，已在 `.gitignore` 中忽略，不纳入版本管理。这样现场修改称呼和台词不会污染 Git 工作区。
 
 本目录没有被整体忽略；除 `dialogue*` 前缀文件外，其它需要版本管理的配置文件仍可正常提交。
+
+## 台词 JSON 新字段
+
+台词 JSON 支持在顶层配置地图文件名和点位列表：
+
+- `map_file`：当前台词配置使用的地图文件名，例如 `test1.pcd`。该字段用于记录和日志排查，实际启动导航桥接时仍需确保 `NAV_PCD_PATH` 指向同一地图文件。
+- `points`：DOCX 严格剧本点位列表，键名应优先与 `steps[].entity_key` 保持一致，例如 `point_2`、`point_3_to_5_transition`。
+
+每个 `points` 条目建议包含：
+
+- `name`：中文点位名，例如 `点位2`。
+- `summary`：点位摘要。
+- `description`：点位说明。
+- `location`：导航坐标数组，每个坐标对象包含 `x`、`y`、`z`、`ox`、`oy`、`oz`、`ow`、`mode`。
+
+workflow 会优先读取当前台词 JSON 的 `points`；如果台词文件没有配置对应点位，才回退到代码内的旧点位配置。修改点位或 `map_file` 后需要重启 workflow 进程，让新台词文件重新加载。
