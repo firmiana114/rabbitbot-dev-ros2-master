@@ -460,3 +460,52 @@
 - `RABBITBOT_UNIFIED_START_STT` 默认 `0`；该开关同时影响统一容器入口、联调编排脚本、导航 loop 健康检查和旧版全量启动脚本，四处行为一致。
 - 关闭 STT 后，导航 loop 的基础服务健康检查不再包含 STT(28184)，因此 STT 缺失不会再触发健康检查失败或服务自动恢复。
 - 本轮新增/调整日志点：四处启动路径在跳过 STT 时均打印 `RABBITBOT_UNIFIED_START_STT=0，跳过 STT ...` 或 `跳过等待 STT 服务 (28184)`，用于现场快速确认 STT 确实未启动且为预期行为。
+
+## 本轮补充：back 返航点位支持台词文件配置
+
+### 背景和目标
+
+本轮目标是按现场要求让 `back` 返航点位也支持写入 `conf/dialogue_<序号>.json` 台词文件；如果台词文件没有显式配置返航点位，则导航 loop 按当前台词 `steps[].entity_key` 对应的 go 点位序列反向生成返航路线。
+
+### 当前状态
+
+已完成：
+
+- 已在 `scripts_1/start_nav_bridge_workflow_loop.sh` 中新增 `read_dialogue_back_route()`，用于读取当前台词 JSON 的顶层 `back_points`。
+- `back_points` 支持字符串数组引用 `points` 键，也支持对象数组直接写 `name` 和 `location`，或通过 `point_key` / `entity_key` 引用 `points`。
+- 未配置或配置为空数组时，脚本会从 `steps[].entity_key` 提取 go 点位，去掉连续重复点位，再反向生成返航序列；如果 `points` 中存在 `point_1`，会补为最终起点。
+- 返航发送给 28180 的坐标统一使用六元组 `(x, y, ox, oy, oz, ow)`，从台词 `location` 中自动忽略 `z` 和 `mode`。
+- 如果读取台词返航配置失败，脚本会记录失败原因，并回退到原有环境变量返航点位 `POINT_5_TASK -> BACK_POINT_1_TASK -> BACK_POINT_2_TASK -> START_POINT_TASK`。
+- 已更新 `conf/README.md`，说明 `back_points` 字段、两种配置写法、默认反序策略和 28180 六元组格式。
+
+未完成：
+
+- 本轮未启动导航桥接、workflow、systemd 服务或容器，未触发机器人移动。
+- 本轮未在真机上验证实际 `back` 返航路径。
+
+### 已验证的事实
+
+- `bash -n scripts_1/start_nav_bridge_workflow_loop.sh` 通过。
+- 使用当前 `conf/dialogue_1.json` 做只读解析验证时，未配置 `back_points` 会输出 `reverse_go_points`，路线为：点位5 -> 3->5过渡点位 -> 点位3 -> 点位2 -> 1->2过渡点位 -> 点位1。
+- 使用临时台词 JSON 显式设置 `back_points=["point_5", "point_3", "point_1"]` 时，只读解析验证输出 `dialogue_back_points`，并按显式配置生成三段返航路线。
+
+### 阻塞问题
+
+无代码层面阻塞。剩余风险是运行层面尚未验证：需要现场重启新版本 loop 后发送 `back`，确认 28180 接收的目标点位、地图和机器人实际移动路线一致。
+
+### 建议的下一步
+
+- 如需自定义返航路线，可在当前台词 JSON 顶层增加 `back_points`，优先使用字符串数组引用 `points` 键，避免复制坐标造成 go/back 不一致。
+- 现场重启 `scripts_1/start_nav_bridge_workflow_loop.sh` 后，观察返航开始日志中的 `source`、`dialogue`、`segments` 和 `route`，确认是 `dialogue_back_points` 还是 `reverse_go_points`。
+- 真机验证时重点确认 `dialogue_1.json` / `test9.pcd` 下默认反序路线是否符合现场回程动线；如果默认反序不适合现场，可在 `dialogue_1.json` 中显式写 `back_points`。
+
+### 注意事项
+
+- `back_points` 修改后需要重启导航 loop 才会重新读取台词文件；已运行的旧 loop 实例不会热更新。
+- 返航点位读取依赖台词文件 `points`，因此 `points` 中引用的 `location` 至少要有一组完整坐标。
+- `back_points` 写错类型、引用不存在的 point key、坐标字段缺失或字段非数字时，脚本会记录错误并回退到原有环境变量兜底返航点。
+
+### 其它信息
+
+- 本轮新增/调整的日志点包括：返航开始时打印返航来源、台词文件路径、分段数和完整路线；读取台词返航配置失败时打印失败原因和兜底来源；最终目标日志打印最后一段返航目标。
+- 这些日志用于排查现场到底使用了台词显式返航点、go 点位反序，还是因配置错误回退到了旧环境变量点位。

@@ -18,6 +18,7 @@
 
 - `map_file`：当前台词配置使用的地图文件名，例如 `test1.pcd`。该字段用于记录和日志排查，实际启动导航桥接时仍需确保 `NAV_PCD_PATH` 指向同一地图文件。
 - `points`：DOCX 严格剧本点位列表，键名应优先与 `steps[].entity_key` 保持一致，例如 `point_2`、`point_3_to_5_transition`。
+- `back_points`：可选返航点位列表，用于 `back` 命令；未配置或为空时，导航 loop 会按 `steps[].entity_key` 的 go 点位序列反向生成返航路线，并在存在 `point_1` 时补充为最终起点。
 
 每个 `points` 条目建议包含：
 
@@ -27,3 +28,10 @@
 - `location`：导航坐标数组，每个坐标对象包含 `x`、`y`、`z`、`ox`、`oy`、`oz`、`ow`、`mode`。
 
 workflow 会优先读取当前台词 JSON 的 `points`；如果台词文件没有配置对应点位，才回退到代码内的旧点位配置。修改点位或 `map_file` 后需要重启 workflow 进程，让新台词文件重新加载。
+
+`back_points` 支持两种写法：
+
+- 字符串数组：例如 `["point_5", "point_3_to_5_transition", "point_3", "point_2", "point_1_to_2_transition", "point_1"]`，每个字符串引用 `points` 中的键。
+- 点位对象数组：每个对象可直接写 `name` 和 `location`，也可写 `point_key` 或 `entity_key` 引用 `points`。
+
+导航 loop 发送给 28180 的返航坐标使用六元组 `(x, y, ox, oy, oz, ow)`，会从 `location` 中自动忽略 `z` 和 `mode`。返航开始时日志会打印点位来源、台词文件路径、分段数量和路线，便于确认到底使用了 `back_points` 还是 go 点位反序兜底。

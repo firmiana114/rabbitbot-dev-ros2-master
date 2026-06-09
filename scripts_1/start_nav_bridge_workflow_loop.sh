@@ -20,6 +20,7 @@
 #   RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE：直接指定台词 JSON 文件完整路径，优先级高于序号。
 #   NAV_PCD_PATH：显式指定导航桥接地图；未设置时优先读取当前台词 JSON 的 map_file。
 #   NAV_MAP_BASE_DIR：台词 map_file 为相对文件名时拼接的地图目录，默认 /home/unitree。
+#   back_points：可在当前台词 JSON 顶层配置返航点位；未配置时按 go 点位序列反序返航。
 
 set -Eeuo pipefail
 
@@ -151,6 +152,109 @@ if not path.exists():
     raise SystemExit(2)
 data = json.loads(path.read_text(encoding="utf-8"))
 print(str(data.get("map_file") or "").strip())
+PY
+}
+
+read_dialogue_back_route() {
+    local dialogue_path="$1"
+    python3 - "$dialogue_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+if not path.exists():
+    raise SystemExit(2)
+data = json.loads(path.read_text(encoding="utf-8"))
+if not isinstance(data, dict):
+    raise SystemExit("台词 JSON 根节点必须是对象")
+points = data.get("points") or {}
+if not isinstance(points, dict):
+    raise SystemExit("台词 JSON points 必须是对象")
+
+def point_name(key, point):
+    if isinstance(point, dict):
+        return str(point.get("name") or point.get("summary") or key).strip() or str(key)
+    return str(key)
+
+def first_location(point, context):
+    if not isinstance(point, dict):
+        raise SystemExit(f"{context} 必须是对象")
+    locations = point.get("location")
+    if not isinstance(locations, list) or not locations:
+        raise SystemExit(f"{context}.location 必须是非空数组")
+    item = locations[0]
+    if not isinstance(item, dict):
+        raise SystemExit(f"{context}.location[0] 必须是对象")
+    missing = [field for field in ("x", "y", "ox", "oy", "oz", "ow") if field not in item]
+    if missing:
+        raise SystemExit(f"{context}.location[0] 缺少 28180 坐标字段: {missing}")
+    values = []
+    for field in ("x", "y", "ox", "oy", "oz", "ow"):
+        try:
+            values.append(float(item[field]))
+        except (TypeError, ValueError) as exc:
+            raise SystemExit(f"{context}.location[0].{field} 必须是数字") from exc
+    return "(" + ", ".join(f"{value:.10g}" for value in values) + ")"
+
+def resolve_item(item, index, source):
+    if isinstance(item, str):
+        key = item.strip()
+        if not key:
+            raise SystemExit(f"{source}[{index}] 不能为空字符串")
+        if key not in points:
+            raise SystemExit(f"{source}[{index}] 指向未知 points key: {key}")
+        point = points[key]
+        return point_name(key, point), first_location(point, f"points.{key}")
+    if isinstance(item, dict):
+        key = str(item.get("point_key") or item.get("entity_key") or "").strip()
+        if key:
+            if key not in points:
+                raise SystemExit(f"{source}[{index}] 指向未知 points key: {key}")
+            point = points[key]
+            return point_name(key, point), first_location(point, f"points.{key}")
+        label = str(item.get("name") or item.get("summary") or f"返航点{index + 1}").strip()
+        return label, first_location(item, f"{source}[{index}]")
+    raise SystemExit(f"{source}[{index}] 必须是字符串或对象")
+
+back_points = data.get("back_points")
+route = []
+source = "dialogue_back_points"
+if back_points is not None and not isinstance(back_points, list):
+    raise SystemExit("台词 JSON back_points 必须是数组")
+if isinstance(back_points, list) and back_points:
+    for index, item in enumerate(back_points):
+        route.append(resolve_item(item, index, "back_points"))
+else:
+    source = "reverse_go_points"
+    go_keys = []
+    for step in data.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        key = str(step.get("entity_key") or "").strip()
+        if not key or key not in points:
+            continue
+        if go_keys and go_keys[-1] == key:
+            continue
+        go_keys.append(key)
+    if "point_1" in points and (not go_keys or go_keys[0] != "point_1"):
+        go_keys.insert(0, "point_1")
+    seen = set()
+    reverse_keys = []
+    for key in reversed(go_keys):
+        if key in seen:
+            continue
+        seen.add(key)
+        reverse_keys.append(key)
+    for index, key in enumerate(reverse_keys):
+        route.append(resolve_item(key, index, "reverse_go_points"))
+
+if not route:
+    raise SystemExit("无法从台词 JSON 生成 back 返航点位")
+print(f"__SOURCE__\t{source}")
+for label, payload in route:
+    safe_label = label.replace("\t", " ").replace("\n", " ")
+    print(f"{safe_label}\t{payload}")
 PY
 }
 
@@ -793,16 +897,52 @@ navigate_back_segment() {
 }
 
 return_to_start() {
-    local labels=("原点位5" "返回点1" "返回点2" "点位1")
-    local tasks=("${POINT_5_TASK}" "${BACK_POINT_1_TASK}" "${BACK_POINT_2_TASK}" "${START_POINT_TASK}")
+    local labels=()
+    local tasks=()
+    local route_source=""
+    local dialogue_path
+    dialogue_path="$(dialogue_path_for_nav_map)"
+
+    local route_output=""
+    if route_output="$(read_dialogue_back_route "${dialogue_path}" 2>&1)"; then
+        local line
+        while IFS= read -r line; do
+            if [[ "${line}" == __SOURCE__* ]]; then
+                route_source="${line#*$'\t'}"
+                continue
+            fi
+            [ -z "${line}" ] && continue
+            labels+=("${line%%$'\t'*}")
+            tasks+=("${line#*$'\t'}")
+        done <<<"${route_output}"
+    else
+        log_warn "读取台词文件 back 返航点位失败，使用环境变量兜底返航点：dialogue=${dialogue_path}, error=${route_output}"
+        route_source="env_fallback"
+        labels=("原点位5" "返回点1" "返回点2" "点位1")
+        tasks=("${POINT_5_TASK}" "${BACK_POINT_1_TASK}" "${BACK_POINT_2_TASK}" "${START_POINT_TASK}")
+    fi
+
+    if [ "${#tasks[@]}" -eq 0 ]; then
+        log_error "返航点位序列为空：dialogue=${dialogue_path}, source=${route_source:-未知}"
+        return 1
+    fi
+
     local segment_total="${#labels[@]}"
     local start_epoch
     start_epoch="$(date +%s)"
 
-    log_info "收到 back 后按返航点序列导航：原点位5 -> 返回点1 -> 返回点2 -> 点位1"
-    log_info "返航最终点位1目标：${START_POINT_TASK}"
-
+    local route_summary=""
     local i
+    for i in "${!labels[@]}"; do
+        if [ -z "${route_summary}" ]; then
+            route_summary="${labels[$i]}"
+        else
+            route_summary="${route_summary} -> ${labels[$i]}"
+        fi
+    done
+    log_info "收到 back 后按返航点序列导航：source=${route_source:-未知}, dialogue=${dialogue_path}, segments=${segment_total}, route=${route_summary}"
+    log_info "返航最终目标：${labels[$((segment_total - 1))]}，${tasks[$((segment_total - 1))]}"
+
     for i in "${!labels[@]}"; do
         local segment_index=$((i + 1))
         if ! navigate_back_segment "${labels[$i]}" "${tasks[$i]}" "${segment_index}" "${segment_total}"; then
@@ -813,7 +953,7 @@ return_to_start() {
     done
 
     local elapsed=$(( $(date +%s) - start_epoch ))
-    log_info "已按返航点序列返回点位1，总耗时=${elapsed}s"
+    log_info "已按返航点序列完成返航，总耗时=${elapsed}s"
 }
 
 return_to_start_with_recovery() {
