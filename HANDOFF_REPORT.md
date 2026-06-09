@@ -656,3 +656,55 @@
 
 - 本轮没有修改业务代码或运行脚本，因此没有新增代码日志点。
 - 本轮新增的迁移包 README 和恢复脚本包含中文说明和恢复阶段日志输出，便于目标机恢复时定位校验、解包、宿主运行时恢复、`ldconfig` 和 systemd reload 等步骤。
+
+## 本轮补充：迁移包已复制到移动硬盘
+
+### 背景和目标
+
+本轮目标是在 Aaron 提供 AGX-orin sudo 授权后，将已生成并校验的 RabbitBot 离线迁移包复制到移动硬盘，供后续带到 `HaiSong-orin` 恢复。
+
+### 当前状态
+
+已完成：
+
+- 已确认 AGX-orin 上移动硬盘为 `/dev/sda1`，文件系统为 exFAT，标签为 `PortableSSD`。
+- 已确认 AGX-orin 当前没有内核 exFAT 模块，`mount -t exfat` 会报 `unknown filesystem type 'exfat'`。
+- 已使用系统已有 `exfat-fuse` 将移动硬盘挂载到 `/media/pc/PortableSSD`。
+- 已将迁移包目录复制到移动硬盘：`/media/pc/PortableSSD/rabbitbot_orin_migration_20260609_125551`。
+- 已执行 `sync`，确保写入落盘。
+- 已在移动硬盘挂载点内执行 `sha256sum -c SHA256SUMS`，所有文件校验均为 `OK`。
+
+未完成：
+
+- 本轮尚未在 `HaiSong-orin` 上恢复迁移包。
+- 本轮尚未弹出移动硬盘；如需拔盘，应先执行安全卸载。
+- 本轮仍未迁移 Neo4j Docker 卷运行数据；该卷不是启动依赖，如需历史记忆数据需另行停容器后打包。
+
+### 已验证的事实
+
+- 移动硬盘挂载点：`/media/pc/PortableSSD`。
+- 移动硬盘上迁移包目录大小约 13G。
+- 移动硬盘校验结果：`rabbitbot-projects.tar: OK`、`rabbitbot-host-runtime.tar: OK`、`restore_on_target.sh: OK`、`README_迁移说明.md: OK`。
+- 移动硬盘剩余空间约 1.4T。
+- exFAT 挂载后文件权限显示为统一可执行，这是 exFAT/FUSE 表现；tar 包内部权限仍由归档保存。
+
+### 阻塞问题
+
+无当前拷贝层面的阻塞。后续阻塞只可能来自目标机恢复时的 sudo 权限、目标机系统库兼容性、现场网卡/机器人连接和是否需要 Neo4j 历史数据。
+
+### 建议的下一步
+
+- 拔出移动硬盘前先执行安全卸载，例如在 AGX-orin 上执行 `sync` 后 `sudo umount /media/pc/PortableSSD`。
+- 将移动硬盘接入 `HaiSong-orin` 并挂载后，进入 `rabbitbot_orin_migration_20260609_125551` 目录执行 `bash restore_on_target.sh`。
+- 目标机恢复后先做只读验证，再决定是否启用 systemd 服务：检查 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master`、`/opt/ros/humble`、`/home/pc/.local`、`/usr/local/lib/libddsc.so` 是否存在，并执行 `source /opt/ros/humble/setup.bash`。
+
+### 注意事项
+
+- 移动硬盘为 exFAT，只适合存放 tar 文件；不要在移动硬盘上解包后再搬迁项目目录。
+- 如需迁移 Neo4j 历史数据，应先停止 AGX-orin 上 `rabbitbot-unified-runtime` 容器，再单独打包 Docker 卷，避免复制运行中的数据库文件。
+- 目标机恢复脚本默认不会自动启动服务，避免在未确认现场网络、地图和机器人连接前触发移动或播报。
+
+### 其它信息
+
+- 本轮没有修改业务代码或运行脚本，因此没有新增代码日志点。
+- 本轮新增的交接信息记录了 exFAT-FUSE 挂载方式、迁移包复制位置和移动硬盘端 SHA256 校验结果，便于后续确认离线介质是否可直接用于恢复。
