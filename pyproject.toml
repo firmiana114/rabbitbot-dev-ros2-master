@@ -23,7 +23,7 @@ dynamic = ["version"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["rabbitbot"]
+include = ["rabbitbot*"]
 
 [tool.setuptools_scm]
 version_file = "rabbitbot/_version.py"

@@ -101,3 +101,10 @@ def test_logs_return_latest_nav_log_lines(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["lines"] == ["two", "three"]
+
+
+
+def test_main_module_exposes_run_function():
+    from rabbitbot.control_console.__main__ import run
+
+    assert callable(run)
