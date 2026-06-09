@@ -9,6 +9,7 @@ def make_config(tmp_path):
     command_script = project_root / "scripts_1" / "send_nav_workflow_command.sh"
     systemctl_path = project_root / "bin" / "systemctl"
     systemctl_record = project_root / "systemctl_args.txt"
+    map_env_file = project_root / "runtime" / "rabbitbot-loop.env"
     workflow_control_dir = project_root / "logs" / "nav_workflow_control" / "workflow_control"
     nav_log_dir = project_root / "logs" / "nav_workflow_control"
     workflow_log_dir = project_root / "logs" / "nav_workflow_control"
@@ -34,6 +35,7 @@ def make_config(tmp_path):
         loop_service_name="rabbitbot-loop.service",
         systemctl_path=systemctl_path,
         sudo_path=None,
+        map_env_file=map_env_file,
     )
 
 
@@ -44,6 +46,18 @@ def test_status_does_not_require_login(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["map_path"] == "/home/unitree/test9.pcd"
+
+
+def test_status_prefers_runtime_map_env_file(tmp_path):
+    config = make_config(tmp_path)
+    config.map_env_file.parent.mkdir(parents=True)
+    config.map_env_file.write_text('NAV_PCD_PATH="/home/unitree/new_map.pcd"\n', encoding="utf-8")
+    client = TestClient(create_app(config))
+
+    response = client.get("/api/status")
+
+    assert response.status_code == 200
+    assert response.json()["map_path"] == "/home/unitree/new_map.pcd"
 
 
 def test_status_returns_map_and_pose_without_login(tmp_path):
@@ -116,10 +130,12 @@ def test_restart_restarts_loop_service_without_login(tmp_path):
     config = make_config(tmp_path)
     client = TestClient(create_app(config))
 
-    response = client.post("/api/restart")
+    response = client.post("/api/restart", json={"map_path": "/home/unitree/test10.pcd"})
 
     assert response.status_code == 200
     assert response.json()["service"] == "rabbitbot-loop.service"
+    assert response.json()["map_path"] == "/home/unitree/test10.pcd"
+    assert config.map_env_file.read_text(encoding="utf-8") == 'NAV_PCD_PATH="/home/unitree/test10.pcd"\n'
     record = config.project_root / "systemctl_args.txt"
     assert record.read_text(encoding="utf-8").splitlines() == ["restart", "rabbitbot-loop.service"]
 
@@ -167,6 +183,9 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '当前位姿' in response.text
     assert '一键重启' in response.text
     assert '/api/restart' in response.text
+    assert '重启地图' in response.text
+    assert 'mapPathInput' in response.text
+    assert 'map_path' in response.text
     assert '显示日志' in response.text
     assert '关闭日志' in response.text
     assert 'logsVisible=false' in response.text

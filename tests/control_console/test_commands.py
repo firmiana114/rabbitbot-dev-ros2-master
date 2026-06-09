@@ -1,6 +1,6 @@
 import pytest
 
-from rabbitbot.control_console.commands import CommandError, restart_loop_service, send_workflow_command, start_task
+from rabbitbot.control_console.commands import CommandError, read_map_path, restart_loop_service, send_workflow_command, start_task, write_map_path
 
 
 def test_send_workflow_command_allows_go_and_invokes_script(tmp_path):
@@ -151,3 +151,41 @@ def test_start_task_rejects_unknown_task(tmp_path):
         start_task("bad", script)
 
     assert "不支持的任务" in str(excinfo.value)
+
+
+def test_write_and_read_map_path_round_trip(tmp_path):
+    env_file = tmp_path / "runtime" / "rabbitbot-loop.env"
+
+    written = write_map_path(env_file, " /home/unitree/test11.pcd ")
+
+    assert written == "/home/unitree/test11.pcd"
+    assert env_file.read_text(encoding="utf-8") == 'NAV_PCD_PATH="/home/unitree/test11.pcd"\n'
+    assert read_map_path(env_file, "/home/unitree/default.pcd") == "/home/unitree/test11.pcd"
+
+
+def test_read_map_path_returns_default_when_missing(tmp_path):
+    assert read_map_path(tmp_path / "missing.env", "/home/unitree/default.pcd") == "/home/unitree/default.pcd"
+
+
+@pytest.mark.parametrize("map_path", ["", "test.pcd", "/home/unitree/bad\nmap.pcd"])
+def test_write_map_path_rejects_invalid_values(tmp_path, map_path):
+    with pytest.raises(CommandError):
+        write_map_path(tmp_path / "runtime" / "rabbitbot-loop.env", map_path)
+
+
+def test_restart_loop_service_writes_map_before_restart(tmp_path):
+    systemctl = tmp_path / "systemctl"
+    record = tmp_path / "record.txt"
+    env_file = tmp_path / "runtime" / "rabbitbot-loop.env"
+    systemctl.write_text(
+        f"#!/usr/bin/env bash\nprintf '%s\n' \"$@\" > {record}\n",
+        encoding="utf-8",
+    )
+    systemctl.chmod(0o755)
+
+    result = restart_loop_service(systemctl_path=systemctl, sudo_path=None, map_path="/home/unitree/test12.pcd", map_env_file=env_file)
+
+    assert result["map_path"] == "/home/unitree/test12.pcd"
+    assert "test12.pcd" in result["message"]
+    assert env_file.read_text(encoding="utf-8") == 'NAV_PCD_PATH="/home/unitree/test12.pcd"\n'
+    assert record.read_text(encoding="utf-8").splitlines() == ["restart", "rabbitbot-loop.service"]

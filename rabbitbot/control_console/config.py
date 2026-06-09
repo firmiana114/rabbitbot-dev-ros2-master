@@ -20,6 +20,7 @@ class ConsoleConfig:
     loop_service_name: str
     systemctl_path: Path
     sudo_path: Path | None
+    map_env_file: Path
 
     @classmethod
     def from_env(cls) -> "ConsoleConfig":
@@ -39,4 +40,5 @@ class ConsoleConfig:
             loop_service_name=os.environ.get("RABBITBOT_LOOP_SERVICE", "rabbitbot-loop.service"),
             systemctl_path=Path(os.environ.get("RABBITBOT_CONSOLE_SYSTEMCTL_PATH", "/usr/bin/systemctl")),
             sudo_path=sudo_path,
+            map_env_file=Path(os.environ.get("RABBITBOT_LOOP_ENV_FILE", str(project_root / "runtime" / "rabbitbot-loop.env"))),
         )

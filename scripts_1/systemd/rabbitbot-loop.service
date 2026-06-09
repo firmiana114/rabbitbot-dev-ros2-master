@@ -17,6 +17,7 @@ TimeoutStopSec=30
 SyslogIdentifier=rabbitbot-loop
 Environment=PYTHONUNBUFFERED=1
 Environment=NAV_PCD_PATH=/home/unitree/test9.pcd
+EnvironmentFile=-/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master/runtime/rabbitbot-loop.env
 
 [Install]
 WantedBy=multi-user.target

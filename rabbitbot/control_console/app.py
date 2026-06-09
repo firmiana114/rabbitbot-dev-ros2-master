@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from .commands import CommandError, restart_loop_service, send_workflow_command, start_task
+from .commands import CommandError, read_map_path, restart_loop_service, send_workflow_command, start_task
 from .config import ConsoleConfig
 from .status import (
     detect_main_loop_running,
@@ -26,6 +26,10 @@ class TaskRequest(BaseModel):
     task: str
 
 
+class RestartRequest(BaseModel):
+    map_path: str | None = None
+
+
 def _html() -> str:
     return """<!doctype html>
 <html lang="zh-CN">
@@ -34,7 +38,7 @@ def _html() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RabbitBot 控制台</title>
   <style>
-    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}</style>
+    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.field{margin-top:16px}.text-input{width:100%;box-sizing:border-box;padding:10px 11px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;color:#172033;background:#fff}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}</style>
 </head>
 <body>
   <div class="wrap">
@@ -61,6 +65,10 @@ def _html() -> str:
             <button class="refresh" onclick="refresh()">刷新状态</button>
             <button id="restartBtn" class="restart" onclick="restartProgram()">一键重启</button>
           </div>
+          <div class="field">
+            <div class="label">重启地图</div>
+            <input id="mapPathInput" class="text-input" type="text" value="/home/unitree/test9.pcd" oninput="mapPathTouched=true">
+          </div>
           <p id="message"></p>
         </section>
         <section class="panel">
@@ -81,6 +89,7 @@ def _html() -> str:
   </div>
 <script>
 var logsVisible=false;
+var mapPathTouched=false;
 function setText(id,text){document.getElementById(id).textContent=text;}
 function requestJson(method,url,payload,callback){
   var xhr=new XMLHttpRequest();
@@ -105,6 +114,7 @@ function refresh(){
   requestJson('GET','/api/status',null,function(error,data){
     if(error){showError(error.message);return;}
     setText('map','地图：'+data.map_path);
+    if(!mapPathTouched&&data.map_path){document.getElementById('mapPathInput').value=data.map_path;}
     setText('overall',data.nav_bridge.ready?'在线':'导航未就绪');
     setText('mainLoop',data.main_loop);
     setText('navBridge',data.nav_bridge.ready?'28180 就绪':'未就绪');
@@ -156,7 +166,8 @@ function restartProgram(){
   button.disabled=true;
   setText('overall','重启中');
   setText('message','正在重新启动导航主程序...');
-  requestJson('POST','/api/restart',{},function(error,body){
+  var mapPath=document.getElementById('mapPathInput').value;
+  requestJson('POST','/api/restart',{map_path:mapPath},function(error,body){
     setText('message',error?error.message:body.message);
     setTimeout(function(){button.disabled=false;refresh();},3000);
   });
@@ -181,9 +192,10 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
         nav_log = latest_file(config.nav_log_dir, "nav_bridge_*.log")
         pose = parse_latest_pose(nav_log) if nav_log else parse_latest_pose(Path("/missing-nav-log"))
         workflow = get_latest_workflow_status(config.workflow_control_dir)
+        current_map_path = read_map_path(config.map_env_file, config.map_path)
         return {
             "ok": True,
-            "map_path": config.map_path,
+            "map_path": current_map_path,
             "main_loop": detect_main_loop_running(),
             "nav_bridge": {"ready": is_port_open("127.0.0.1", config.nav_port), "port": config.nav_port},
             "workflow": workflow.to_dict(),
@@ -207,12 +219,14 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
 
 
     @app.post("/api/restart")
-    def restart() -> dict:
+    def restart(payload: RestartRequest) -> dict:
         try:
             return restart_loop_service(
                 config.loop_service_name,
                 systemctl_path=config.systemctl_path,
                 sudo_path=config.sudo_path,
+                map_path=payload.map_path,
+                map_env_file=config.map_env_file,
             )
         except CommandError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
