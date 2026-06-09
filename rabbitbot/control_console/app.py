@@ -88,6 +88,7 @@ def _html() -> str:
           <div class="label">导览讲解词</div>
           <div class="actions" style="margin-top:0">
             <button id="dialogueLoadBtn" class="refresh" onclick="loadDialogue()">加载讲解词</button>
+            <button id="dialogueToggleBtn" class="refresh" onclick="toggleDialogueEditor()" disabled>折叠讲解词</button>
             <button id="dialogueSaveBtn" class="go" onclick="saveDialogue()" disabled>保存讲解词</button>
           </div>
         </div>
@@ -107,6 +108,8 @@ def _html() -> str:
 <script>
 var logsVisible=false;
 var mapPathTouched=false;
+var dialogueLoaded=false;
+var dialogueCollapsed=false;
 function setText(id,text){document.getElementById(id).textContent=text;}
 function requestJson(method,url,payload,callback){
   var xhr=new XMLHttpRequest();
@@ -169,12 +172,24 @@ function dialogueSummaryText(summary){
   if(!summary){return '未加载';}
   return '文件：'+summary.path+' / 称呼：'+(summary.leader_calling||'-')+' / 地图：'+(summary.map_file||'-')+' / 步骤：'+summary.steps+' / 台词段：'+summary.segments+' / 点位：'+summary.points;
 }
+function updateDialogueFoldState(){
+  document.getElementById('dialogueEditor').hidden=dialogueCollapsed;
+  document.getElementById('dialogueSaveBtn').disabled=!dialogueLoaded||dialogueCollapsed;
+  document.getElementById('dialogueToggleBtn').disabled=!dialogueLoaded;
+  setText('dialogueToggleBtn',dialogueCollapsed?'展开讲解词':'折叠讲解词');
+}
 function renderDialogue(body){
-  document.getElementById('dialogueEditor').hidden=false;
+  dialogueLoaded=true;
+  dialogueCollapsed=false;
   document.getElementById('dialogueEditor').value=body.content||'';
-  document.getElementById('dialogueSaveBtn').disabled=false;
+  updateDialogueFoldState();
   setText('dialogueSummary',dialogueSummaryText(body.summary));
   setText('dialogueMessage',body.message||'');
+}
+function toggleDialogueEditor(){
+  if(!dialogueLoaded){return;}
+  dialogueCollapsed=!dialogueCollapsed;
+  updateDialogueFoldState();
 }
 function loadDialogue(){
   document.getElementById('dialogueLoadBtn').disabled=true;

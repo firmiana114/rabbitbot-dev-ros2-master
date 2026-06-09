@@ -244,6 +244,10 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '导览讲解词' in response.text
     assert '加载讲解词' in response.text
     assert '保存讲解词' in response.text
+    assert '折叠讲解词' in response.text
+    assert '展开讲解词' in response.text
+    assert 'dialogueToggleBtn' in response.text
+    assert 'toggleDialogueEditor' in response.text
     assert 'dialogueEditor' in response.text
     assert '/api/dialogue' in response.text
     assert '显示日志' in response.text
