@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-import secrets
 
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -19,13 +18,6 @@ from .status import (
 )
 
 
-SESSION_COOKIE = "rabbitbot_console_session"
-
-
-class LoginRequest(BaseModel):
-    password: str
-
-
 class CommandRequest(BaseModel):
     command: str
 
@@ -38,18 +30,11 @@ def _html() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RabbitBot 控制台</title>
   <style>
-    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.back{background:#b3261e}.refresh{background:#334155}.login{max-width:360px;margin:12vh auto}.input{width:100%;box-sizing:border-box;padding:11px;border:1px solid #cbd5e1;border-radius:6px;margin:10px 0 12px}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}</style>
+    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.back{background:#b3261e}.refresh{background:#334155}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}</style>
 </head>
 <body>
   <div class="wrap">
-    <form id="loginForm" class="panel login">
-      <h2>RabbitBot 控制台</h2>
-      <div class="label">请输入访问密码</div>
-      <input id="password" class="input" type="password" autocomplete="current-password" placeholder="密码">
-      <button class="refresh" type="submit">登录</button>
-      <p id="loginError" class="error"></p>
-    </form>
-    <div id="app" style="display:none">
+    <div id="app">
       <div class="top">
         <div><h2>RabbitBot 控制台</h2><div id="map" class="label">地图：-</div></div>
         <div id="overall" class="value">读取中</div>
@@ -80,19 +65,9 @@ def _html() -> str:
     </div>
   </div>
 <script>
-async function submitLogin(event){
-  if(event){event.preventDefault();}
-  const password=document.getElementById('password').value;
-  const res=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
-  if(!res.ok){document.getElementById('loginError').textContent='密码错误';return;}
-  document.getElementById('loginForm').style.display='none';
-  document.getElementById('app').style.display='block';
-  refresh();
-}
 function setText(id,text){document.getElementById(id).textContent=text;}
 async function refresh(){
   const res=await fetch('/api/status');
-  if(res.status===401){document.getElementById('loginForm').style.display='block';document.getElementById('app').style.display='none';return;}
   const data=await res.json();
   setText('map','地图：'+data.map_path);
   setText('overall',data.nav_bridge.ready?'在线':'导航未就绪');
@@ -110,8 +85,8 @@ async function sendCommand(command){
   setText('message',res.ok?body.message:body.detail);
   refresh();
 }
-setInterval(()=>{if(document.getElementById('app').style.display!=='none')refresh();},2000);
-document.getElementById('loginForm').addEventListener('submit', submitLogin);
+refresh();
+setInterval(refresh,2000);
 </script>
 </body>
 </html>"""
@@ -120,25 +95,13 @@ document.getElementById('loginForm').addEventListener('submit', submitLogin);
 def create_app(config: ConsoleConfig | None = None) -> FastAPI:
     config = config or ConsoleConfig.from_env()
     app = FastAPI(title="RabbitBot Control Console")
-    session_token = secrets.token_urlsafe(32)
-
-    def require_auth(rabbitbot_console_session: str | None = Cookie(default=None)) -> None:
-        if rabbitbot_console_session != session_token:
-            raise HTTPException(status_code=401, detail="未登录")
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         return HTMLResponse(_html(), headers={"Cache-Control": "no-store"})
 
-    @app.post("/api/login")
-    def login(payload: LoginRequest, response: Response) -> dict:
-        if payload.password != config.password:
-            raise HTTPException(status_code=401, detail="密码错误")
-        response.set_cookie(SESSION_COOKIE, session_token, httponly=True, samesite="lax")
-        return {"ok": True}
-
     @app.get("/api/status")
-    def status(_: None = Depends(require_auth)) -> dict:
+    def status() -> dict:
         nav_log = latest_file(config.nav_log_dir, "nav_bridge_*.log")
         pose = parse_latest_pose(nav_log) if nav_log else parse_latest_pose(Path("/missing-nav-log"))
         workflow = get_latest_workflow_status(config.workflow_control_dir)
@@ -152,14 +115,14 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
         }
 
     @app.post("/api/command")
-    def command(payload: CommandRequest, _: None = Depends(require_auth)) -> dict:
+    def command(payload: CommandRequest) -> dict:
         try:
             return send_workflow_command(payload.command, config.command_script)
         except CommandError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/logs")
-    def logs(target: str = "nav", lines: int = 120, _: None = Depends(require_auth)) -> dict:
+    def logs(target: str = "nav", lines: int = 120) -> dict:
         bounded_lines = max(1, min(lines, 400))
         if target == "nav":
             path = latest_file(config.nav_log_dir, "nav_bridge_*.log")

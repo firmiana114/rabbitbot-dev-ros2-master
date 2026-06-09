@@ -9,7 +9,6 @@ PROJECT_ROOT = Path("/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master")
 @dataclass(frozen=True)
 class ConsoleConfig:
     project_root: Path
-    password: str
     host: str
     port: int
     nav_port: int
@@ -24,7 +23,6 @@ class ConsoleConfig:
         project_root = Path(os.environ.get("RABBITBOT_PROJECT_ROOT", str(PROJECT_ROOT)))
         return cls(
             project_root=project_root,
-            password=os.environ.get("RABBITBOT_CONSOLE_PASSWORD", "123"),
             host=os.environ.get("RABBITBOT_CONSOLE_HOST", "0.0.0.0"),
             port=int(os.environ.get("RABBITBOT_CONSOLE_PORT", "8080")),
             nav_port=int(os.environ.get("RABBITBOT_NAV_PORT", "28180")),

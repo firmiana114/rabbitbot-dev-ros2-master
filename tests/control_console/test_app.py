@@ -18,7 +18,6 @@ def make_config(tmp_path):
     command_script.chmod(0o755)
     return ConsoleConfig(
         project_root=project_root,
-        password="123",
         host="127.0.0.1",
         port=8080,
         nav_port=9,
@@ -30,15 +29,16 @@ def make_config(tmp_path):
     )
 
 
-def test_status_requires_login(tmp_path):
+def test_status_does_not_require_login(tmp_path):
     client = TestClient(create_app(make_config(tmp_path)))
 
     response = client.get("/api/status")
 
-    assert response.status_code == 401
+    assert response.status_code == 200
+    assert response.json()["map_path"] == "/home/unitree/test9.pcd"
 
 
-def test_login_sets_cookie_and_status_returns_map_and_pose(tmp_path):
+def test_status_returns_map_and_pose_without_login(tmp_path):
     config = make_config(tmp_path)
     nav_log = config.nav_log_dir / "nav_bridge_20260609.log"
     nav_log.write_text(
@@ -49,10 +49,8 @@ def test_login_sets_cookie_and_status_returns_map_and_pose(tmp_path):
     (config.workflow_control_dir / "20260609_100000.ready").write_text("ready\n", encoding="utf-8")
     client = TestClient(create_app(config))
 
-    login = client.post("/api/login", json={"password": "123"})
     response = client.get("/api/status")
 
-    assert login.status_code == 200
     assert response.status_code == 200
     body = response.json()
     assert body["map_path"] == "/home/unitree/test9.pcd"
@@ -61,17 +59,8 @@ def test_login_sets_cookie_and_status_returns_map_and_pose(tmp_path):
     assert body["pose"]["x"] == 1.0
 
 
-def test_login_rejects_wrong_password(tmp_path):
+def test_command_rejects_quit_without_login(tmp_path):
     client = TestClient(create_app(make_config(tmp_path)))
-
-    response = client.post("/api/login", json={"password": "bad"})
-
-    assert response.status_code == 401
-
-
-def test_command_rejects_quit_even_after_login(tmp_path):
-    client = TestClient(create_app(make_config(tmp_path)))
-    client.post("/api/login", json={"password": "123"})
 
     response = client.post("/api/command", json={"command": "quit"})
 
@@ -79,9 +68,8 @@ def test_command_rejects_quit_even_after_login(tmp_path):
     assert "不支持的命令" in response.json()["detail"]
 
 
-def test_command_sends_go_after_login(tmp_path):
+def test_command_sends_go_without_login(tmp_path):
     client = TestClient(create_app(make_config(tmp_path)))
-    client.post("/api/login", json={"password": "123"})
 
     response = client.post("/api/command", json={"command": "go"})
 
@@ -95,7 +83,6 @@ def test_logs_return_latest_nav_log_lines(tmp_path):
     latest = config.nav_log_dir / "nav_bridge_2.log"
     latest.write_text("one\ntwo\nthree\n", encoding="utf-8")
     client = TestClient(create_app(config))
-    client.post("/api/login", json={"password": "123"})
 
     response = client.get("/api/logs?target=nav&lines=2")
 
@@ -111,28 +98,17 @@ def test_main_module_exposes_run_function():
 
 
 
-def test_login_button_uses_non_conflicting_handler_name(tmp_path):
-    client = TestClient(create_app(make_config(tmp_path)))
-
-    response = client.get("/")
-
-    assert response.status_code == 200
-    assert 'id="loginForm"' in response.text
-    assert 'function submitLogin(' in response.text
-    assert 'onclick="login()"' not in response.text
-    assert 'onclick="submitLogin()"' not in response.text
-    assert 'id="login"' not in response.text
-
-
-
-def test_login_page_uses_form_submit_and_no_cache(tmp_path):
+def test_page_shows_console_without_login_form(tmp_path):
     client = TestClient(create_app(make_config(tmp_path)))
 
     response = client.get("/")
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
-    assert 'id="loginForm"' in response.text
-    assert '<button class="refresh" type="submit">登录</button>' in response.text
-    assert "addEventListener('submit', submitLogin)" in response.text
-    assert 'onclick="submitLogin()"' not in response.text
+    assert 'id="app"' in response.text
+    assert 'style="display:none"' not in response.text
+    assert 'id="loginForm"' not in response.text
+    assert 'password' not in response.text.lower()
+    assert '/api/login' not in response.text
+    assert '开始任务' in response.text
+    assert '返航' in response.text

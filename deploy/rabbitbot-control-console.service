@@ -7,7 +7,6 @@ Wants=network-online.target
 Type=simple
 User=pc
 WorkingDirectory=/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master
-Environment=RABBITBOT_CONSOLE_PASSWORD=123
 Environment=RABBITBOT_CONSOLE_HOST=0.0.0.0
 Environment=RABBITBOT_CONSOLE_PORT=8080
 Environment=NAV_PCD_PATH=/home/unitree/test9.pcd
