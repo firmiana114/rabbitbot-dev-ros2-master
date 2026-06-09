@@ -21,12 +21,17 @@ class ConsoleConfig:
     systemctl_path: Path
     sudo_path: Path | None
     map_env_file: Path
+    dialogue_dir: Path
+    dialogue_index: str
+    dialogue_file: Path | None
 
     @classmethod
     def from_env(cls) -> "ConsoleConfig":
         project_root = Path(os.environ.get("RABBITBOT_PROJECT_ROOT", str(PROJECT_ROOT)))
         sudo_path_value = os.environ.get("RABBITBOT_CONSOLE_SUDO_PATH", "/usr/bin/sudo")
         sudo_path = None if sudo_path_value.lower() in {"", "none", "0"} else Path(sudo_path_value)
+        dialogue_file_value = os.environ.get("RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE", "").strip()
+        dialogue_file = Path(dialogue_file_value) if dialogue_file_value else None
         return cls(
             project_root=project_root,
             host=os.environ.get("RABBITBOT_CONSOLE_HOST", "0.0.0.0"),
@@ -41,4 +46,7 @@ class ConsoleConfig:
             systemctl_path=Path(os.environ.get("RABBITBOT_CONSOLE_SYSTEMCTL_PATH", "/usr/bin/systemctl")),
             sudo_path=sudo_path,
             map_env_file=Path(os.environ.get("RABBITBOT_LOOP_ENV_FILE", str(project_root / "runtime" / "rabbitbot-loop.env"))),
+            dialogue_dir=project_root / "conf",
+            dialogue_index=os.environ.get("RABBITBOT_DIALOGUE_INDEX", os.environ.get("RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX", "0")),
+            dialogue_file=dialogue_file,
         )

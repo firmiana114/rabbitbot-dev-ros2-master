@@ -13,11 +13,17 @@ def make_config(tmp_path):
     workflow_control_dir = project_root / "logs" / "nav_workflow_control" / "workflow_control"
     nav_log_dir = project_root / "logs" / "nav_workflow_control"
     workflow_log_dir = project_root / "logs" / "nav_workflow_control"
+    dialogue_dir = project_root / "conf"
     command_script.parent.mkdir(parents=True)
     systemctl_path.parent.mkdir(parents=True)
     workflow_control_dir.mkdir(parents=True)
     nav_log_dir.mkdir(parents=True, exist_ok=True)
     workflow_log_dir.mkdir(parents=True, exist_ok=True)
+    dialogue_dir.mkdir(parents=True, exist_ok=True)
+    (dialogue_dir / "dialogue_0.json").write_text(
+        '{"variables":{"leader_calling":"各位领导"},"opening":{},"steps":[{"segments":[{"text":"欢迎"}]}],"map_file":"test9.pcd","points":{}}\n',
+        encoding="utf-8",
+    )
     command_script.write_text("#!/usr/bin/env bash\necho \"已发送命令：$1\"\n", encoding="utf-8")
     command_script.chmod(0o755)
     systemctl_path.write_text(f"#!/usr/bin/env bash\nprintf '%s\n' \"$@\" > {systemctl_record}\n", encoding="utf-8")
@@ -36,6 +42,9 @@ def make_config(tmp_path):
         systemctl_path=systemctl_path,
         sudo_path=None,
         map_env_file=map_env_file,
+        dialogue_dir=dialogue_dir,
+        dialogue_index="0",
+        dialogue_file=None,
     )
 
 
@@ -140,6 +149,52 @@ def test_restart_restarts_loop_service_without_login(tmp_path):
     assert record.read_text(encoding="utf-8").splitlines() == ["restart", "rabbitbot-loop.service"]
 
 
+def test_dialogue_loads_current_config(tmp_path):
+    client = TestClient(create_app(make_config(tmp_path)))
+
+    response = client.get("/api/dialogue")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is True
+    assert body["summary"]["leader_calling"] == "各位领导"
+    assert body["summary"]["map_file"] == "test9.pcd"
+    assert '"text": "欢迎"' in body["content"]
+
+
+def test_dialogue_save_validates_and_writes_config(tmp_path):
+    config = make_config(tmp_path)
+    client = TestClient(create_app(config))
+    content = '{"variables":{"leader_calling":"客户"},"opening":{},"steps":[{"segments":[{"text":"新的讲解词"}]}],"map_file":"test10.pcd","points":{}}'
+
+    response = client.post("/api/dialogue", json={"content": content})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"]["leader_calling"] == "客户"
+    saved = (config.dialogue_dir / "dialogue_0.json").read_text(encoding="utf-8")
+    assert "新的讲解词" in saved
+    assert list(config.dialogue_dir.glob("dialogue_0.json.*.bak"))
+
+
+def test_dialogue_save_rejects_invalid_json(tmp_path):
+    client = TestClient(create_app(make_config(tmp_path)))
+
+    response = client.post("/api/dialogue", json={"content": "{"})
+
+    assert response.status_code == 400
+    assert "JSON 解析失败" in response.json()["detail"]
+
+
+def test_dialogue_save_rejects_invalid_structure(tmp_path):
+    client = TestClient(create_app(make_config(tmp_path)))
+
+    response = client.post("/api/dialogue", json={"content": "[]"})
+
+    assert response.status_code == 400
+    assert "根节点必须是对象" in response.json()["detail"]
+
+
 def test_logs_return_latest_nav_log_lines(tmp_path):
     config = make_config(tmp_path)
     (config.nav_log_dir / "nav_bridge_1.log").write_text("old\n", encoding="utf-8")
@@ -186,6 +241,11 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '重启地图' in response.text
     assert 'mapPathInput' in response.text
     assert 'map_path' in response.text
+    assert '导览讲解词' in response.text
+    assert '加载讲解词' in response.text
+    assert '保存讲解词' in response.text
+    assert 'dialogueEditor' in response.text
+    assert '/api/dialogue' in response.text
     assert '显示日志' in response.text
     assert '关闭日志' in response.text
     assert 'logsVisible=false' in response.text

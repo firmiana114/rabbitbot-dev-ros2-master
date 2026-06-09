@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from .commands import CommandError, read_map_path, restart_loop_service, send_workflow_command, start_task
 from .config import ConsoleConfig
+from .dialogue import DialogueError, read_dialogue_editor, resolve_dialogue_path, write_dialogue_config
 from .status import (
     detect_main_loop_running,
     get_latest_workflow_status,
@@ -30,6 +31,10 @@ class RestartRequest(BaseModel):
     map_path: str | None = None
 
 
+class DialogueRequest(BaseModel):
+    content: str
+
+
 def _html() -> str:
     return """<!doctype html>
 <html lang="zh-CN">
@@ -38,7 +43,7 @@ def _html() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RabbitBot 控制台</title>
   <style>
-    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.field{margin-top:16px}.text-input{width:100%;box-sizing:border-box;padding:10px 11px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;color:#172033;background:#fff}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}</style>
+    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.field{margin-top:16px}.text-input,.dialogue-editor{width:100%;box-sizing:border-box;padding:10px 11px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;color:#172033;background:#fff}.dialogue-editor{font-family:ui-monospace,Menlo,monospace;min-height:420px;line-height:1.45;resize:vertical}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}</style>
 </head>
 <body>
   <div class="wrap">
@@ -78,6 +83,18 @@ def _html() -> str:
           <div id="pose" class="value pose-line">暂无定位位姿数据</div>
         </section>
       </div>
+      <section class="panel" style="margin-top:16px">
+        <div class="top" style="margin-bottom:10px">
+          <div class="label">导览讲解词</div>
+          <div class="actions" style="margin-top:0">
+            <button id="dialogueLoadBtn" class="refresh" onclick="loadDialogue()">加载讲解词</button>
+            <button id="dialogueSaveBtn" class="go" onclick="saveDialogue()" disabled>保存讲解词</button>
+          </div>
+        </div>
+        <div id="dialogueSummary" class="label">未加载</div>
+        <textarea id="dialogueEditor" class="dialogue-editor" hidden></textarea>
+        <p id="dialogueMessage"></p>
+      </section>
       <section class="panel" style="margin-top:16px">
         <div class="top" style="margin-bottom:10px">
           <div class="label">最近日志</div>
@@ -147,6 +164,37 @@ function toggleLogs(){
   }else{
     setText('logs','');
   }
+}
+function dialogueSummaryText(summary){
+  if(!summary){return '未加载';}
+  return '文件：'+summary.path+' / 称呼：'+(summary.leader_calling||'-')+' / 地图：'+(summary.map_file||'-')+' / 步骤：'+summary.steps+' / 台词段：'+summary.segments+' / 点位：'+summary.points;
+}
+function renderDialogue(body){
+  document.getElementById('dialogueEditor').hidden=false;
+  document.getElementById('dialogueEditor').value=body.content||'';
+  document.getElementById('dialogueSaveBtn').disabled=false;
+  setText('dialogueSummary',dialogueSummaryText(body.summary));
+  setText('dialogueMessage',body.message||'');
+}
+function loadDialogue(){
+  document.getElementById('dialogueLoadBtn').disabled=true;
+  setText('dialogueMessage','正在加载讲解词...');
+  requestJson('GET','/api/dialogue',null,function(error,body){
+    document.getElementById('dialogueLoadBtn').disabled=false;
+    if(error){setText('dialogueMessage',error.message);return;}
+    renderDialogue(body);
+  });
+}
+function saveDialogue(){
+  if(!window.confirm('确定保存导览讲解词吗？保存后需要一键重启生效。')){return;}
+  var button=document.getElementById('dialogueSaveBtn');
+  button.disabled=true;
+  setText('dialogueMessage','正在保存讲解词...');
+  requestJson('POST','/api/dialogue',{content:document.getElementById('dialogueEditor').value},function(error,body){
+    button.disabled=false;
+    if(error){setText('dialogueMessage',error.message);return;}
+    renderDialogue(body);
+  });
 }
 function sendCommand(command){
   requestJson('POST','/api/command',{command:command},function(error,body){
@@ -229,6 +277,22 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
                 map_env_file=config.map_env_file,
             )
         except CommandError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/dialogue")
+    def get_dialogue() -> dict:
+        try:
+            path = resolve_dialogue_path(config.dialogue_dir, config.dialogue_index, config.dialogue_file)
+            return read_dialogue_editor(path)
+        except DialogueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/dialogue")
+    def save_dialogue(payload: DialogueRequest) -> dict:
+        try:
+            path = resolve_dialogue_path(config.dialogue_dir, config.dialogue_index, config.dialogue_file)
+            return write_dialogue_config(path, payload.content)
+        except DialogueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/logs")
