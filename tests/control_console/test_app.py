@@ -108,3 +108,17 @@ def test_main_module_exposes_run_function():
     from rabbitbot.control_console.__main__ import run
 
     assert callable(run)
+
+
+
+def test_login_button_uses_non_conflicting_handler_name(tmp_path):
+    client = TestClient(create_app(make_config(tmp_path)))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert 'id="loginPanel"' in response.text
+    assert 'onclick="submitLogin()"' in response.text
+    assert 'function submitLogin()' in response.text
+    assert 'onclick="login()"' not in response.text
+    assert 'id="login"' not in response.text

@@ -42,11 +42,11 @@ def _html() -> str:
 </head>
 <body>
   <div class="wrap">
-    <div id="login" class="panel login">
+    <div id="loginPanel" class="panel login">
       <h2>RabbitBot 控制台</h2>
       <div class="label">请输入访问密码</div>
       <input id="password" class="input" type="password" autocomplete="current-password" placeholder="密码">
-      <button class="refresh" onclick="login()">登录</button>
+      <button class="refresh" onclick="submitLogin()">登录</button>
       <p id="loginError" class="error"></p>
     </div>
     <div id="app" style="display:none">
@@ -80,18 +80,18 @@ def _html() -> str:
     </div>
   </div>
 <script>
-async function login(){
+async function submitLogin(){
   const password=document.getElementById('password').value;
   const res=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
   if(!res.ok){document.getElementById('loginError').textContent='密码错误';return;}
-  document.getElementById('login').style.display='none';
+  document.getElementById('loginPanel').style.display='none';
   document.getElementById('app').style.display='block';
   refresh();
 }
 function setText(id,text){document.getElementById(id).textContent=text;}
 async function refresh(){
   const res=await fetch('/api/status');
-  if(res.status===401){document.getElementById('login').style.display='block';document.getElementById('app').style.display='none';return;}
+  if(res.status===401){document.getElementById('loginPanel').style.display='block';document.getElementById('app').style.display='none';return;}
   const data=await res.json();
   setText('map','地图：'+data.map_path);
   setText('overall',data.nav_bridge.ready?'在线':'导航未就绪');
