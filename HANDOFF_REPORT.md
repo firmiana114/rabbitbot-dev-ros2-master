@@ -323,3 +323,44 @@
 
 - 本轮新增/调整的日志点包括：台词文件加载完成时输出 `map_file` 和 `points` 数量；点位加载时输出使用台词文件配置或代码兜底配置、点位名、坐标数量和地图文件名。
 - 这些日志用于区分导航失败时到底是台词文件点位未生效、回退到了代码兜底，还是地图文件与导航桥接实际加载地图不一致。
+
+## 本轮补充：dialogue_1 切换 test9 点位
+
+### 背景和目标
+
+本轮目标是按现场提供的 test9 地图点位，更新 `conf/dialogue_1.json` 中 DOCX 严格剧本实际使用的导航点位。现场已先将该台词文件的地图字段改为 `test9.pcd`，本轮保留该配置并更新对应点位坐标。
+
+### 当前状态
+
+已完成：
+
+- 已确认 `conf/dialogue_1.json` 当前 `map_file` 为 `test9.pcd`。
+- 已更新 `point_1_to_2_transition`、`point_2`、`point_3`、`point_3_to_5_transition`、`point_5` 的 `location` 坐标为 test9 图提供值。
+- 已确认 `dialogue_1.json` 当前 steps 实际引用上述 5 个点位；未提供新坐标且未被 steps 引用的 `point_1`、`point_4` 本轮未改动。
+- 已保留 `dialogue_1.json` 当前已有称呼配置 `variables.leader_calling=各位领导`。
+
+未完成：
+
+- 本轮未启动 workflow、导航桥接或 systemd 服务。
+- 本轮未进行真机导航验证。
+
+### 已验证的事实
+
+- `conf/dialogue_1.json` 已通过 `python3 -m json.tool` JSON 格式校验。
+- test9 的 5 个点位均已通过字段完整性校验，包含 `x/y/z/ox/oy/oz/ow/mode`。
+- `rabbitbot/agno_agents/workflow.py` 已通过 `python3 -m py_compile` 语法检查。
+
+### 阻塞问题
+
+无代码层面阻塞。剩余风险是运行层面尚未验证：需要启动 workflow 后确认日志加载 `dialogue_1.json`、`map_file=test9.pcd`，并确认导航桥接实际使用 test9 对应地图。
+
+### 建议的下一步
+
+- 使用 `RABBITBOT_DIALOGUE_INDEX=1` 或等效配置启动 workflow，确认实际选中 `dialogue_1.json`。
+- 启动导航桥接前确认 `NAV_PCD_PATH` 指向 test9 对应地图文件。
+- 真机按完整 DOCX 严格剧本跑一遍，重点验证 `1到2过渡`、点位2、点位3、`3到5过渡` 和点位5 的到点精度。
+
+### 注意事项
+
+- `dialogue_1.json` 的 `point_1` 和 `point_4` 坐标仍保留旧值；当前 steps 未引用它们。如后续剧本增加引用或现场需要完整 test9 点位表，应补充这两个点位的新坐标。
+- 台词 JSON 修改后需要重启 workflow 才会重新加载。
