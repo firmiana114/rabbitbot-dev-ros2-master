@@ -419,3 +419,44 @@
 
 - 本轮新增日志点：loop 启动准备阶段会打印使用显式导航地图，或打印根据台词文件推导出的 `dialogue`、`map_file` 和最终 `NAV_PCD_PATH`。
 - 该日志用于快速诊断台词点位与导航桥接地图是否一致。
+
+## 本轮补充：禁用 STT 服务自动启动
+
+### 背景和目标
+
+当前 workflow 已不再需要 STT 语音识别服务（严格 DOCX 剧本已移除全部 STT 问答监听），现场要求 workflow 启动时不再自动拉起 STT 服务（28184），以减少资源占用和无关启动失败风险。
+
+### 当前状态
+
+已完成：
+
+- 新增统一开关 `RABBITBOT_UNIFIED_START_STT`，默认 `0`（不启动 STT）；如确需启动，可显式设置 `RABBITBOT_UNIFIED_START_STT=1`。开关命名和接线方式与已有的 `RABBITBOT_UNIFIED_START_EMBEDDING` 保持一致。
+- `scripts_1/unified_runtime/start_unified_container.sh`：新增开关默认值；`start_stt()` 顶部增加跳过守卫，开关非 `1` 时打印跳过日志并直接返回，不再启动 STT、不再等待 28184；同步更新文件头注释。
+- `scripts_1/start_unified_integration_workflow.sh`：新增开关默认值与头部注释；基础服务等待阶段对 STT(28184) 改为条件等待，开关非 `1` 时打印跳过日志；`ensure_compatible_container` 新增 STT 开关比较项，开关变化时触发容器重建；docker run 时通过 `-e RABBITBOT_UNIFIED_START_STT` 透传到容器内。
+- `scripts_1/start_nav_bridge_workflow_loop.sh`：新增开关默认值；基础服务健康检查 `base_services_health_ok` 中 STT(28184) 改为仅在开关为 `1` 时才检查，避免关闭 STT 后健康检查误判为不健康并触发误重启；调用集成脚本时透传 `RABBITBOT_UNIFIED_START_STT`。
+- `scripts/start_all_services.sh`（旧版全量启动入口）：新增开关默认值；主流程 `start_stt` 调用改为条件执行，开关非 `1` 时打印跳过日志，避免 STT 从该旧入口回流。
+
+未完成：
+
+- 本轮只做脚本改造和静态检查，未在真机/容器中实际重启 workflow 验证（避免中断现场可能正在运行的服务）。
+
+### 已验证的事实
+
+- 已确认 workflow 不会因关闭 STT 服务而在初始化阶段失败：`rabbitbot/context.py` 中 `self.stt_agent = create_stt_agent()`，而 `rabbitbot/provider.py` 的 `create_stt_agent()` 仅构造 `STTAgent(host_url)` 对象、保存 URL，不在构造时连接 28184；STT 客户端为懒连接，只有真正触发监听时才请求服务，而严格 DOCX 剧本已不再触发监听。
+- 4 个脚本均通过 `bash -n` 语法检查。
+- 本轮补丁脚本对每处替换做命中次数断言（期望命中 1 次），全部精确命中：container 3 处、integration 7 处、navloop 3 处、all_services 2 处。
+
+### 阻塞问题
+
+无代码层面阻塞。当前运行中的容器若是在本次改动前创建并已启动 STT，本次脚本改动不会主动停止已在运行的 STT 进程；如需让已运行实例也不再有 STT，可用 `RECREATE_CONTAINER=1`（开关比较会因 STT 配置变化自动触发重建）重建容器，或手动停止 STT 进程。
+
+### 建议的下一步
+
+- 下次重启统一服务时无需额外设置即默认不启动 STT；如临时需要 STT，整链路设置 `RABBITBOT_UNIFIED_START_STT=1` 后再启动。
+- 启动后确认终端出现 `RABBITBOT_UNIFIED_START_STT=0，跳过 STT` 日志，并确认 28184 未被监听、workflow 仍正常进入开场。
+
+### 注意事项
+
+- `RABBITBOT_UNIFIED_START_STT` 默认 `0`；该开关同时影响统一容器入口、联调编排脚本、导航 loop 健康检查和旧版全量启动脚本，四处行为一致。
+- 关闭 STT 后，导航 loop 的基础服务健康检查不再包含 STT(28184)，因此 STT 缺失不会再触发健康检查失败或服务自动恢复。
+- 本轮新增/调整日志点：四处启动路径在跳过 STT 时均打印 `RABBITBOT_UNIFIED_START_STT=0，跳过 STT ...` 或 `跳过等待 STT 服务 (28184)`，用于现场快速确认 STT 确实未启动且为预期行为。

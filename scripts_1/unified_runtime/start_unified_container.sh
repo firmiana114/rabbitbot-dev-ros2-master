@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 单容器实验入口：在一个容器内启动 Neo4j、TTS、STT、Memory Agent、Robot Agent 和 workflow；VLM/Embedding 默认跳过。
+# 单容器实验入口：在一个容器内启动 Neo4j、TTS、Memory Agent、Robot Agent 和 workflow；VLM/Embedding/STT 默认跳过。
 
 set -Eeuo pipefail
 
@@ -13,6 +13,7 @@ RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE:-0}"
 RABBITBOT_WORKFLOW_NON_INTEGRATION="${RABBITBOT_WORKFLOW_NON_INTEGRATION:-0}"
 RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM:-0}"
 RABBITBOT_UNIFIED_START_EMBEDDING="${RABBITBOT_UNIFIED_START_EMBEDDING:-0}"
+RABBITBOT_UNIFIED_START_STT="${RABBITBOT_UNIFIED_START_STT:-0}"
 RABBITBOT_TTS_BACKEND="${RABBITBOT_TTS_BACKEND:-unitree}"
 RABBITBOT_UNITREE_TTS_INTERFACE="${RABBITBOT_UNITREE_TTS_INTERFACE:-eno1}"
 RABBITBOT_UNITREE_TTS_VOLUME="${RABBITBOT_UNITREE_TTS_VOLUME:-100}"
@@ -154,6 +155,10 @@ start_tts() {
 }
 
 start_stt() {
+    if [ "${RABBITBOT_UNIFIED_START_STT}" != "1" ]; then
+        log_info "RABBITBOT_UNIFIED_START_STT=0，跳过 STT（当前 workflow 不再需要语音识别服务）"
+        return 0
+    fi
     if http_ok http://127.0.0.1:28184/docs; then
         log_success "STT 已运行"
         return 0

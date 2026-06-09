@@ -55,6 +55,7 @@ ROBOT_AGENT_PORT=28180
 
 TTS_DEVICE_NAME="${TTS_DEVICE_NAME:-BT67}"
 STT_DEVICE_NAME="${STT_DEVICE_NAME:-Wireless Mic Rx}"
+RABBITBOT_UNIFIED_START_STT="${RABBITBOT_UNIFIED_START_STT:-0}"
 
 AUTO_START_WORKFLOW="${AUTO_START_WORKFLOW:-1}"
 RESTART_EXISTING="${RESTART_EXISTING:-0}"
@@ -392,7 +393,11 @@ wait_until "Neo4j Bolt (${NEO4J_BOLT_PORT})" "${WAIT_DEFAULT_SECONDS}" neo4j_rea
 
 start_vlm_and_embedding || exit 1
 start_tts || exit 1
-start_stt || exit 1
+if [ "${RABBITBOT_UNIFIED_START_STT}" = "1" ]; then
+    start_stt || exit 1
+else
+    log_info "RABBITBOT_UNIFIED_START_STT=0，跳过 STT（当前 workflow 不再需要语音识别服务）"
+fi
 # 当前阶段暂不需要 VLN，先不启动 8001 服务。
 # start_vln || log_warn "VLN 未就绪，workflow 中 VLN 相关能力可能不可用"
 start_memory_agent || exit 1

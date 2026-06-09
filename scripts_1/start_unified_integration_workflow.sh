@@ -3,7 +3,7 @@
 #
 # 运行模型：
 #   1. 统一容器只作为基础服务底座，容器内入口固定 AUTO_START_WORKFLOW=0。
-#   2. 本脚本等待 Neo4j、TTS、STT、Memory Agent、Robot Agent 就绪；VLM/Embedding 默认跳过。
+#   2. 本脚本等待 Neo4j、TTS、Memory Agent、Robot Agent 就绪；VLM/Embedding/STT 默认跳过。
 #   3. workflow 通过 docker exec 在当前终端前台启动，联调/非联调模式由本次执行传入。
 #
 # 常用环境变量：
@@ -14,6 +14,7 @@
 #   RABBITBOT_UNIFIED_ATTACH_STDIN=1 将终端输入传给 workflow
 #   RABBITBOT_UNIFIED_START_VLM=1 显式启动 VLM
 #   RABBITBOT_UNIFIED_START_EMBEDDING=1 显式启动 Embedding
+#   RABBITBOT_UNIFIED_START_STT=1 显式启动 STT（默认不启动，当前 workflow 不再需要）
 #
 # workflow 运行环境变量速查：
 # - RABBITBOT_STRICT_DOCX_SCRIPT：是否启用严格 DOCX 剧本模式，默认启用。
@@ -65,6 +66,7 @@ WAIT_DEFAULT_SECONDS="${WAIT_DEFAULT_SECONDS:-420}"
 WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS:-600}"
 RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM:-0}"
 RABBITBOT_UNIFIED_START_EMBEDDING="${RABBITBOT_UNIFIED_START_EMBEDDING:-0}"
+RABBITBOT_UNIFIED_START_STT="${RABBITBOT_UNIFIED_START_STT:-0}"
 RABBITBOT_TTS_BACKEND="${RABBITBOT_TTS_BACKEND:-unitree}"
 RABBITBOT_UNITREE_TTS_INTERFACE="${RABBITBOT_UNITREE_TTS_INTERFACE:-eno1}"
 RABBITBOT_UNITREE_TTS_VOLUME="${RABBITBOT_UNITREE_TTS_VOLUME:-100}"
@@ -160,7 +162,11 @@ wait_for_base_services() {
         log_info "RABBITBOT_UNIFIED_START_EMBEDDING=0，跳过等待 Embedding 服务 (8005)"
     fi
     wait_until "TTS 服务 (28185)" "${WAIT_DEFAULT_SECONDS}" http_ok http://127.0.0.1:28185/docs
-    wait_until "STT 服务 (28184)" "${WAIT_DEFAULT_SECONDS}" http_ok http://127.0.0.1:28184/docs
+    if [ "${RABBITBOT_UNIFIED_START_STT}" = "1" ]; then
+        wait_until "STT 服务 (28184)" "${WAIT_DEFAULT_SECONDS}" http_ok http://127.0.0.1:28184/docs
+    else
+        log_info "RABBITBOT_UNIFIED_START_STT=0，跳过等待 STT 服务 (28184)"
+    fi
     wait_until "Memory Agent 服务 (28182)" "${WAIT_DEFAULT_SECONDS}" http_ok http://127.0.0.1:28182/docs
     wait_until "Robot Agent 服务 (28180)" "${WAIT_DEFAULT_SECONDS}" port_open 28180
 }
@@ -182,6 +188,8 @@ ensure_compatible_container() {
     container_start_vlm="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNIFIED_START_VLM || true)"
     local container_start_embedding
     container_start_embedding="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNIFIED_START_EMBEDDING || true)"
+    local container_start_stt
+    container_start_stt="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNIFIED_START_STT || true)"
     local container_tts_backend
     container_tts_backend="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_TTS_BACKEND || true)"
     local container_unitree_interface
@@ -195,6 +203,8 @@ ensure_compatible_container() {
         incompatible_reason="VLM 启动配置变化：container=${container_start_vlm:-未设置}, expected=${RABBITBOT_UNIFIED_START_VLM}"
     elif [ "${container_start_embedding:-未设置}" != "${RABBITBOT_UNIFIED_START_EMBEDDING}" ]; then
         incompatible_reason="Embedding 启动配置变化：container=${container_start_embedding:-未设置}, expected=${RABBITBOT_UNIFIED_START_EMBEDDING}"
+    elif [ "${container_start_stt:-未设置}" != "${RABBITBOT_UNIFIED_START_STT}" ]; then
+        incompatible_reason="STT 启动配置变化：container=${container_start_stt:-未设置}, expected=${RABBITBOT_UNIFIED_START_STT}"
     elif [ "${container_tts_backend:-local}" != "${RABBITBOT_TTS_BACKEND}" ]; then
         incompatible_reason="TTS 后端配置变化：container=${container_tts_backend:-local}, expected=${RABBITBOT_TTS_BACKEND}"
     elif [ "${RABBITBOT_TTS_BACKEND}" = "unitree" ] && [ "${container_unitree_interface:-eno1}" != "${RABBITBOT_UNITREE_TTS_INTERFACE}" ]; then
@@ -255,6 +265,7 @@ create_container_if_needed() {
         -e RABBITBOT_TTS_STRICT_FAILURE="${RABBITBOT_TTS_STRICT_FAILURE}" \
         -e RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM}" \
         -e RABBITBOT_UNIFIED_START_EMBEDDING="${RABBITBOT_UNIFIED_START_EMBEDDING}" \
+        -e RABBITBOT_UNIFIED_START_STT="${RABBITBOT_UNIFIED_START_STT}" \
         -e AUTO_START_WORKFLOW=0 \
         -e WAIT_DEFAULT_SECONDS="${WAIT_DEFAULT_SECONDS}" \
         -e WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS}" \
