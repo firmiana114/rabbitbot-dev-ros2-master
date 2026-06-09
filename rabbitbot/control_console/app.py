@@ -66,24 +66,51 @@ def _html() -> str:
   </div>
 <script>
 function setText(id,text){document.getElementById(id).textContent=text;}
-async function refresh(){
-  const res=await fetch('/api/status');
-  const data=await res.json();
-  setText('map','地图：'+data.map_path);
-  setText('overall',data.nav_bridge.ready?'在线':'导航未就绪');
-  setText('mainLoop',data.main_loop);
-  setText('navBridge',data.nav_bridge.ready?'28180 就绪':'未就绪');
-  setText('workflow',data.workflow.status || 'unknown');
-  document.getElementById('goBtn').disabled=!data.nav_bridge.ready;
-  if(data.pose && data.pose.available){setText('pose',`x ${data.pose.x} / y ${data.pose.y} / z ${data.pose.z}\nox ${data.pose.ox} / oy ${data.pose.oy} / oz ${data.pose.oz} / ow ${data.pose.ow}`);}else{setText('pose',(data.pose&&data.pose.message)||'暂无定位位姿数据');}
-  const logs=await fetch('/api/logs?target=nav&lines=120');
-  if(logs.ok){const body=await logs.json();setText('logs',body.lines.join('\n') || '暂无日志');}
+function requestJson(method,url,payload,callback){
+  var xhr=new XMLHttpRequest();
+  xhr.open(method,url,true);
+  xhr.setRequestHeader('Accept','application/json');
+  if(payload){xhr.setRequestHeader('Content-Type','application/json');}
+  xhr.onreadystatechange=function(){
+    if(xhr.readyState!==4){return;}
+    var body={};
+    try{body=xhr.responseText?JSON.parse(xhr.responseText):{};}catch(error){callback(new Error('响应解析失败'));return;}
+    if(xhr.status<200||xhr.status>=300){callback(new Error(body.detail||body.message||('请求失败：'+xhr.status)),body);return;}
+    callback(null,body);
+  };
+  xhr.onerror=function(){callback(new Error('网络请求失败，请检查网页地址和局域网连接'));};
+  xhr.send(payload?JSON.stringify(payload):null);
 }
-async function sendCommand(command){
-  const res=await fetch('/api/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command})});
-  const body=await res.json();
-  setText('message',res.ok?body.message:body.detail);
-  refresh();
+function showError(message){
+  setText('overall','读取失败');
+  setText('message',message);
+}
+function refresh(){
+  requestJson('GET','/api/status',null,function(error,data){
+    if(error){showError(error.message);return;}
+    setText('map','地图：'+data.map_path);
+    setText('overall',data.nav_bridge.ready?'在线':'导航未就绪');
+    setText('mainLoop',data.main_loop);
+    setText('navBridge',data.nav_bridge.ready?'28180 就绪':'未就绪');
+    setText('workflow',data.workflow.status||'unknown');
+    document.getElementById('goBtn').disabled=!data.nav_bridge.ready;
+    if(data.pose&&data.pose.available){
+      var newline=String.fromCharCode(10);
+      setText('pose','x '+data.pose.x+' / y '+data.pose.y+' / z '+data.pose.z+newline+'ox '+data.pose.ox+' / oy '+data.pose.oy+' / oz '+data.pose.oz+' / ow '+data.pose.ow);
+    }else{
+      setText('pose',(data.pose&&data.pose.message)||'暂无定位位姿数据');
+    }
+    requestJson('GET','/api/logs?target=nav&lines=120',null,function(logError,body){
+      if(logError){setText('logs',logError.message);return;}
+      setText('logs',(body.lines&&body.lines.join(String.fromCharCode(10)))||'暂无日志');
+    });
+  });
+}
+function sendCommand(command){
+  requestJson('POST','/api/command',{command:command},function(error,body){
+    setText('message',error?error.message:body.message);
+    refresh();
+  });
 }
 refresh();
 setInterval(refresh,2000);
