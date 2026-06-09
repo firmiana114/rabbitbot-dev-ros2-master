@@ -596,3 +596,63 @@
 ### 其它信息
 
 - 本轮没有新增或调整代码日志点；仅确认已有交接报告中记录的关键日志点，包括台词文件地图/点位加载日志、导航 loop 地图推导日志、返航来源与路线日志、STT 跳过日志。
+
+## 本轮补充：移动硬盘迁移包准备
+
+### 背景和目标
+
+本轮目标是按 Aaron 要求，为将当前 AGX-orin 上的 RabbitBot 项目迁移到另一台 `HaiSong-orin` 做离线迁移准备。由于网络传输慢，迁移策略改为先在 AGX-orin 本机生成可搬运的 tar 迁移包，再通过移动硬盘带到目标机恢复。
+
+### 当前状态
+
+已完成：
+
+- 已确认 `rabbitbot-unified-runtime:20260518` 镜像在 `HaiSong-orin` 上已存在。
+- 已确认 AGX-orin 上 `/mnt/ssd/navgation/projects` 总体约 12G，包含 `rabbitbot-dev-ros2-master` 本体、模型目录、`unitree_sdk2`、`unitree_slam_example_new`、`custom_action_ws`、`pyorbbecsdk-v2-py310` 等项目内依赖。
+- 已确认 AGX-orin 上项目外但运行需要的宿主依赖包括 `/opt/ros/humble`、`/home/pc/.local`、`/usr/local/lib/libddsc*`、`/usr/local/lib/libddscxx*`、`/etc/systemd/system/rabbitbot-loop.service` 和 `/etc/systemd/system/rabbitbot-control-console.service`。
+- 已确认 `HaiSong-orin` 当前没有 `/mnt/ssd/navgation/projects`，没有 `/opt/ros`，没有 `uvicorn/fastapi/rclpy/custom_action_interfaces` 等宿主 Python/ROS 导入环境，也没有 rabbitbot systemd 服务文件。
+- 已生成迁移包目录：`/mnt/ssd/navgation/migration_bundles/rabbitbot_orin_migration_20260609_125551`。
+- 迁移包包含：`rabbitbot-projects.tar`、`rabbitbot-host-runtime.tar`、`restore_on_target.sh`、`README_迁移说明.md` 和 `SHA256SUMS`。
+- 已完成 SHA256 实读校验，所有文件均为 `OK`。
+- 已确认移动硬盘在 AGX-orin 上识别为 `/dev/sda1`，文件系统为 exFAT，标签为 `PortableSSD`。
+
+未完成：
+
+- 移动硬盘当前尚未挂载；SSH 下执行 `udisksctl mount -b /dev/sda1` 被 polkit 拒绝，原因是远程会话没有本机交互授权终端。
+- 尚未把迁移包复制到移动硬盘。
+- 尚未在 `HaiSong-orin` 上恢复迁移包或启动服务验证。
+- 本轮未打包 Neo4j Docker 卷。当前只读检查显示 `rabbitbot_unified_neo4j_data` 约 19G、`rabbitbot_unified_neo4j_logs` 约 14M；该卷属于运行数据，不是启动依赖。如需迁移历史记忆数据，建议停止 `rabbitbot-unified-runtime` 容器后另行打包。
+
+### 已验证的事实
+
+- AGX-orin 当前移动硬盘识别信息：`sda1 exfat PortableSSD`，但无挂载点。
+- AGX-orin 当前 `/mnt/ssd` 剩余空间在生成迁移包后约 44G。
+- `rabbitbot-projects.tar` 大小约 12G，内容根路径为 `projects/`。
+- `rabbitbot-host-runtime.tar` 大小约 1.2G，内容包含 `opt/ros/humble/`、`home/pc/.local/`、DDS 动态库和两个 systemd 服务文件。
+- `HaiSong-orin` `/mnt/ssd` 可用空间约 700G，足够恢复迁移包。
+- `HaiSong-orin` 当前没有 rabbitbot systemd 服务，恢复脚本默认只执行 `systemctl daemon-reload`，不会自动 enable/start 服务。
+- `/home/unitree` 是机器人本体侧路径，不是 Orin 主机侧需要拷贝的目录；服务配置里的 `/home/unitree/test9.pcd` 会在运行时传给导航底层。
+
+### 阻塞问题
+
+当前唯一阻塞是移动硬盘未挂载。需要在 AGX-orin 本机图形界面挂载 `PortableSSD`，或在 AGX-orin 本机终端执行 sudo mount 后，再复制迁移包目录。
+
+### 建议的下一步
+
+- 在 AGX-orin 本机挂载移动硬盘，确认出现挂载点，例如 `/media/pc/PortableSSD`。
+- 挂载后复制整个目录 `/mnt/ssd/navgation/migration_bundles/rabbitbot_orin_migration_20260609_125551` 到移动硬盘。必须复制 tar 文件，不要把 tar 解开后再复制，因为 exFAT 不能保留 Linux 权限和软链接。
+- 将移动硬盘接到 `HaiSong-orin` 并挂载后，在迁移包目录内执行 `bash restore_on_target.sh`。
+- 恢复后先确认 `sha256sum -c SHA256SUMS`、`/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master` 存在、`source /opt/ros/humble/setup.bash` 可用，再决定是否启用或启动 `rabbitbot-loop.service` 和 `rabbitbot-control-console.service`。
+- 如果需要迁移 Neo4j 历史数据，先停止 AGX-orin 上 `rabbitbot-unified-runtime` 容器，再单独打包 `rabbitbot_unified_neo4j_data` 和 `rabbitbot_unified_neo4j_logs` 卷。
+
+### 注意事项
+
+- 迁移包是 tar 归档，适合放在 exFAT 移动硬盘上；不要直接裸拷贝 `/mnt/ssd/navgation/projects` 到 exFAT。
+- `restore_on_target.sh` 需要 sudo 权限来写入 `/opt/ros/humble`、`/usr/local/lib` 和 `/etc/systemd/system`。
+- 恢复脚本会执行 `sudo chown -R pc:pc /home/pc/.local /mnt/ssd/navgation/projects`，目标机应存在 `pc` 用户。
+- 目标机恢复后仍需按现场实际网络和机器人连接检查 `NAV_PCD_PATH`、网卡名和音频设备。
+
+### 其它信息
+
+- 本轮没有修改业务代码或运行脚本，因此没有新增代码日志点。
+- 本轮新增的迁移包 README 和恢复脚本包含中文说明和恢复阶段日志输出，便于目标机恢复时定位校验、解包、宿主运行时恢复、`ldconfig` 和 systemd reload 等步骤。
