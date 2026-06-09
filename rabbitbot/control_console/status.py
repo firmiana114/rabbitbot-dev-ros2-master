@@ -16,11 +16,15 @@ POSE_RE = re.compile(
 POSITION_RE = re.compile(rf"x:\s*{FLOAT}\s+y:\s*{FLOAT}\s+z:\s*{FLOAT}")
 ORIENTATION_RE = re.compile(rf"ox:\s*{FLOAT}\s+oy:\s*{FLOAT}\s+oz:\s*{FLOAT}\s+ow:\s*{FLOAT}")
 RUN_ID_RE = re.compile(r"^(\d{8}_\d{6})\.(status|pid|ready|exit_code|finished_at)$")
+LOCALIZATION_SUCCESS_MESSAGE = "定位成功"
+LOCALIZATION_HELP_MESSAGE = "定位未成功：程序会持续重定位，需要遥控机器人的位姿，帮助机器人完成定位"
 
 
 @dataclass(frozen=True)
 class PoseStatus:
     available: bool
+    localized: bool = False
+    status_message: str = LOCALIZATION_HELP_MESSAGE
     x: float | None = None
     y: float | None = None
     z: float | None = None
@@ -79,13 +83,27 @@ def get_tail_lines(path: Path, limit: int = 120) -> list[str]:
     return [strip_ansi(line) for line in lines[-limit:]]
 
 
+def _localization_state(lines: list[str]) -> tuple[bool, str]:
+    localized = False
+    message = LOCALIZATION_HELP_MESSAGE
+    for line in lines:
+        if "Waiting for localization" in line or "start relocation with map" in line:
+            localized = False
+            message = LOCALIZATION_HELP_MESSAGE
+        if "[Auto-Relocation] Success! Current pose:" in line or "[Ready] Navigation system ready for commands!" in line:
+            localized = True
+            message = LOCALIZATION_SUCCESS_MESSAGE
+    return localized, message
+
+
 def parse_latest_pose(path: Path) -> PoseStatus:
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
-        return PoseStatus(available=False, message="暂无定位位姿数据")
+        return PoseStatus(available=False, localized=False, status_message=LOCALIZATION_HELP_MESSAGE, message="暂无定位位姿数据")
 
     clean_lines = [strip_ansi(line) for line in lines]
+    localized, status_message = _localization_state(clean_lines)
     latest: PoseStatus | None = None
 
     for line in clean_lines:
@@ -94,6 +112,8 @@ def parse_latest_pose(path: Path) -> PoseStatus:
             values = [float(value) for value in match.groups()]
             latest = PoseStatus(
                 available=True,
+                localized=localized,
+                status_message=status_message,
                 x=values[0],
                 y=values[1],
                 z=values[2],
@@ -120,6 +140,8 @@ def parse_latest_pose(path: Path) -> PoseStatus:
         orient_values = [float(value) for value in orientation.groups()]
         latest = PoseStatus(
             available=True,
+            localized=localized,
+            status_message=status_message,
             x=pos_values[0],
             y=pos_values[1],
             z=pos_values[2],
@@ -131,7 +153,7 @@ def parse_latest_pose(path: Path) -> PoseStatus:
         )
 
     if latest is None:
-        return PoseStatus(available=False, message="暂无定位位姿数据")
+        return PoseStatus(available=False, localized=localized, status_message=status_message, message="暂无定位位姿数据")
     return latest
 
 

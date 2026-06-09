@@ -55,7 +55,9 @@ def _html() -> str:
           <p id="message"></p>
         </section>
         <section class="panel">
-          <div class="label">定位位姿</div>
+          <div class="label">定位状态</div>
+          <div id="poseStatus" class="value">读取中</div>
+          <div class="label" style="margin-top:12px">当前位姿</div>
           <div id="pose" class="value pose-line">暂无定位位姿数据</div>
         </section>
       </div>
@@ -95,6 +97,7 @@ function refresh(){
     setText('navBridge',data.nav_bridge.ready?'28180 就绪':'未就绪');
     setText('workflow',data.workflow.status||'unknown');
     document.getElementById('goBtn').disabled=!data.nav_bridge.ready;
+    setText('poseStatus',(data.pose&&data.pose.status_message)||(data.pose&&data.pose.localized?'定位成功':'定位未成功：程序会持续重定位，需要遥控机器人的位姿，帮助机器人完成定位'));
     if(data.pose&&data.pose.available){
       var newline=String.fromCharCode(10);
       setText('pose','x '+data.pose.x+' / y '+data.pose.y+' / z '+data.pose.z+newline+'ox '+data.pose.ox+' / oy '+data.pose.oy+' / oz '+data.pose.oz+' / ow '+data.pose.ow);

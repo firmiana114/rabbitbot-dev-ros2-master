@@ -64,6 +64,8 @@ def test_status_returns_map_and_pose_without_login(tmp_path):
     assert body["map_path"] == "/home/unitree/test9.pcd"
     assert body["workflow"]["status"] == "waiting_for_go"
     assert body["pose"]["available"] is True
+    assert body["pose"]["localized"] is False
+    assert "需要遥控机器人的位姿" in body["pose"]["status_message"]
     assert body["pose"]["x"] == 1.0
 
 
@@ -132,5 +134,7 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '/api/login' not in response.text
     assert '开始任务' in response.text
     assert '返航' in response.text
+    assert '定位状态' in response.text
+    assert '当前位姿' in response.text
     assert '一键重启' in response.text
     assert '/api/restart' in response.text
