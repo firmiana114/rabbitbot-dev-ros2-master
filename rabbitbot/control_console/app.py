@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from .commands import CommandError, restart_loop_service, send_workflow_command
+from .commands import CommandError, restart_loop_service, send_workflow_command, start_task
 from .config import ConsoleConfig
 from .status import (
     detect_main_loop_running,
@@ -22,6 +22,10 @@ class CommandRequest(BaseModel):
     command: str
 
 
+class TaskRequest(BaseModel):
+    task: str
+
+
 def _html() -> str:
     return """<!doctype html>
 <html lang="zh-CN">
@@ -30,7 +34,7 @@ def _html() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RabbitBot 控制台</title>
   <style>
-    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}</style>
+    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}</style>
 </head>
 <body>
   <div class="wrap">
@@ -46,8 +50,13 @@ def _html() -> str:
             <div class="card"><div class="label">导航桥接</div><div id="navBridge" class="value">-</div></div>
             <div class="card"><div class="label">Workflow</div><div id="workflow" class="value">-</div></div>
           </div>
+          <div class="label" style="margin-top:16px">开始任务</div>
           <div class="actions">
-            <button id="goBtn" class="go" onclick="sendCommand('go')">开始任务</button>
+            <button id="guideBtn" class="go" onclick="startTask('guide')">导览</button>
+            <button id="dialogueBtn" class="task placeholder" onclick="startTask('dialogue')">对话</button>
+            <button id="visionBtn" class="task placeholder" onclick="startTask('vision')">视觉导航</button>
+          </div>
+          <div class="actions">
             <button class="back" onclick="sendCommand('back')">返航</button>
             <button class="refresh" onclick="refresh()">刷新状态</button>
             <button id="restartBtn" class="restart" onclick="restartProgram()">一键重启</button>
@@ -96,7 +105,7 @@ function refresh(){
     setText('mainLoop',data.main_loop);
     setText('navBridge',data.nav_bridge.ready?'28180 就绪':'未就绪');
     setText('workflow',data.workflow.status||'unknown');
-    document.getElementById('goBtn').disabled=!data.nav_bridge.ready;
+    document.getElementById('guideBtn').disabled=!data.nav_bridge.ready;
     setText('poseStatus',(data.pose&&data.pose.status_message)||(data.pose&&data.pose.localized?'定位成功':'定位未成功：程序会持续重定位，需要遥控机器人的位姿，帮助机器人完成定位'));
     if(data.pose&&data.pose.available){
       var newline=String.fromCharCode(10);
@@ -112,6 +121,12 @@ function refresh(){
 }
 function sendCommand(command){
   requestJson('POST','/api/command',{command:command},function(error,body){
+    setText('message',error?error.message:body.message);
+    refresh();
+  });
+}
+function startTask(task){
+  requestJson('POST','/api/task',{task:task},function(error,body){
     setText('message',error?error.message:body.message);
     refresh();
   });
@@ -155,6 +170,14 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
             "workflow": workflow.to_dict(),
             "pose": pose.to_dict(),
         }
+
+
+    @app.post("/api/task")
+    def task(payload: TaskRequest) -> dict:
+        try:
+            return start_task(payload.task, config.command_script)
+        except CommandError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/command")
     def command(payload: CommandRequest) -> dict:

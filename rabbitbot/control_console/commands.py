@@ -5,6 +5,8 @@ import subprocess
 
 
 ALLOWED_COMMANDS = {"go", "back"}
+TASK_LABELS = {"guide": "导览", "dialogue": "对话", "vision": "视觉导航"}
+PLACEHOLDER_TASKS = {"dialogue", "vision"}
 LOOP_SERVICE_NAME = "rabbitbot-loop.service"
 
 
@@ -33,6 +35,25 @@ def send_workflow_command(command: str, script: Path, extra_args: list[str] | No
         raise CommandError(output or f"命令执行失败，退出码：{result.returncode}")
 
     return {"ok": True, "command": command, "message": output or f"已发送命令：{command}"}
+
+
+def start_task(task: str, script: Path, extra_args: list[str] | None = None) -> dict:
+    if task not in TASK_LABELS:
+        raise CommandError(f"不支持的任务：{task}")
+
+    label = TASK_LABELS[task]
+    if task in PLACEHOLDER_TASKS:
+        return {"ok": True, "task": task, "task_label": label, "placeholder": True, "message": f"{label}任务暂未接入"}
+
+    result = send_workflow_command("go", script, extra_args=extra_args)
+    return {
+        "ok": True,
+        "task": task,
+        "task_label": label,
+        "placeholder": False,
+        "command": result["command"],
+        "message": f"{label}任务已启动",
+    }
 
 
 def restart_loop_service(

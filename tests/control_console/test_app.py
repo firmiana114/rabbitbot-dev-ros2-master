@@ -87,6 +87,31 @@ def test_command_sends_go_without_login(tmp_path):
     assert response.json()["command"] == "go"
 
 
+def test_task_guide_sends_go_without_login(tmp_path):
+    client = TestClient(create_app(make_config(tmp_path)))
+
+    response = client.post("/api/task", json={"task": "guide"})
+
+    assert response.status_code == 200
+    assert response.json()["task"] == "guide"
+    assert response.json()["command"] == "go"
+    assert response.json()["message"] == "导览任务已启动"
+
+
+def test_task_placeholders_return_message_without_login(tmp_path):
+    client = TestClient(create_app(make_config(tmp_path)))
+
+    dialogue = client.post("/api/task", json={"task": "dialogue"})
+    vision = client.post("/api/task", json={"task": "vision"})
+
+    assert dialogue.status_code == 200
+    assert dialogue.json()["placeholder"] is True
+    assert dialogue.json()["message"] == "对话任务暂未接入"
+    assert vision.status_code == 200
+    assert vision.json()["placeholder"] is True
+    assert vision.json()["message"] == "视觉导航任务暂未接入"
+
+
 def test_restart_restarts_loop_service_without_login(tmp_path):
     config = make_config(tmp_path)
     client = TestClient(create_app(config))
@@ -133,6 +158,10 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert 'password' not in response.text.lower()
     assert '/api/login' not in response.text
     assert '开始任务' in response.text
+    assert '导览' in response.text
+    assert '对话' in response.text
+    assert '视觉导航' in response.text
+    assert '/api/task' in response.text
     assert '返航' in response.text
     assert '定位状态' in response.text
     assert '当前位姿' in response.text
