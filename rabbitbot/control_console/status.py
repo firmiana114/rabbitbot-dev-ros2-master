@@ -66,7 +66,7 @@ def latest_file(directory: Path, pattern: str) -> Path | None:
         return None
     if not matches:
         return None
-    return max(matches, key=lambda path: path.stat().st_mtime)
+    return max(matches, key=lambda path: (path.stat().st_mtime, path.name))
 
 
 def get_tail_lines(path: Path, limit: int = 120) -> list[str]:
