@@ -1,0 +1,2 @@
+# Allow the LAN control console to restart only the RabbitBot loop service.
+pc ALL=(root) NOPASSWD: /usr/bin/systemctl restart rabbitbot-loop.service

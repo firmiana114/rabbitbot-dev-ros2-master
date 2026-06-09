@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from .commands import CommandError, send_workflow_command
+from .commands import CommandError, restart_loop_service, send_workflow_command
 from .config import ConsoleConfig
 from .status import (
     detect_main_loop_running,
@@ -30,7 +30,7 @@ def _html() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RabbitBot 控制台</title>
   <style>
-    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.back{background:#b3261e}.refresh{background:#334155}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}</style>
+    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}</style>
 </head>
 <body>
   <div class="wrap">
@@ -50,6 +50,7 @@ def _html() -> str:
             <button id="goBtn" class="go" onclick="sendCommand('go')">开始任务</button>
             <button class="back" onclick="sendCommand('back')">返航</button>
             <button class="refresh" onclick="refresh()">刷新状态</button>
+            <button id="restartBtn" class="restart" onclick="restartProgram()">一键重启</button>
           </div>
           <p id="message"></p>
         </section>
@@ -112,6 +113,17 @@ function sendCommand(command){
     refresh();
   });
 }
+function restartProgram(){
+  if(!window.confirm('确定重新启动导航主程序吗？')){return;}
+  var button=document.getElementById('restartBtn');
+  button.disabled=true;
+  setText('overall','重启中');
+  setText('message','正在重新启动导航主程序...');
+  requestJson('POST','/api/restart',{},function(error,body){
+    setText('message',error?error.message:body.message);
+    setTimeout(function(){button.disabled=false;refresh();},3000);
+  });
+}
 refresh();
 setInterval(refresh,2000);
 </script>
@@ -145,6 +157,18 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
     def command(payload: CommandRequest) -> dict:
         try:
             return send_workflow_command(payload.command, config.command_script)
+        except CommandError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+    @app.post("/api/restart")
+    def restart() -> dict:
+        try:
+            return restart_loop_service(
+                config.loop_service_name,
+                systemctl_path=config.systemctl_path,
+                sudo_path=config.sudo_path,
+            )
         except CommandError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

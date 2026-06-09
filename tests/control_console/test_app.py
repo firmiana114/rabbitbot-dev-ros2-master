@@ -7,15 +7,20 @@ from rabbitbot.control_console.config import ConsoleConfig
 def make_config(tmp_path):
     project_root = tmp_path / "project"
     command_script = project_root / "scripts_1" / "send_nav_workflow_command.sh"
+    systemctl_path = project_root / "bin" / "systemctl"
+    systemctl_record = project_root / "systemctl_args.txt"
     workflow_control_dir = project_root / "logs" / "nav_workflow_control" / "workflow_control"
     nav_log_dir = project_root / "logs" / "nav_workflow_control"
     workflow_log_dir = project_root / "logs" / "nav_workflow_control"
     command_script.parent.mkdir(parents=True)
+    systemctl_path.parent.mkdir(parents=True)
     workflow_control_dir.mkdir(parents=True)
     nav_log_dir.mkdir(parents=True, exist_ok=True)
     workflow_log_dir.mkdir(parents=True, exist_ok=True)
     command_script.write_text("#!/usr/bin/env bash\necho \"已发送命令：$1\"\n", encoding="utf-8")
     command_script.chmod(0o755)
+    systemctl_path.write_text(f"#!/usr/bin/env bash\nprintf '%s\n' \"$@\" > {systemctl_record}\n", encoding="utf-8")
+    systemctl_path.chmod(0o755)
     return ConsoleConfig(
         project_root=project_root,
         host="127.0.0.1",
@@ -26,6 +31,9 @@ def make_config(tmp_path):
         workflow_control_dir=workflow_control_dir,
         nav_log_dir=nav_log_dir,
         workflow_log_dir=workflow_log_dir,
+        loop_service_name="rabbitbot-loop.service",
+        systemctl_path=systemctl_path,
+        sudo_path=None,
     )
 
 
@@ -77,6 +85,18 @@ def test_command_sends_go_without_login(tmp_path):
     assert response.json()["command"] == "go"
 
 
+def test_restart_restarts_loop_service_without_login(tmp_path):
+    config = make_config(tmp_path)
+    client = TestClient(create_app(config))
+
+    response = client.post("/api/restart")
+
+    assert response.status_code == 200
+    assert response.json()["service"] == "rabbitbot-loop.service"
+    record = config.project_root / "systemctl_args.txt"
+    assert record.read_text(encoding="utf-8").splitlines() == ["restart", "rabbitbot-loop.service"]
+
+
 def test_logs_return_latest_nav_log_lines(tmp_path):
     config = make_config(tmp_path)
     (config.nav_log_dir / "nav_bridge_1.log").write_text("old\n", encoding="utf-8")
@@ -112,3 +132,5 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '/api/login' not in response.text
     assert '开始任务' in response.text
     assert '返航' in response.text
+    assert '一键重启' in response.text
+    assert '/api/restart' in response.text

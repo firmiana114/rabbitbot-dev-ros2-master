@@ -17,10 +17,15 @@ class ConsoleConfig:
     workflow_control_dir: Path
     nav_log_dir: Path
     workflow_log_dir: Path
+    loop_service_name: str
+    systemctl_path: Path
+    sudo_path: Path | None
 
     @classmethod
     def from_env(cls) -> "ConsoleConfig":
         project_root = Path(os.environ.get("RABBITBOT_PROJECT_ROOT", str(PROJECT_ROOT)))
+        sudo_path_value = os.environ.get("RABBITBOT_CONSOLE_SUDO_PATH", "/usr/bin/sudo")
+        sudo_path = None if sudo_path_value.lower() in {"", "none", "0"} else Path(sudo_path_value)
         return cls(
             project_root=project_root,
             host=os.environ.get("RABBITBOT_CONSOLE_HOST", "0.0.0.0"),
@@ -31,4 +36,7 @@ class ConsoleConfig:
             workflow_control_dir=project_root / "logs" / "nav_workflow_control" / "workflow_control",
             nav_log_dir=project_root / "logs" / "nav_workflow_control",
             workflow_log_dir=project_root / "logs" / "nav_workflow_control",
+            loop_service_name=os.environ.get("RABBITBOT_LOOP_SERVICE", "rabbitbot-loop.service"),
+            systemctl_path=Path(os.environ.get("RABBITBOT_CONSOLE_SYSTEMCTL_PATH", "/usr/bin/systemctl")),
+            sudo_path=sudo_path,
         )
