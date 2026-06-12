@@ -1351,3 +1351,62 @@ Aaron 要求通过 SSH 接手 AGX-orin 上 `/mnt/ssd/navgation/projects/rabbitbo
 - 本轮新增/调整的日志点包括：导航主程序关闭开始/完成、重启开始/完成、端口清理开始、fuser 命令执行、无权限降级、命令失败、命令完成、端口释放完成和端口释放超时。
 - 这些日志用于排查控制台停止/重启后 28180 端口仍被旧导航桥接占用、sudo 无权限、fuser 缺失、清理命令失败或端口迟迟未释放等问题。
 - 生成时间：2026-06-17
+
+## 本轮补充：QA 触发导览 workflow 启动测试
+
+### 背景和目标
+
+本轮按 Aaron 要求对当前 workflow 做一轮启动链路测试，重点确认三件事：全部基础服务能否正常启动；默认进入 QA 问答模式后大模型是否能正常回答问题；通过命令形式向 STT 注入“开始导览”后，是否能触发导览 workflow 启动。Aaron 已说明机器人可能没有开启行走模式，因此本轮不把导航是否实际移动或到点作为成败标准。
+
+### 当前状态
+
+已完成：
+
+- 已确认测试开始前 Git 工作区干净，最新提交为 `9bded4f 修复控制台重启端口清理与 TTS 默认后端`。
+- 已确认 `rabbitbot-loop.service`、`rabbitbot-control-console.service` 和 `docker.service` 均为 `active`。
+- 已确认统一容器 `rabbitbot-unified-runtime` 正在运行。
+- 已确认关键端口均在监听：VLM `8000`、Neo4j `7687`、导航桥接 `28180`、Memory `28182`、STT `28184`、TTS `28185`。
+- 已确认 `runtime/nav_workflow_control/guide_state` 曾进入 `qa_listening`，表示导览 workflow 已预启动并停在 go 闸门，QA 模式处于待命。
+- 已通过 STT 注入接口发送普通问题：`你好，请用一句话介绍你自己`；接口返回 HTTP 200，`utterance_id=1`。
+- 已确认 QA/VLM/TTS 链路正常：TTS 日志显示回答被提交并播报，内容为“你好！”和“我是RabbitBot，一个能够回答各种问题的智能助手。”。
+- 已通过 STT 注入接口发送导览口令：`开始导览`；接口返回 HTTP 200，`utterance_id=2`。
+- 已确认导览被成功触发：`guide_state` 从 `qa_listening` 切换到 `guide_running`，导览 workflow 日志显示进入严格 DOCX 剧本并发送第一段导航目标。
+- 已确认导览启动后继续推进：workflow 完成开场 TTS、动作调用、`1到2过渡` 和 `跟随步行到点位2` 两个导航步骤，随后进入 `点咖啡` 台词段。
+
+未完成：
+
+- 本轮没有验证机器人真实行走、导航到点精度或完整导览闭环；Aaron 已明确本轮不关注导航是否成功。
+- 本轮没有执行 `back` 返航，也没有停止当前 `rabbitbot-loop.service`。
+- 本轮没有修改业务代码。
+
+### 已验证的事实
+
+- `guide_state` 最终为 `state=guide_running`、`run_id=20260612_131441`，说明导览已经进入运行态。
+- 服务最终仍保持可用：`rabbitbot-loop.service`、控制台和 Docker 为 active，28180/28182/28184/28185/8000/7687 仍在监听。
+- STT 注入普通问题和导览口令均返回 HTTP 200。
+- QA 问答路径使用当前配置 `vlm_stream=0`、`stream_tts=1`，普通问题已完成大模型回答和 TTS 分段播报。
+- 导览 workflow 日志显示第一段目标为 test9 点位 `(0.1797, -0.1793, 0.0022, 0.1118, 0.0196, 0.9935)`，并成功进入后续剧本步骤；该事实只用于证明导览流程启动，不用于评价导航是否成功。
+- 观察到一个非本轮判定项：进入 `点咖啡` 台词段后，TTS 已生成并入队 `tts_index=7..10`，但日志中只看到 `tts_index=7` 的 `tts_play_start`，未继续看到对应 `tts_play_done`；workflow 随后持续查询 `get_wav_count`。这不影响本轮“启动是否成功”的结论，但后续若要完整跑导览，需要单独排查 TTS 播放队列卡住风险。
+
+### 阻塞问题
+
+本轮目标无阻塞：服务启动、QA 问答、STT 口令触发导览启动三项均已验证通过。剩余风险是完整导览运行层面风险，主要是现场行走模式/导航状态和本轮观察到的 TTS 播放队列可能卡住。
+
+### 建议的下一步
+
+- 如果只验证“开始导览”触发链路，本轮已经满足要求。
+- 如果要继续验证完整导览，需要先确认机器人行走模式已开启，再观察导航和 `点咖啡` 后续台词是否继续播报。
+- 如后续发现卡在 `点咖啡`，优先检查 `logs/unified_runtime/rabbitbot_tts.log` 中 `tts_index=7` 是否缺少 `tts_play_done`，以及本地 REDMI 音响播放线程是否阻塞。
+- 如需恢复待命状态，可在现场确认安全后按既有流程停止或重启 `rabbitbot-loop.service`，或根据当前位置决定是否发送 `back`。
+
+### 注意事项
+
+- 本轮测试通过 STT `/exec` 的 `inject_text_async` 注入文本，不依赖真实麦克风识别。
+- 本轮没有因为导航状态做失败判定；机器人未开启行走模式时，导航是否移动不代表 workflow 启动失败。
+- 远端日志时间显示为 2026-06-12，当前会话日期为 2026-06-17；后续排查时应注意 AGX-orin 系统时间可能与当前会话日期不一致。
+
+### 其它信息
+
+- 本轮没有新增或调整代码日志点。
+- 本轮使用的关键日志包括：`logs/vlm_qa_workflow/vlm_qa_workflow_20260612_051412.log`、`logs/vlm_qa_workflow/vlm_qa_dialogue_20260612_051414.log`、`logs/nav_workflow_control/rabbitbot_workflow_20260612_131441.log`、`logs/unified_runtime/rabbitbot_tts.log`。
+- 生成时间：2026-06-17
