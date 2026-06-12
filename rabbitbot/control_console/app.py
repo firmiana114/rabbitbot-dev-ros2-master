@@ -13,6 +13,7 @@ from .status import (
     detect_main_loop_running,
     get_latest_workflow_status,
     get_tail_lines,
+    read_guide_state,
     is_port_open,
     latest_file,
     parse_latest_pose,
@@ -132,17 +133,36 @@ function showError(message){
   setText('overall','读取失败');
   setText('message',message);
 }
+function guideStateValue(data){return data&&data.guide_state&&data.guide_state.state?data.guide_state.state:'unknown';}
+function guideStateLabel(state){
+  var labels={
+    starting:'启动中',
+    guide_preparing:'导览预启动中',
+    qa_listening:'QA 待命，可开始导览',
+    guide_running:'导览中',
+    guide_finished_waiting_back:'导览完成，等待返航',
+    returning:'返航中',
+    guide_prepare_failed:'导览预启动失败',
+    qa_disabled:'QA 模式关闭',
+    unknown:'状态未知'
+  };
+  return labels[state]||state||'状态未知';
+}
+function canStartGuide(data){
+  return data&&data.nav_bridge&&data.nav_bridge.ready&&guideStateValue(data)==='qa_listening';
+}
 function servicesReady(data){
-  return data&&data.main_loop==='running'&&data.nav_bridge&&data.nav_bridge.ready&&data.workflow&&data.workflow.ready;
+  return data&&data.main_loop==='running'&&data.nav_bridge&&data.nav_bridge.ready&&data.guide_state&&data.guide_state.state==='qa_listening';
 }
 function renderStatus(data){
+  var guideState=guideStateValue(data);
   setText('map','地图：'+data.map_path);
   if(!mapPathTouched&&data.map_path){document.getElementById('mapPathInput').value=data.map_path;}
-  setText('overall',servicesReady(data)?'全部就绪':(data.nav_bridge.ready?'在线':'导航未就绪'));
+  setText('overall',servicesReady(data)?'全部就绪':(data.nav_bridge.ready?guideStateLabel(guideState):'导航未就绪'));
   setText('mainLoop',data.main_loop);
   setText('navBridge',data.nav_bridge.ready?'28180 就绪':'未就绪');
-  setText('workflow',data.workflow.status||'unknown');
-  document.getElementById('guideBtn').disabled=!data.nav_bridge.ready;
+  setText('workflow',guideStateLabel(guideState));
+  document.getElementById('guideBtn').disabled=!canStartGuide(data);
   setText('poseStatus',(data.pose&&data.pose.status_message)||(data.pose&&data.pose.localized?'定位成功':'定位未成功：程序会持续重定位，需要遥控机器人的位姿，帮助机器人完成定位'));
   if(data.pose&&data.pose.available){
     var newline=String.fromCharCode(10);
@@ -306,16 +326,32 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
 
     @app.get("/api/status")
     def status() -> dict:
+        main_loop = detect_main_loop_running()
+        current_map_path = read_map_path(config.map_env_file, config.map_path)
+        guide_state = read_guide_state(config.guide_state_file)
+        if main_loop != "running":
+            pose = parse_latest_pose(Path("/missing-nav-log"))
+            workflow = {"run_id": None, "status": "loop_not_running", "ready": False, "pid": None, "exit_code": None, "finished_at": None}
+            return {
+                "ok": True,
+                "map_path": current_map_path,
+                "main_loop": main_loop,
+                "nav_bridge": {"ready": False, "port": config.nav_port},
+                "workflow": workflow,
+                "guide_state": guide_state.to_dict(),
+                "pose": pose.to_dict(),
+            }
+
         nav_log = latest_file(config.nav_log_dir, "nav_bridge_*.log")
         pose = parse_latest_pose(nav_log) if nav_log else parse_latest_pose(Path("/missing-nav-log"))
         workflow = get_latest_workflow_status(config.workflow_control_dir)
-        current_map_path = read_map_path(config.map_env_file, config.map_path)
         return {
             "ok": True,
             "map_path": current_map_path,
-            "main_loop": detect_main_loop_running(),
+            "main_loop": main_loop,
             "nav_bridge": {"ready": is_port_open("127.0.0.1", config.nav_port), "port": config.nav_port},
             "workflow": workflow.to_dict(),
+            "guide_state": guide_state.to_dict(),
             "pose": pose.to_dict(),
         }
 

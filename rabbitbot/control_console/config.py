@@ -17,6 +17,7 @@ class ConsoleConfig:
     workflow_control_dir: Path
     nav_log_dir: Path
     workflow_log_dir: Path
+    guide_state_file: Path
     loop_service_name: str
     systemctl_path: Path
     sudo_path: Path | None
@@ -42,6 +43,10 @@ class ConsoleConfig:
             workflow_control_dir=project_root / "logs" / "nav_workflow_control" / "workflow_control",
             nav_log_dir=project_root / "logs" / "nav_workflow_control",
             workflow_log_dir=project_root / "logs" / "nav_workflow_control",
+            guide_state_file=Path(os.environ.get(
+                "RABBITBOT_NAV_WORKFLOW_GUIDE_STATE_FILE",
+                str(project_root / "runtime" / "nav_workflow_control" / "guide_state"),
+            )),
             loop_service_name=os.environ.get("RABBITBOT_LOOP_SERVICE", "rabbitbot-loop.service"),
             systemctl_path=Path(os.environ.get("RABBITBOT_CONSOLE_SYSTEMCTL_PATH", "/usr/bin/systemctl")),
             sudo_path=sudo_path,

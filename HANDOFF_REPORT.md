@@ -1248,3 +1248,52 @@ Aaron 要求将 QA workflow 与导览 workflow 整合：系统默认处于 QA �
 ### 其它信息
 
 - 生成时间：2026-06-17 00:00:00
+
+## 本轮补充：控制台 ready 状态改用 QA/导览 guide_state
+
+### 背景和目标
+
+Aaron 要求修正网页控制台 ready 状态口径：QA/导览整合后，旧 `workflow.ready` 只表示导览 workflow 预启动闸门 ready，不能再单独代表“可执行导览”。本轮目标是让 `/api/status` 返回新的 `guide_state`，并让前端“所有服务已加载成功，可执行相关操作”和“导览”按钮以 `guide_state.state=qa_listening` 为准，避免 `guide_state=starting` 等阶段误判 ready。
+
+### 当前状态
+
+已完成：
+
+- `ConsoleConfig` 新增 `guide_state_file`，默认路径与导航 loop 一致：`runtime/nav_workflow_control/guide_state`，也支持环境变量 `RABBITBOT_NAV_WORKFLOW_GUIDE_STATE_FILE` 覆盖。
+- `rabbitbot/control_console/status.py` 新增 `GuideState` 和 `read_guide_state()`，解析并返回 `state`、`run_id`、`detail`、`time`；文件不存在或为空时返回 `state=unknown`。
+- `/api/status` 已新增 `guide_state` 字段；即使主循环未运行，也会返回 `guide_state` 供前端诊断。
+- 前端 `servicesReady(data)` 已改为要求 `main_loop=running`、导航桥接 ready、且 `guide_state.state === 'qa_listening'`。
+- “导览”按钮已改为只在导航桥接 ready 且 `guide_state.state === 'qa_listening'` 时启用。
+- Workflow 卡片和整体状态文案已改为显示新业务状态：`starting`、`guide_preparing`、`qa_listening`、`guide_running`、`guide_finished_waiting_back`、`returning`、`guide_prepare_failed`、`qa_disabled`、`unknown`。
+- 旧 `workflow` 字段继续保留在 `/api/status` 中，作为诊断信息，不再覆盖新 `guide_state` 业务状态。
+
+未完成：
+
+- 本轮未在浏览器中人工点击验证页面；已通过后端接口和页面源码测试覆盖主要 ready 逻辑。
+
+### 已验证的事实
+
+- 已通过 `PYTHONPYCACHEPREFIX=/tmp/rabbitbot_pycache_check python3 -m py_compile rabbitbot/control_console/app.py rabbitbot/control_console/config.py rabbitbot/control_console/status.py tests/control_console/test_app.py tests/control_console/test_status.py`。
+- 已通过 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/control_console -q`，结果为 `62 passed`。
+- 已通过 `git diff --check`。
+- 新增测试覆盖：`guide_state` 文件缺失返回 unknown；`starting` 不应作为 ready；`qa_listening` 与主循环/导航 ready 组合为前端 ready 依据；`guide_running` 时前端导览按钮条件不满足；`read_guide_state()` 可解析四个字段。
+
+### 阻塞问题
+
+- 无代码层面阻塞。
+
+### 建议的下一步
+
+- 重启服务后打开控制台，观察 `guide_state=starting` 或 `guide_preparing` 阶段不再显示“所有服务已加载成功”。
+- 等待状态进入 `qa_listening` 后，确认页面显示“QA 待命，可开始导览”，且“导览”按钮可用。
+- 导览运行中确认页面显示“导览中”，且“导览”按钮禁用。
+
+### 注意事项
+
+- 前端 ready 已不再由旧 `workflow.ready` 决定；旧字段只用于排查预启动 workflow 闸门、pid、退出码等信息。
+- 如果 `runtime/nav_workflow_control/guide_state` 不存在，控制台会显示状态未知，不会误判为 ready。
+- 本轮新增日志点较少，主要复用导航 loop 已写入的 `guide_state` 状态文件；诊断重点从控制台 `/api/status.guide_state` 和导航 loop 日志中的“导览状态已更新”查看。
+
+### 其它信息
+
+- 生成时间：2026-06-17 00:00:00

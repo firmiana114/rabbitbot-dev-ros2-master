@@ -5,6 +5,7 @@ from rabbitbot.control_console.config import ConsoleConfig
 from rabbitbot.control_console.status import (
     get_latest_workflow_status,
     latest_file,
+    read_guide_state,
     get_tail_lines,
     parse_latest_pose,
     strip_ansi,
@@ -224,3 +225,29 @@ def test_parse_latest_pose_does_not_keep_old_success_forever(tmp_path):
     assert pose.source == "pose_log"
     assert pose.x == 4.0
     assert pose.ow == 0.7
+
+def test_read_guide_state_parses_runtime_state_file(tmp_path):
+    state_file = tmp_path / "guide_state"
+    state_file.write_text(
+        "state=qa_listening\n"
+        "run_id=20260617_010000\n"
+        "detail=导览 workflow 已停在 go 闸门\n"
+        "time=2026-06-17 01:00:00\n",
+        encoding="utf-8",
+    )
+
+    state = read_guide_state(state_file)
+
+    assert state.state == "qa_listening"
+    assert state.run_id == "20260617_010000"
+    assert state.detail == "导览 workflow 已停在 go 闸门"
+    assert state.time == "2026-06-17 01:00:00"
+
+
+def test_read_guide_state_returns_unknown_when_file_missing(tmp_path):
+    state = read_guide_state(tmp_path / "missing_guide_state")
+
+    assert state.state == "unknown"
+    assert state.run_id == ""
+    assert state.detail == ""
+    assert state.time == ""

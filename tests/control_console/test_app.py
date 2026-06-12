@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 
 from rabbitbot.control_console.app import create_app
 from rabbitbot.control_console.config import ConsoleConfig
@@ -13,6 +14,7 @@ def make_config(tmp_path):
     workflow_control_dir = project_root / "logs" / "nav_workflow_control" / "workflow_control"
     nav_log_dir = project_root / "logs" / "nav_workflow_control"
     workflow_log_dir = project_root / "logs" / "nav_workflow_control"
+    guide_state_file = project_root / "runtime" / "nav_workflow_control" / "guide_state"
     dialogue_dir = project_root / "conf"
     command_script.parent.mkdir(parents=True)
     systemctl_path.parent.mkdir(parents=True)
@@ -38,6 +40,7 @@ def make_config(tmp_path):
         workflow_control_dir=workflow_control_dir,
         nav_log_dir=nav_log_dir,
         workflow_log_dir=workflow_log_dir,
+        guide_state_file=guide_state_file,
         loop_service_name="rabbitbot-loop.service",
         systemctl_path=systemctl_path,
         sudo_path=None,
@@ -45,6 +48,19 @@ def make_config(tmp_path):
         dialogue_dir=dialogue_dir,
         dialogue_index="0",
         dialogue_file=None,
+    )
+
+
+
+
+def write_guide_state(config, state, run_id="20260617_010000", detail="测试状态", time="2026-06-17 01:00:00"):
+    config.guide_state_file.parent.mkdir(parents=True, exist_ok=True)
+    config.guide_state_file.write_text(
+        f"state={state}\n"
+        f"run_id={run_id}\n"
+        f"detail={detail}\n"
+        f"time={time}\n",
+        encoding="utf-8",
     )
 
 
@@ -63,10 +79,85 @@ def test_status_prefers_runtime_map_env_file(tmp_path):
     config.map_env_file.write_text('NAV_PCD_PATH="/home/unitree/new_map.pcd"\n', encoding="utf-8")
     client = TestClient(create_app(config))
 
-    response = client.get("/api/status")
+    with patch("rabbitbot.control_console.app.detect_main_loop_running", return_value="running"):
+        response = client.get("/api/status")
 
     assert response.status_code == 200
     assert response.json()["map_path"] == "/home/unitree/new_map.pcd"
+
+
+
+
+def test_status_marks_services_not_ready_when_main_loop_missing(tmp_path):
+    config = make_config(tmp_path)
+    client = TestClient(create_app(config))
+
+    with patch("rabbitbot.control_console.app.detect_main_loop_running", return_value="not_detected"):
+        response = client.get("/api/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["main_loop"] == "not_detected"
+    assert body["nav_bridge"]["ready"] is False
+    assert body["workflow"]["status"] == "loop_not_running"
+    assert body["workflow"]["ready"] is False
+
+
+def test_status_returns_unknown_guide_state_when_file_missing(tmp_path):
+    config = make_config(tmp_path)
+    client = TestClient(create_app(config))
+
+    with patch("rabbitbot.control_console.app.detect_main_loop_running", return_value="running"),          patch("rabbitbot.control_console.app.is_port_open", return_value=True):
+        response = client.get("/api/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["guide_state"] == {"state": "unknown", "run_id": "", "detail": "", "time": ""}
+
+
+def test_status_returns_starting_guide_state_not_ready_semantics(tmp_path):
+    config = make_config(tmp_path)
+    write_guide_state(config, "starting", detail="启动中")
+    client = TestClient(create_app(config))
+
+    with patch("rabbitbot.control_console.app.detect_main_loop_running", return_value="running"),          patch("rabbitbot.control_console.app.is_port_open", return_value=True):
+        response = client.get("/api/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["main_loop"] == "running"
+    assert body["nav_bridge"]["ready"] is True
+    assert body["guide_state"]["state"] == "starting"
+    assert body["guide_state"]["detail"] == "启动中"
+
+
+def test_status_returns_qa_listening_as_ready_source(tmp_path):
+    config = make_config(tmp_path)
+    write_guide_state(config, "qa_listening", detail="导览 workflow 已停在 go 闸门")
+    client = TestClient(create_app(config))
+
+    with patch("rabbitbot.control_console.app.detect_main_loop_running", return_value="running"),          patch("rabbitbot.control_console.app.is_port_open", return_value=True):
+        response = client.get("/api/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["main_loop"] == "running"
+    assert body["nav_bridge"]["ready"] is True
+    assert body["guide_state"]["state"] == "qa_listening"
+
+
+def test_status_returns_guide_running_state_for_disabled_guide_button(tmp_path):
+    config = make_config(tmp_path)
+    write_guide_state(config, "guide_running", detail="导览中")
+    client = TestClient(create_app(config))
+
+    with patch("rabbitbot.control_console.app.detect_main_loop_running", return_value="running"),          patch("rabbitbot.control_console.app.is_port_open", return_value=True):
+        response = client.get("/api/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["nav_bridge"]["ready"] is True
+    assert body["guide_state"]["state"] == "guide_running"
 
 
 def test_status_returns_map_and_pose_without_login(tmp_path):
@@ -80,7 +171,8 @@ def test_status_returns_map_and_pose_without_login(tmp_path):
     (config.workflow_control_dir / "20260609_100000.ready").write_text("ready\n", encoding="utf-8")
     client = TestClient(create_app(config))
 
-    response = client.get("/api/status")
+    with patch("rabbitbot.control_console.app.detect_main_loop_running", return_value="running"):
+        response = client.get("/api/status")
 
     assert response.status_code == 200
     body = response.json()
@@ -257,6 +349,9 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '开始任务' in response.text
     assert '导览' in response.text
     assert '对话' in response.text
+    assert "data.guide_state.state==='qa_listening'" in response.text
+    assert "function canStartGuide(data)" in response.text
+    assert "guide_running:'导览中'" in response.text
     assert '视觉导航' in response.text
     assert '/api/task' in response.text
     assert '返航' in response.text
