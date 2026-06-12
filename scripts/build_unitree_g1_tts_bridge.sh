@@ -5,6 +5,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PROJECTS_DIR="${RABBITBOT_PROJECTS_DIR:-$(cd "${PROJECT_DIR}/.." && pwd)}"
 SOURCE_FILE="${PROJECT_DIR}/scripts/unitree_g1_tts_bridge.cpp"
 OUTPUT_FILE="${RABBITBOT_UNITREE_TTS_BINARY:-${PROJECT_DIR}/build/unitree_g1_tts_bridge}"
 ARCH="$(uname -m)"
@@ -14,7 +15,7 @@ if [ -n "${RABBITBOT_UNITREE_SDK_DIR:-}" ]; then
 elif [ -d /workspace/projects/unitree_sdk2 ]; then
     SDK_DIR="/workspace/projects/unitree_sdk2"
 else
-    SDK_DIR="/mnt/ssd/navgation/projects/unitree_sdk2"
+    SDK_DIR="${PROJECTS_DIR}/unitree_sdk2"
 fi
 
 if [ ! -d "${SDK_DIR}" ]; then

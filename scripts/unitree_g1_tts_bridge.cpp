@@ -13,7 +13,8 @@ namespace {
 void PrintUsage(const char* program) {
   std::cerr << "用法: " << program
             << " --network <网卡名> --text <播报文本> [--speaker <编号>]"
-            << " [--volume <0-100>] [--timeout <秒>] [--hold-seconds <秒>]" << std::endl;
+            << " [--volume <0-100>] [--timeout <秒>] [--hold-seconds <秒>]"
+            << " [--probe get_volume]" << std::endl;
 }
 
 bool ReadNextValue(int argc, char** argv, int* index, std::string* value) {
@@ -49,6 +50,7 @@ float ParseFloat(const std::string& value, const std::string& name) {
 int main(int argc, char** argv) {
   std::string network_interface;
   std::string text;
+  std::string probe_mode;
   int speaker_id = 0;
   int volume = -1;
   float timeout = 10.0F;
@@ -91,6 +93,11 @@ int main(int argc, char** argv) {
         return 2;
       }
       hold_seconds = ParseFloat(value, "hold-seconds");
+    } else if (arg == "--probe") {
+      if (!ReadNextValue(argc, argv, &i, &probe_mode)) {
+        PrintUsage(argv[0]);
+        return 2;
+      }
     } else if (arg == "--help" || arg == "-h") {
       PrintUsage(argv[0]);
       return 0;
@@ -101,7 +108,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (network_interface.empty() || text.empty()) {
+  if (network_interface.empty() || (text.empty() && probe_mode.empty())) {
     PrintUsage(argv[0]);
     return 2;
   }
@@ -124,6 +131,18 @@ int main(int argc, char** argv) {
     unitree::robot::g1::AudioClient client;
     client.Init();
     client.SetTimeout(timeout);
+
+    if (!probe_mode.empty()) {
+      if (probe_mode == "get_volume") {
+        uint8_t current_volume = 0;
+        int32_t ret = client.GetVolume(current_volume);
+        std::cout << "Unitree G1 TTS探测完成: probe=get_volume, ret=" << ret
+                  << ", volume=" << static_cast<int>(current_volume) << std::endl;
+        return ret;
+      }
+      std::cerr << "未知探测模式: " << probe_mode << std::endl;
+      return 2;
+    }
 
     if (volume >= 0) {
       int32_t volume_ret = client.SetVolume(static_cast<uint8_t>(volume));

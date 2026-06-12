@@ -967,3 +967,60 @@
 
 - 本轮新增日志点：桥接程序打印 `hold_seconds`、保持客户端存活开始和结束；Python 后端打印 `bridge_hold_seconds`、`post_bridge_wait_seconds`、命令超时和自动重建原因。
 - 这些日志用于诊断 DDS 客户端生命周期是否覆盖真实播报窗口，以及二进制是否已经包含最新桥接逻辑。
+
+## 本轮补充：同步 ShuHao TTS/STT 逻辑与 VLM 问答 workflow
+
+### 背景和目标
+
+Aaron 要求将 `ShuHao-orin` 上已经完成的 TTS/STT 逻辑和 `qa_workflow` 同步到当前 `AGX-orin` 项目。由于 AGX 项目分支 `June6_workflow` 落后 ShuHao 的 `feature/qa-vlm-workflow` 多个版本，本轮目标不是整仓覆盖，而是选择性合并相关能力，并保留 AGX 已经验证过的 Unitree TTS `--hold-seconds` 桥接保持修复。
+
+### 当前状态
+
+已完成：
+
+- 新增 `rabbitbot/agno_agents/vlm_qa_workflow.py`，用于持续监听 STT、调用 VLM 生成回答，并通过 TTS 播报。
+- 新增 `scripts/run_vlm_qa_workflow.py` 和 `scripts/start_vlm_qa_workflow.bash`，作为容器内 VLM 问答 workflow 入口。
+- 新增 `scripts_1/start_unified_vlm_qa_workflow.sh`，作为宿主侧启动入口；会显式启用 VLM 与 STT，先启动统一容器基础服务，再前台运行问答 workflow。
+- 同步 ShuHao 的 `scripts/start_tts_app.bash` TTS auto 后端健康检查逻辑：检查 Unitree 网卡、链路载波、IPv4、桥接程序和只读 `GetVolume` 探测，失败时回退 local 后端并输出分阶段日志。
+- 同步 `scripts/start_stt_app.bash` 的 STT 输入设备自动选择策略日志，便于现场判断麦克风选择顺序。
+- 合并 `scripts/unitree_g1_tts_bridge.cpp`：保留 AGX 已验证的 `--hold-seconds` 播报保持逻辑，同时加入 ShuHao 的 `--probe get_volume` 只读探测能力。
+- 更新 `scripts/build_unitree_g1_tts_bridge.sh`，优先从当前项目父目录推导 `unitree_sdk2`，兼容 AGX 的 `/mnt/ssd/navgation/projects/unitree_sdk2` 布局。
+- 更新 `scripts_1/start_unified_integration_workflow.sh` 和 `scripts_1/unified_runtime/start_unified_container.sh`：默认 TTS 后端改为 `auto`，透传 Unitree TTS 健康检查参数，TTS 就绪检查改为 `/exec` 表单接口探活，避免仅 `/docs` 可访问但协议不兼容的假就绪。
+
+未完成：
+
+- 本轮未启动 VLM 问答 workflow，避免加载模型、重建容器或占用现场音频设备。
+- 本轮未启动导航 workflow、导航桥接、systemd 服务，也未发送 `go/back`。
+- 本轮未做现场语音问答实测；后续仍需在有人值守时确认 STT 麦克风、VLM 加载耗时和 TTS 实际出声节奏。
+
+### 已验证的事实
+
+- 同步前 AGX 工作区干净，分支为 `June6_workflow`。
+- 已执行 `bash -n` 检查以下脚本并通过：`scripts/start_tts_app.bash`、`scripts/start_stt_app.bash`、`scripts/build_unitree_g1_tts_bridge.sh`、`scripts/start_vlm_qa_workflow.bash`、`scripts_1/start_unified_vlm_qa_workflow.sh`、`scripts_1/start_unified_integration_workflow.sh`、`scripts_1/unified_runtime/start_unified_container.sh`。
+- 已使用 `PYTHONPYCACHEPREFIX=/tmp/rabbitbot_pycache_check python3 -m py_compile` 编译 `rabbitbot/agno_agents/vlm_qa_workflow.py`、`scripts/run_vlm_qa_workflow.py` 和 `rabbitbot/audio/unitree_g1_tts.py` 通过；直接写项目 `__pycache__` 会遇到已有 root 权限缓存文件，因此使用临时 pycache 目录规避。
+- 已执行 `git diff --check` 通过。
+- 已重新构建 `build/unitree_g1_tts_bridge`，`--help` 输出同时包含 `--hold-seconds` 与 `--probe get_volume`。
+- 已用 `py310/bin/python scripts/run_vlm_qa_workflow.py --help` 验证 QA 入口可导入并输出帮助。
+
+### 阻塞问题
+
+无代码层面阻塞。运行层面仍需现场确认：启动 QA workflow 会启用 VLM 与 STT，可能占用 GPU、麦克风和 TTS 服务；应在非导览时段验证。
+
+### 建议的下一步
+
+- 先在确认现场安全且不影响导览的窗口运行：`bash scripts_1/start_unified_vlm_qa_workflow.sh`。
+- 如需只测纯语音问答，保持默认 `RABBITBOT_QA_INCLUDE_IMAGE=0`。
+- 如需测试视觉问答，可先使用 `RABBITBOT_QA_INCLUDE_IMAGE=1 RABBITBOT_QA_IMAGE_SOURCE=mock`，再切换到机器人实时图像。
+- 如果 TTS auto 回退 local 后端失败，优先查看 `logs/unified_runtime/rabbitbot_tts.log` 中 `TTS启动检查` 分阶段日志，确认是网卡、carrier、IPv4、桥接构建还是 `GetVolume` 探测失败。
+- 如果 QA workflow 启动时容器因 `RABBITBOT_UNIFIED_START_STT=1` 或 `RABBITBOT_UNIFIED_START_VLM=1` 与旧容器配置不一致而重建，这是预期行为。
+
+### 注意事项
+
+- 本轮没有从 ShuHao 整文件覆盖 AGX 的 TTS 后端，避免丢失 AGX 最新的 `--hold-seconds` 修复；当前桥接程序同时具备保持客户端存活和只读探测能力。
+- 默认 TTS 后端现在是 `auto`；链路健康时应选择 Unitree，本体链路不可用时会尝试回退 local，并在日志中给出原因。
+- QA workflow 不执行导航，不发送 `go/back`，也不启动导览剧本；它只负责语音监听、VLM 推理和 TTS 播报。
+
+### 其它信息
+
+- 本轮新增/调整日志点：TTS 启动检查会记录 auto 判定开始、接口状态、carrier/IP 检查结果、桥接构建状态、Unitree 音频服务探测开始/成功/失败和最终后端；QA workflow 会记录启动配置、每轮监听、STT 输入摘要、VLM 推理耗时、流式 TTS 分段、问答日志写入和异常失败路径。
+- 生成时间：2026-06-16 18:10:00

@@ -67,12 +67,16 @@ WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS:-600}"
 RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM:-0}"
 RABBITBOT_UNIFIED_START_EMBEDDING="${RABBITBOT_UNIFIED_START_EMBEDDING:-0}"
 RABBITBOT_UNIFIED_START_STT="${RABBITBOT_UNIFIED_START_STT:-0}"
-RABBITBOT_TTS_BACKEND="${RABBITBOT_TTS_BACKEND:-unitree}"
+RABBITBOT_TTS_BACKEND="${RABBITBOT_TTS_BACKEND:-auto}"
 RABBITBOT_UNITREE_TTS_INTERFACE="${RABBITBOT_UNITREE_TTS_INTERFACE:-eno1}"
 RABBITBOT_UNITREE_TTS_VOLUME="${RABBITBOT_UNITREE_TTS_VOLUME:-100}"
 RABBITBOT_UNITREE_TTS_SPEAKER_ID="${RABBITBOT_UNITREE_TTS_SPEAKER_ID:-0}"
 RABBITBOT_UNITREE_TTS_TIMEOUT="${RABBITBOT_UNITREE_TTS_TIMEOUT:-10}"
 RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST="${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST:-1}"
+RABBITBOT_UNITREE_TTS_REQUIRE_CARRIER="${RABBITBOT_UNITREE_TTS_REQUIRE_CARRIER:-1}"
+RABBITBOT_UNITREE_TTS_REQUIRE_IPV4="${RABBITBOT_UNITREE_TTS_REQUIRE_IPV4:-1}"
+RABBITBOT_UNITREE_TTS_AUTO_PROBE="${RABBITBOT_UNITREE_TTS_AUTO_PROBE:-1}"
+RABBITBOT_UNITREE_TTS_PROBE_TIMEOUT="${RABBITBOT_UNITREE_TTS_PROBE_TIMEOUT:-3}"
 
 log_info() {
     echo -e "\033[32m[INFO]\033[0m $1"
@@ -125,6 +129,14 @@ http_ok() {
     [ "${code}" = "200" ]
 }
 
+tts_exec_ok() {
+    local code
+    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+        -X POST http://127.0.0.1:28185/exec \
+        --form-string 'task={"task":"wait_speech","lang":"","text":"","timeout":1}' 2>/dev/null || true)
+    [ "${code}" = "200" ]
+}
+
 json_model_ok() {
     curl -s --max-time 5 "$1" 2>/dev/null | grep -q '"data"'
 }
@@ -162,7 +174,7 @@ wait_for_base_services() {
     else
         log_info "RABBITBOT_UNIFIED_START_EMBEDDING=0，跳过等待 Embedding 服务 (8005)"
     fi
-    wait_until "TTS 服务 (28185)" "${WAIT_DEFAULT_SECONDS}" http_ok http://127.0.0.1:28185/docs
+    wait_until "TTS /exec 服务 (28185)" "${WAIT_DEFAULT_SECONDS}" tts_exec_ok
     if [ "${RABBITBOT_UNIFIED_START_STT}" = "1" ]; then
         wait_until "STT 服务 (28184)" "${WAIT_DEFAULT_SECONDS}" http_ok http://127.0.0.1:28184/docs
     else
@@ -199,6 +211,8 @@ ensure_compatible_container() {
     container_unitree_volume="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNITREE_TTS_VOLUME || true)"
     local container_unitree_set_volume_each_request
     container_unitree_set_volume_each_request="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST || true)"
+    local container_unitree_auto_probe
+    container_unitree_auto_probe="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNITREE_TTS_AUTO_PROBE || true)"
     local incompatible_reason=""
     if [ "${container_auto_start}" != "0" ]; then
         incompatible_reason="旧的自启动 workflow 模式"
@@ -216,6 +230,8 @@ ensure_compatible_container() {
         incompatible_reason="Unitree TTS 音量配置变化：container=${container_unitree_volume:-85}, expected=${RABBITBOT_UNITREE_TTS_VOLUME}"
     elif [ "${RABBITBOT_TTS_BACKEND}" = "unitree" ] && [ "${container_unitree_set_volume_each_request:-0}" != "${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST}" ]; then
         incompatible_reason="Unitree TTS 每次请求设置音量配置变化：container=${container_unitree_set_volume_each_request:-0}, expected=${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST}"
+    elif [ "${RABBITBOT_TTS_BACKEND}" = "auto" ] && [ "${container_unitree_auto_probe:-0}" != "${RABBITBOT_UNITREE_TTS_AUTO_PROBE}" ]; then
+        incompatible_reason="Unitree TTS auto 探测配置变化：container=${container_unitree_auto_probe:-0}, expected=${RABBITBOT_UNITREE_TTS_AUTO_PROBE}"
     fi
 
     if [ -n "${incompatible_reason}" ]; then
@@ -248,7 +264,7 @@ create_container_if_needed() {
     fi
 
     log_info "创建统一容器基础服务底座：${CONTAINER_NAME}"
-    log_info "TTS 默认后端：${RABBITBOT_TTS_BACKEND}，Unitree 网卡：${RABBITBOT_UNITREE_TTS_INTERFACE}，音量：${RABBITBOT_UNITREE_TTS_VOLUME}，每次请求设置音量：${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST}"
+    log_info "TTS 默认后端：${RABBITBOT_TTS_BACKEND}，Unitree 网卡：${RABBITBOT_UNITREE_TTS_INTERFACE}，音量：${RABBITBOT_UNITREE_TTS_VOLUME}，每次请求设置音量：${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST}，auto_probe=${RABBITBOT_UNITREE_TTS_AUTO_PROBE}"
     docker create \
         --name "${CONTAINER_NAME}" \
         --network host \
@@ -267,6 +283,10 @@ create_container_if_needed() {
         -e RABBITBOT_UNITREE_TTS_SPEAKER_ID="${RABBITBOT_UNITREE_TTS_SPEAKER_ID}" \
         -e RABBITBOT_UNITREE_TTS_TIMEOUT="${RABBITBOT_UNITREE_TTS_TIMEOUT}" \
         -e RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST="${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST}" \
+        -e RABBITBOT_UNITREE_TTS_REQUIRE_CARRIER="${RABBITBOT_UNITREE_TTS_REQUIRE_CARRIER}" \
+        -e RABBITBOT_UNITREE_TTS_REQUIRE_IPV4="${RABBITBOT_UNITREE_TTS_REQUIRE_IPV4}" \
+        -e RABBITBOT_UNITREE_TTS_AUTO_PROBE="${RABBITBOT_UNITREE_TTS_AUTO_PROBE}" \
+        -e RABBITBOT_UNITREE_TTS_PROBE_TIMEOUT="${RABBITBOT_UNITREE_TTS_PROBE_TIMEOUT}" \
         -e RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE}" \
         -e RABBITBOT_TTS_STRICT_FAILURE="${RABBITBOT_TTS_STRICT_FAILURE}" \
         -e RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM}" \

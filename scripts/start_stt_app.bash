@@ -47,6 +47,7 @@ PY
 
 # STT_DEVICE_NAME 只在明确指定时作为最高优先级；默认自动选择外接麦克风。
 DEVICE_NAME="${STT_DEVICE_NAME:-}"
+echo "STT 输入设备自动选择策略: 显式指定名称 > 外接麦克风类设备 > 其它外接输入设备 > Orin 内置音频设备"
 
 DEVICE_INDEX=""
 DEVICE_FOUND_NAME=""
