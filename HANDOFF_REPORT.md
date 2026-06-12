@@ -801,3 +801,60 @@
 
 - 本轮没有修改业务代码或运行脚本，因此没有新增代码日志点。
 - 本轮新增的交接信息记录了电源模式切换命令、系统停机时间线、Docker 退出码解释和后续恢复建议，便于后续避免把系统级重启误判为业务服务崩溃。
+
+## 本轮补充：启动 workflow 并观察服务稳定性
+
+### 背景和目标
+
+本轮按 Aaron 要求，在 AGX-orin 上启动一次 workflow，观察启动、预启动、实际 `go` 运行、导航过程中的服务状态，重点确认此前切换电源模式后相关服务退出的问题是否仍会表现为服务崩溃。
+
+### 当前状态
+
+- 已执行 `sudo systemctl start rabbitbot-loop.service` 启动导航桥接、统一容器基础服务和 workflow 预启动逻辑。
+- 已发送 `bash scripts_1/send_nav_workflow_command.sh go`，workflow 已实际进入导览流程。
+- 本轮为避免机器人在持续障碍物状态下继续尝试导航，已执行 `sudo systemctl stop rabbitbot-loop.service` 停止本次 loop/workflow。
+- 停止后 `rabbitbot-loop.service` 被 systemd 标记为 `failed (status=143)`，这是 stop 触发 SIGTERM 后脚本退出码导致；尝试 `systemctl reset-failed rabbitbot-loop.service` 时当前 sudo 规则要求密码，未清理该 failed 标记。
+- 停止后导航桥接 28180 已关闭，workflow 进程已停止；Docker、`rabbitbot-control-console.service` 和统一容器基础服务仍在运行。
+
+### 已验证的事实
+
+- 启动前基线：`rabbitbot-control-console.service` 与 Docker 为 running，`rabbitbot-loop.service` inactive/dead，`rabbitbot-unified-runtime` 为 `Exited (137)`。
+- `rabbitbot-loop.service` 启动后成功拉起导航桥接，28180 端口打开；日志显示使用显式地图 `NAV_PCD_PATH=/home/unitree/test9.pcd`。
+- 导航启动阶段提示 `Warning: PCD path is not visible from this shell: /home/unitree/test9.pcd`，但随后底层重定位成功，日志出现 `[Ready] Navigation system ready for commands!`。
+- 统一容器 `rabbitbot-unified-runtime` 从退出态恢复为 running，Neo4j 7687、TTS 28185、Memory 28182 均就绪；STT 28184 按当前配置跳过，保持 closed，符合预期。
+- workflow 预启动成功，生成 run_id `20260612_112819`，ready 文件落盘；发送 `go` 后闸门释放，日志显示 `workflow启动闸门: stage=released`。
+- workflow 加载默认台词 `conf/dialogue_0.json`，日志显示 `map_file=test9.pcd, points=7, steps=8, segments=6`。
+- 开场 TTS 请求成功，握手动作 `shake_hand` 经 28180 返回成功；后续 `face_wave` 动作也成功。
+- 出现一次非致命收手动作超时：`release` async 请求 3 秒 read timeout，workflow 记录失败但继续执行，后续 release 再次成功。
+- workflow 发出实际导航目标：
+  - `1->2过渡点位`：`(0.1797, -0.1793, 0.0022, 0.1118, 0.0196, 0.9935)`
+  - `点位2`：`(1.3443, 0.2059, 0.0137, 0.1131, 0.1278, 0.9852)`
+- 进入第二段导航后，28180 `/go_to_status` 长时间保持 `{"status":"1","last_status":-1,"next_status":1,"sub":"navigating"}`，workflow 日志持续显示 `NavigationStatus.ACTIVE`。
+- 导航底层持续输出 `[SLAM Info] "There are obstacles nearby, please be careful"`，这是本轮 workflow 未完成的直接运行原因；观察期间不是 Docker、control-console、统一容器、TTS、Memory 或 workflow 自身崩溃。
+- 观察期间 `rabbitbot-loop.service`、Docker、`rabbitbot-control-console.service` 均保持 active；`rabbitbot-unified-runtime` 保持 Up；8080、28180、28182、28185、7687 均按阶段可用。
+- 本轮未复现“切换电源模式后服务崩”的系统级退出；实际运行瓶颈是物理导航路径持续检测到障碍物。
+
+### 阻塞问题
+
+- workflow 未自然跑完整程，因为第二段导航持续处于 `ACTIVE/navigating`，底层持续报告附近有障碍物。
+- `rabbitbot-loop.service` 停止后留下 failed 标记；清理该标记需要具备 `systemctl reset-failed rabbitbot-loop.service` 的 sudo 权限或现场输入密码。
+- AGX shell 侧仍看不到 `/home/unitree/test9.pcd`，虽然本轮底层重定位成功，但该提示仍会影响后续排查判断。
+
+### 建议的下一步
+
+- 现场确认机器人周边和到点位2路径是否确有障碍物；清障后再启动 workflow 复测导航完成情况。
+- 如需清理服务状态，可由具备 sudo 密码或免密权限的现场人员执行 `sudo systemctl reset-failed rabbitbot-loop.service`。
+- 下次复测前先确认 28180 关闭、`rabbitbot-loop.service` inactive，再启动服务，避免旧导航桥接占用端口。
+- 如希望停服务不留下 failed 标记，建议后续调整脚本或 systemd unit，让 SIGTERM 停止时返回 0，或设置合适的 `SuccessExitStatus=143`。
+- 针对 `release` 3 秒超时，可考虑调高 async release 的短超时时间，或在日志中区分“命令已发出但等待回执超时”和“动作执行失败”。
+
+### 注意事项
+
+- 本轮为安全起见，在持续障碍物状态下主动停止了 `rabbitbot-loop.service`；停止后 28180 已关闭，但统一容器基础服务仍运行，28182、28185、7687 仍开放。
+- 持续出现的 DDS `ddsi_udp_conn_write to udp/172.18.0.1:7410 failed` 日志没有导致服务退出，但噪声较大，后续如需降低日志干扰，应检查 DDS 网络接口/容器网络配置。
+- 不要把本轮未跑完整误判为服务崩溃；关键服务在观察窗口内保持正常。
+
+### 其它信息
+
+- 本轮未修改业务代码或脚本，因此没有新增代码日志点。
+- 本轮使用已有日志完成排查，关键日志点包括：导航地图加载和重定位、统一基础服务就绪、workflow 闸门释放、TTS 请求开始/完成、动作 HTTP 请求/回执、导航目标发送、导航状态轮询和底层障碍物提示。
