@@ -749,3 +749,55 @@
 ### 其它信息
 
 - 本轮没有修改业务代码或运行脚本，因此没有新增代码日志点。
+
+## 本轮补充：排查切换电源模式后服务退出
+
+### 背景和目标
+
+本轮目标是按 Aaron 要求排查“以前切换电源模式后有些服务会崩”的现场现象，确认当前 AGX-orin 上是否存在同类情况，并定位原因。
+
+### 当前状态
+
+已完成：
+
+- 已只读排查 `systemctl`、Docker 状态、`/var/log/auth.log`、`/var/log/syslog`、`/var/log/kern.log`、Docker inspect/logs 和项目日志。
+- 已确认 2026-06-12 12:13:19 在项目目录执行过 `sudo /usr/sbin/nvpmodel -m 0`，即从原先 `MODE_30W` 切到 `MAXN`。
+- 已确认切换前 `jtop` 记录为 `nvpmodel running in [2]MODE_30W - Default: 2`，当前启动后 `nvpmodel -q` 和 `jtop` 均显示 `MAXN`。
+- 已确认 2026-06-12 12:13:26 开始系统级停机流程，随后停止图形会话、用户会话、jtop、Docker、nvfancontrol 等系统服务。
+- 已确认 `rabbitbot-unified-runtime` 当前为 `Exited (137)`，Docker inspect 显示 `OOMKilled=false`；该退出码符合系统停机时 Docker/容器收到终止后被强制结束的表现，不是容器内 Python 业务异常或 OOM。
+- 已确认当前 `rabbitbot-control-console.service` 和 `docker.service` 正常运行，`rabbitbot-loop.service` 为 disabled/inactive，`rabbitbot-unified-runtime` 容器未自动恢复。
+
+未完成：
+
+- 本轮未重启 `rabbitbot-unified-runtime`、`rabbitbot-loop.service`、导航桥接或 workflow。
+- 本轮未再次执行 `nvpmodel -m` 做破坏性复现，避免再次触发系统重启或中断现场。
+
+### 已验证的事实
+
+- `/var/log/auth.log` 明确记录：`Jun 12 12:13:19 ... COMMAND=/usr/sbin/nvpmodel -m 0`。
+- `/var/log/syslog` 显示：12:13:26 开始停止用户会话和图形界面，12:13:56 systemd 停止 Multi-User、Docker、nvfancontrol 等服务，并且 dockerd 收到 `Processing signal 'terminated'`。
+- Docker inspect 显示 `rabbitbot-unified-runtime` 的 `ExitCode=137`、`OOMKilled=false`、`Finished=2026-06-12T04:14:09Z`。
+- 当前系统时间存在回拨现象：`last -x` 中上一轮结束时间约为 12:14，当前启动时间约为 11:11；因此 Docker 中的 12:14 退出记录属于上一轮启动周期，不应误判为当前 11:xx 会话内刚发生。
+- 项目日志中 2026-06-12 11:16 的 loop 启动曾使用 `/home/unitree/test9.pcd`，导航底层返回 `Load pcd failed`；该问题与电源模式切换导致服务退出是两个独立问题。
+
+### 阻塞问题
+
+无代码层面阻塞。当前运行层面风险是：切换电源模式后如果整机重启，非自启动的 `rabbitbot-unified-runtime` 容器和 `rabbitbot-loop.service` 不会自动恢复，需要人工或控制台重新启动。
+
+### 建议的下一步
+
+- 后续切换电源模式前，先停止 RabbitBot 导航 loop、workflow、导航桥接和统一容器，避免被系统停机流程强制杀掉后留下 `Exited (137)` 状态。
+- 切换电源模式后先确认 `nvpmodel -q`、Docker、`rabbitbot-control-console.service`、`rabbitbot-unified-runtime`、28180/28182/28185 等服务状态，再启动 workflow。
+- 如果需要切换到 `MAXN` 并立即继续演示，应把“切换电源模式 -> 等待重启完成 -> 重新启动统一容器基础服务 -> 再启动 loop/workflow”作为固定操作流程。
+- 如需自动恢复，可考虑为统一容器基础服务增加明确的 systemd 管理方式，或让控制台在检测到容器 `Exited (137)` 且 `OOMKilled=false` 时提示“上次可能因系统重启/停机退出，需要重新启动基础服务”。
+
+### 注意事项
+
+- 本次证据不支持“RabbitBot 某个服务因电源模式参数变化自行崩溃”的判断；更准确的说法是：执行 `nvpmodel -m 0` 后系统进入重启/停机流程，Docker 和 RabbitBot 服务被系统正常停止，部分进程如 jtop 未及时退出后被 SIGKILL。
+- `ExitCode=137` 不等于一定是内存不足；本次 Docker 明确给出 `OOMKilled=false`，应优先按系统停机/强制终止分析。
+- 当前 `nvpmodel` 已是 `MAXN`，再次执行切换命令前应确认现场是否允许重启。
+
+### 其它信息
+
+- 本轮没有修改业务代码或运行脚本，因此没有新增代码日志点。
+- 本轮新增的交接信息记录了电源模式切换命令、系统停机时间线、Docker 退出码解释和后续恢复建议，便于后续避免把系统级重启误判为业务服务崩溃。
