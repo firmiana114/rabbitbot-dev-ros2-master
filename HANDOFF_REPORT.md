@@ -1078,3 +1078,60 @@ Aaron 要求在 AGX 上实际测试 QA workflow，重点确认 STT/TTS 设备选
 
 - 本轮新增/调整日志点：TTS auto 探测新增 Unitree 桥接动态库路径日志；QA workflow 的 VLM token 上限可通过 `RABBITBOT_QA_VLM_MAX_TOKENS` 调整，后续排查可结合 `VLM 首 token 到达`、`VLM 流式问答完成` 和 `流式 TTS 分段已提交` 判断卡点。
 - 生成时间：2026-06-16 18:55:00
+
+## 本轮补充：强制重建容器后复测 QA workflow
+
+### 背景和目标
+
+Aaron 要求重启全部服务和容器后重新测试 AGX 的 QA workflow，确认上一轮 VLM 不稳定是否由服务状态残留导致。
+
+### 当前状态
+
+已完成：
+
+- 已使用 `RECREATE_CONTAINER=1` 强制删除并重建 `rabbitbot-unified-runtime` 容器。
+- 已重新拉起 Neo4j、VLM、TTS、STT、Memory Agent 和 Robot Agent。
+- 已确认 VLM 冷启动流程正常，8000 `/v1/models` 就绪。
+- 已确认 TTS `/exec`、STT 28184、Memory 28182、Robot Agent 28180 均就绪。
+- 已直接测试 8000：
+  - 非流式短问题 `stream=false` 正常返回，HTTP 200，耗时约 4.5 秒。
+  - 流式短问题 `stream=true` 能输出 token；测试命令用 `head` 截断输出导致 curl 写管道失败，但 token 已实际返回。
+- 已通过 28184 注入短问题“你好，请用一句话介绍你自己”，QA workflow 收到文本，VLM 首 token 约 0.327 秒，TTS 成功播报 1 个分段。
+- 已通过 28184 注入多句问题“请用三句话介绍语音问答系统的工作流程，每句话都要简短”，复现 VLM 多句请求无首 token 的问题。
+- 在 QA 多句请求挂起后，直接测试 8000 同一多句问题的 `stream=true` 和 `stream=false`，均在超时时间内无有效输出。
+- 已停止本轮测试容器，释放 28180、28182、28184、28185、8000、7687，避免留下不健康 VLM 进程占用资源。
+
+未完成：
+
+- 多句 QA 流式问答仍未跑通。
+- 本轮未修改代码，仅完成重建容器后的复测与报告记录。
+
+### 已验证的事实
+
+- 重建容器能消除上一轮残留状态，短问题链路稳定可用。
+- 当前问题具有输入形态相关性：短问题 `stream=false` / `stream=true` 和完整 QA 都能工作；多句问题会导致 QA 和直接 8000 请求无有效返回。
+- 这次复测进一步说明问题不是单纯由旧容器残留导致，也不是 STT 注入或 TTS 设备选择导致，而是 VLM 对该类多句请求的生成/流式处理稳定性问题。
+
+### 阻塞问题
+
+- AGX 上多句 VLM 请求仍会触发 8000 无有效返回，阻塞 QA 多句流式问答验收。
+
+### 建议的下一步
+
+- 先绕开完整 QA workflow，直接对 8000 做更细粒度矩阵测试：
+  - 短问题、多句问题、改写后的多句问题。
+  - `stream=false` / `stream=true`。
+  - `max_tokens=32/64/96`。
+  - `temperature=0`、`top_p`、`top_k` 等采样参数。
+- 如果确认只有特定中文请求触发卡住，可在 QA workflow 中加入问题改写或安全 prompt 模板。
+- 如果确认 `stream=true` 对稍长请求不稳定，应为 QA workflow 增加非流式 fallback、首 token 超时和请求取消/重启提示。
+
+### 注意事项
+
+- 本轮结束时 AGX 没有保留测试容器运行，相关端口均已释放。
+- 当前 Git 工作区在报告更新前是干净状态。
+
+### 其它信息
+
+- 本轮未新增业务代码日志点；复测主要使用现有日志：服务就绪日志、VLM 首 token 日志、TTS 分段日志、STT 注入返回和 8000 curl 响应。
+- 生成时间：2026-06-16 19:20:00
