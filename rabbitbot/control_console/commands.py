@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
+import socket
 import subprocess
+import time
 
 
 ALLOWED_COMMANDS = {"go", "back"}
@@ -9,6 +12,8 @@ TASK_LABELS = {"guide": "导览", "dialogue": "对话", "vision": "视觉导航"
 PLACEHOLDER_TASKS = {"dialogue", "vision"}
 LOOP_SERVICE_NAME = "rabbitbot-loop.service"
 MAP_ENV_KEY = "NAV_PCD_PATH"
+NAV_BRIDGE_PORT = 28180
+logger = logging.getLogger(__name__)
 
 
 class CommandError(RuntimeError):
@@ -101,6 +106,64 @@ def start_task(task: str, script: Path, extra_args: list[str] | None = None) -> 
     }
 
 
+
+def _port_open(host: str, port: int, timeout: float = 0.25) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _cleanup_tcp_port_occupants(
+    port: int,
+    sudo_path: Path | None,
+    fuser_path: Path = Path("/usr/bin/fuser"),
+    wait_seconds: float = 5.0,
+) -> None:
+    started_at = time.monotonic()
+    if not fuser_path.exists():
+        logger.warning("端口清理跳过：fuser 不存在，port=%s, fuser=%s", port, fuser_path)
+        return
+
+    logger.info("端口清理开始：port=%s, fuser=%s, sudo=%s, wait_seconds=%.1f", port, fuser_path, sudo_path, wait_seconds)
+    attempts: list[list[str]] = []
+    if sudo_path is not None and sudo_path.exists():
+        attempts.append([str(sudo_path), "-n", str(fuser_path), "-k", f"{port}/tcp"])
+    attempts.append([str(fuser_path), "-k", f"{port}/tcp"])
+
+    last_result = None
+    for args in attempts:
+        logger.debug("端口清理执行：port=%s, command=%s", port, args)
+        last_result = subprocess.run(
+            args,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        output = (last_result.stdout or last_result.stderr or "").strip()
+        if "password is required" in output or "not allowed" in output:
+            logger.warning("端口清理命令无权限，尝试降级执行：port=%s, exit_code=%s, output_summary=%s", port, last_result.returncode, output[:200])
+            continue
+        if last_result.returncode in (0, 1):
+            logger.info("端口清理命令完成：port=%s, exit_code=%s, output_summary=%s", port, last_result.returncode, output[:200])
+            break
+        logger.error("端口清理命令失败：port=%s, exit_code=%s, output_summary=%s", port, last_result.returncode, output[:200])
+        raise CommandError(output or f"释放 {port} 端口占用失败，退出码：{last_result.returncode}")
+    if last_result is None:
+        return
+
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        if not _port_open("127.0.0.1", port):
+            logger.info("端口清理完成：port=%s, elapsed=%.3fs", port, time.monotonic() - started_at)
+            return
+        time.sleep(0.2)
+
+    logger.error("端口清理超时：port=%s, elapsed=%.3fs", port, time.monotonic() - started_at)
+    raise CommandError(f"{port} 端口占用未释放，请检查旧导航桥接进程")
+
+
 def _run_loop_service_action(
     action: str,
     service_name: str,
@@ -151,6 +214,7 @@ def restart_loop_service(
     sudo_path: Path | None = Path("/usr/bin/sudo"),
     map_path: str | None = None,
     map_env_file: Path | None = None,
+    cleanup_port: bool = True,
 ) -> dict:
     if service_name != LOOP_SERVICE_NAME:
         raise CommandError(f"不支持重启的服务：{service_name}")
@@ -161,7 +225,12 @@ def restart_loop_service(
             raise CommandError("缺少地图配置文件路径")
         active_map_path = write_map_path(map_env_file, map_path)
 
-    output = _run_loop_service_action("restart", service_name, systemctl_path, sudo_path, "重启")
+    logger.info("导航主程序重启开始：service=%s, map_path=%s, cleanup_port=%s", service_name, active_map_path, cleanup_port)
+    _run_loop_service_action("stop", service_name, systemctl_path, sudo_path, "关闭")
+    if cleanup_port:
+        _cleanup_tcp_port_occupants(NAV_BRIDGE_PORT, sudo_path)
+    output = _run_loop_service_action("start", service_name, systemctl_path, sudo_path, "启动")
+    logger.info("导航主程序重启完成：service=%s, map_path=%s", service_name, active_map_path)
 
     response = {"ok": True, "service": service_name, "message": output or "已重新启动导航主程序"}
     if active_map_path is not None:
@@ -174,8 +243,13 @@ def stop_loop_service(
     service_name: str = LOOP_SERVICE_NAME,
     systemctl_path: Path = Path("/usr/bin/systemctl"),
     sudo_path: Path | None = Path("/usr/bin/sudo"),
+    cleanup_port: bool = True,
 ) -> dict:
     if service_name != LOOP_SERVICE_NAME:
         raise CommandError(f"不支持关闭的服务：{service_name}")
+    logger.info("导航主程序关闭开始：service=%s, cleanup_port=%s", service_name, cleanup_port)
     output = _run_loop_service_action("stop", service_name, systemctl_path, sudo_path, "关闭")
+    if cleanup_port:
+        _cleanup_tcp_port_occupants(NAV_BRIDGE_PORT, sudo_path)
+    logger.info("导航主程序关闭完成：service=%s", service_name)
     return {"ok": True, "service": service_name, "message": output or "已关闭导航主程序"}

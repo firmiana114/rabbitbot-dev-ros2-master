@@ -1297,3 +1297,57 @@ Aaron 要求修正网页控制台 ready 状态口径：QA/导览整合后，旧 
 ### 其它信息
 
 - 生成时间：2026-06-17 00:00:00
+
+## 本轮补充：提交控制台端口清理与 TTS 默认后端调整
+
+### 背景和目标
+
+Aaron 要求通过 SSH 接手 AGX-orin 上 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master` 项目，阅读交接报告和项目本身，确认当前工作区未提交内容，并整理为一次提交，确保工作区干净。
+
+### 当前状态
+
+已完成：
+
+- 已阅读当前 `HANDOFF_REPORT.md`、项目 README、分支和最近提交，确认项目仍在 `June6_workflow` 分支。
+- 已确认接手时未提交内容集中在 5 个文件：`rabbitbot/control_console/commands.py`、`scripts/start_tts_app.bash`、`scripts_1/unified_runtime/start_unified_container.sh`、`tests/control_console/test_app.py`、`tests/control_console/test_commands.py`。
+- 已确认控制台重启/关闭导航主程序的逻辑从单次 `systemctl restart` 调整为 `stop -> 清理 28180 端口 -> start`，用于避免旧导航桥接进程残留占用端口。
+- 已补充控制台端口清理日志和重启/关闭流程日志，记录端口、sudo/fuser 路径、返回码、输出摘要、耗时、降级原因和超时失败原因。
+- 已修复端口清理降级判断：当 `sudo -n fuser` 输出需要密码或权限不足时，先识别为无权限并降级普通 `fuser`，避免把返回码 1 误判为 fuser 正常“无占用”。
+- 已补充测试覆盖：重启顺序必须为 `stop -> cleanup -> start`；sudo 无权限时会降级执行普通 `fuser`；已有控制台 API 测试同步 mock 端口清理。
+- 已确认 TTS 启动逻辑当前改为优先本地 `REDMI Speaker 2-6002`，未检测到首选本地音响时回退 Unitree G1 本体 TTS；统一容器默认 `RABBITBOT_TTS_BACKEND=local` 并显式透传首选本地设备。
+
+未完成：
+
+- 本轮未启动或停止 `rabbitbot-loop.service`、导航桥接、workflow 或统一容器，未触发机器人移动或播报。
+- 本轮未做真实控制台点击、真实 systemd 重启或真实 TTS 出声验证。
+
+### 已验证的事实
+
+- `PYTHONPATH=/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q tests/control_console/test_commands.py tests/control_console/test_app.py` 通过，结果为 `48 passed`。
+- `PYTHONPYCACHEPREFIX=/tmp/rabbitbot_pycache_check python3 -m py_compile` 已验证控制台命令、控制台 app 和对应测试文件语法通过。
+- `bash -n scripts/start_tts_app.bash` 通过。
+- `bash -n scripts_1/unified_runtime/start_unified_container.sh` 通过。
+- `git diff --check` 通过。
+- 接手时 `pytest` 裸命令不存在；使用 `python3 -m pytest` 并设置 `PYTHONPATH` 后测试可正常运行。
+
+### 阻塞问题
+
+无代码层面的阻塞。剩余风险是运行验证类风险：端口清理、systemd stop/start 顺序和 TTS 本地音响优先策略尚未在真实现场控制台操作中验证。
+
+### 建议的下一步
+
+- 现场安全窗口内，通过网页控制台执行一次“关闭程序”和“一键重启”，确认日志中出现导航主程序关闭/重启开始、端口清理开始、端口清理完成和导航主程序重启完成。
+- 如果一键重启后仍提示 28180 占用，优先查看控制台服务日志中 `端口清理命令无权限`、`端口清理命令失败` 或 `端口清理超时` 记录。
+- 下次启动统一容器后确认 TTS 日志中的后端和设备选择，重点检查是否选择到 `REDMI Speaker 2-6002` 或按预期回退 Unitree。
+
+### 注意事项
+
+- 控制台端口清理使用 `fuser -k 28180/tcp`，属于会终止占用该端口进程的操作；只应在关闭或重启导航主程序流程中触发。
+- 日志只记录命令路径、端口、返回码和输出摘要，不记录敏感信息。
+- 本轮没有改动导览台词、导航点位、QA workflow 逻辑或 systemd unit 文件。
+
+### 其它信息
+
+- 本轮新增/调整的日志点包括：导航主程序关闭开始/完成、重启开始/完成、端口清理开始、fuser 命令执行、无权限降级、命令失败、命令完成、端口释放完成和端口释放超时。
+- 这些日志用于排查控制台停止/重启后 28180 端口仍被旧导航桥接占用、sudo 无权限、fuser 缺失、清理命令失败或端口迟迟未释放等问题。
+- 生成时间：2026-06-17

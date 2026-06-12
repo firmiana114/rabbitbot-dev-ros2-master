@@ -1,6 +1,7 @@
 import pytest
+from unittest.mock import patch
 
-from rabbitbot.control_console.commands import CommandError, read_map_path, restart_loop_service, send_workflow_command, start_loop_service, start_task, stop_loop_service, write_map_path
+from rabbitbot.control_console.commands import CommandError, _cleanup_tcp_port_occupants, read_map_path, restart_loop_service, send_workflow_command, start_loop_service, start_task, stop_loop_service, write_map_path
 
 
 def test_send_workflow_command_allows_go_and_invokes_script(tmp_path):
@@ -100,11 +101,59 @@ def test_restart_loop_service_invokes_systemctl_restart(tmp_path):
     )
     systemctl.chmod(0o755)
 
-    result = restart_loop_service(systemctl_path=systemctl, sudo_path=None)
+    result = restart_loop_service(systemctl_path=systemctl, sudo_path=None, cleanup_port=False)
 
     assert result["ok"] is True
     assert result["service"] == "rabbitbot-loop.service"
-    assert record.read_text(encoding="utf-8").splitlines() == ["restart", "rabbitbot-loop.service"]
+    assert record.read_text(encoding="utf-8").splitlines() == ["start", "rabbitbot-loop.service"]
+
+
+def test_restart_loop_service_stops_cleans_port_then_starts(tmp_path):
+    systemctl = tmp_path / "systemctl"
+    record = tmp_path / "record.txt"
+    systemctl.write_text(
+        f"#!/usr/bin/env bash\nprintf '%s %s\\n' \"$1\" \"$2\" >> {record}\n",
+        encoding="utf-8",
+    )
+    systemctl.chmod(0o755)
+
+    def mark_cleanup(*_args, **_kwargs):
+        with record.open("a", encoding="utf-8") as handle:
+            handle.write("cleanup 28180\n")
+
+    with patch("rabbitbot.control_console.commands._cleanup_tcp_port_occupants", side_effect=mark_cleanup):
+        result = restart_loop_service(systemctl_path=systemctl, sudo_path=None)
+
+    assert result["ok"] is True
+    assert record.read_text(encoding="utf-8").splitlines() == [
+        "stop rabbitbot-loop.service",
+        "cleanup 28180",
+        "start rabbitbot-loop.service",
+    ]
+
+
+def test_cleanup_tcp_port_occupants_falls_back_when_sudo_needs_password(tmp_path):
+    sudo = tmp_path / "sudo"
+    fuser = tmp_path / "fuser"
+    record = tmp_path / "record.txt"
+    sudo.write_text(
+        f"#!/usr/bin/env bash\necho sudo:$* >> {record}\necho sudo: a password is required >&2\nexit 1\n",
+        encoding="utf-8",
+    )
+    fuser.write_text(
+        f"#!/usr/bin/env bash\necho fuser:$* >> {record}\nexit 1\n",
+        encoding="utf-8",
+    )
+    sudo.chmod(0o755)
+    fuser.chmod(0o755)
+
+    with patch("rabbitbot.control_console.commands._port_open", return_value=False):
+        _cleanup_tcp_port_occupants(28180, sudo_path=sudo, fuser_path=fuser, wait_seconds=0.1)
+
+    assert record.read_text(encoding="utf-8").splitlines() == [
+        f"sudo:-n {fuser} -k 28180/tcp",
+        "fuser:-k 28180/tcp",
+    ]
 
 
 def test_restart_loop_service_rejects_other_services(tmp_path):
@@ -138,7 +187,7 @@ def test_stop_loop_service_invokes_systemctl_stop(tmp_path):
     )
     systemctl.chmod(0o755)
 
-    result = stop_loop_service(systemctl_path=systemctl, sudo_path=None)
+    result = stop_loop_service(systemctl_path=systemctl, sudo_path=None, cleanup_port=False)
 
     assert result["ok"] is True
     assert result["service"] == "rabbitbot-loop.service"
@@ -239,9 +288,9 @@ def test_restart_loop_service_writes_map_before_restart(tmp_path):
     )
     systemctl.chmod(0o755)
 
-    result = restart_loop_service(systemctl_path=systemctl, sudo_path=None, map_path="/home/unitree/test12.pcd", map_env_file=env_file)
+    result = restart_loop_service(systemctl_path=systemctl, sudo_path=None, map_path="/home/unitree/test12.pcd", map_env_file=env_file, cleanup_port=False)
 
     assert result["map_path"] == "/home/unitree/test12.pcd"
     assert "test12.pcd" in result["message"]
     assert env_file.read_text(encoding="utf-8") == 'NAV_PCD_PATH="/home/unitree/test12.pcd"\n'
-    assert record.read_text(encoding="utf-8").splitlines() == ["restart", "rabbitbot-loop.service"]
+    assert record.read_text(encoding="utf-8").splitlines() == ["start", "rabbitbot-loop.service"]

@@ -244,21 +244,23 @@ def test_restart_restarts_loop_service_without_login(tmp_path):
     config = make_config(tmp_path)
     client = TestClient(create_app(config))
 
-    response = client.post("/api/restart", json={"map_path": "/home/unitree/test10.pcd"})
+    with patch("rabbitbot.control_console.commands._cleanup_tcp_port_occupants"):
+        response = client.post("/api/restart", json={"map_path": "/home/unitree/test10.pcd"})
 
     assert response.status_code == 200
     assert response.json()["service"] == "rabbitbot-loop.service"
     assert response.json()["map_path"] == "/home/unitree/test10.pcd"
     assert config.map_env_file.read_text(encoding="utf-8") == 'NAV_PCD_PATH="/home/unitree/test10.pcd"\n'
     record = config.project_root / "systemctl_args.txt"
-    assert record.read_text(encoding="utf-8").splitlines() == ["restart", "rabbitbot-loop.service"]
+    assert record.read_text(encoding="utf-8").splitlines() == ["start", "rabbitbot-loop.service"]
 
 
 def test_stop_stops_loop_service_without_login(tmp_path):
     config = make_config(tmp_path)
     client = TestClient(create_app(config))
 
-    response = client.post("/api/stop")
+    with patch("rabbitbot.control_console.commands._cleanup_tcp_port_occupants"):
+        response = client.post("/api/stop")
 
     assert response.status_code == 200
     assert response.json()["service"] == "rabbitbot-loop.service"

@@ -187,14 +187,30 @@ PY
 }
 
 if [ "${RABBITBOT_TTS_BACKEND}" = "auto" ]; then
-    tts_start_log "TTS后端自动选择开始：interface=${RABBITBOT_UNITREE_TTS_INTERFACE}, require_carrier=${RABBITBOT_UNITREE_TTS_REQUIRE_CARRIER}, require_ipv4=${RABBITBOT_UNITREE_TTS_REQUIRE_IPV4}, auto_probe=${RABBITBOT_UNITREE_TTS_AUTO_PROBE}"
-    if unitree_interface_healthcheck && unitree_audio_probe; then
-        tts_start_log "TTS后端自动选择完成：effective=unitree, reason=Unitree接口、链路、IPv4与音频服务探测通过"
-        RABBITBOT_TTS_BACKEND="unitree"
-    else
-        tts_start_log "TTS后端自动选择完成：effective=local, reason=Unitree健康检查失败，回退本地外接输出设备"
+    PREFERRED_LOCAL_TTS_DEVICE="${RABBITBOT_PREFERRED_LOCAL_TTS_DEVICE:-REDMI Speaker 2-6002}"
+    tts_start_log "TTS后端自动选择开始：preferred_local=${PREFERRED_LOCAL_TTS_DEVICE}, interface=${RABBITBOT_UNITREE_TTS_INTERFACE}, require_carrier=${RABBITBOT_UNITREE_TTS_REQUIRE_CARRIER}, require_ipv4=${RABBITBOT_UNITREE_TTS_REQUIRE_IPV4}, auto_probe=${RABBITBOT_UNITREE_TTS_AUTO_PROBE}"
+    if [ -d /dev/snd ] && python3 - "${PREFERRED_LOCAL_TTS_DEVICE}" <<'PY' | grep -qx '1'
+import sys
+try:
+    import sounddevice as sd
+except Exception:
+    raise SystemExit(0)
+preferred = sys.argv[1].strip().lower()
+for dev in sd.query_devices():
+    if int(dev.get('max_output_channels', 0)) <= 0:
+        continue
+    if preferred and preferred in str(dev.get('name', '')).lower():
+        print('1')
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+    then
         RABBITBOT_TTS_BACKEND="local"
-        export TTS_DEVICE_NAME="${TTS_DEVICE_NAME:-BT67}"
+        export TTS_DEVICE_NAME="${TTS_DEVICE_NAME:-${PREFERRED_LOCAL_TTS_DEVICE}}"
+        tts_start_log "TTS后端自动选择完成：effective=local, reason=检测到外接音响, device=${TTS_DEVICE_NAME}"
+    else
+        RABBITBOT_TTS_BACKEND="unitree"
+        tts_start_log "TTS后端自动选择完成：effective=unitree, reason=未检测到 ${PREFERRED_LOCAL_TTS_DEVICE}，回退到 Unitree G1 本体 TTS"
     fi
     export RABBITBOT_TTS_BACKEND
 fi
