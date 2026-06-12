@@ -31,13 +31,18 @@ class UnitreeG1TTS:
         self.network_interface = os.getenv("RABBITBOT_UNITREE_TTS_INTERFACE", "eno1").strip() or "eno1"
         self.speaker_id = int(os.getenv("RABBITBOT_UNITREE_TTS_SPEAKER_ID", "0"))
         self.timeout = float(os.getenv("RABBITBOT_UNITREE_TTS_TIMEOUT", "10"))
-        self.command_timeout = float(os.getenv("RABBITBOT_UNITREE_TTS_COMMAND_TIMEOUT", str(self.timeout + 5.0)))
+        default_command_timeout = max(self.timeout + 35.0, 45.0)
+        self.command_timeout = float(os.getenv("RABBITBOT_UNITREE_TTS_COMMAND_TIMEOUT", str(default_command_timeout)))
         volume_text = os.getenv("RABBITBOT_UNITREE_TTS_VOLUME", "100").strip()
         self.volume = int(volume_text) if volume_text else -1
         self.set_volume_each_request = _env_enabled("RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST", False)
+        self.bridge_hold_enabled = _env_enabled("RABBITBOT_UNITREE_TTS_BRIDGE_HOLD", True)
+        self.bridge_hold_extra_seconds = float(os.getenv("RABBITBOT_UNITREE_TTS_BRIDGE_HOLD_EXTRA_SECONDS", "0.5"))
+        self.post_bridge_wait_seconds = float(os.getenv("RABBITBOT_UNITREE_TTS_POST_BRIDGE_WAIT_SECONDS", "0.2"))
         self.volume_applied = False
         self.binary_path = Path(os.getenv("RABBITBOT_UNITREE_TTS_BINARY", "build/unitree_g1_tts_bridge"))
         self.build_script = Path(os.getenv("RABBITBOT_UNITREE_TTS_BUILD_SCRIPT", "scripts/build_unitree_g1_tts_bridge.sh"))
+        self.source_path = Path(os.getenv("RABBITBOT_UNITREE_TTS_SOURCE", "scripts/unitree_g1_tts_bridge.cpp"))
         self.sdk_dir = Path(os.getenv("RABBITBOT_UNITREE_SDK_DIR") or self._default_sdk_dir())
         self.sdk_thirdparty_lib = self.sdk_dir / "thirdparty" / "lib" / os.uname().machine
         self.auto_build = _env_enabled("RABBITBOT_UNITREE_TTS_AUTO_BUILD", True)
@@ -52,8 +57,13 @@ class UnitreeG1TTS:
             speaker=self.speaker_id,
             volume=self.volume,
             set_volume_each_request=self.set_volume_each_request,
+            bridge_hold_enabled=self.bridge_hold_enabled,
+            bridge_hold_extra_seconds=self.bridge_hold_extra_seconds,
+            post_bridge_wait_seconds=self.post_bridge_wait_seconds,
             timeout=self.timeout,
+            command_timeout=self.command_timeout,
             binary=self.binary_path,
+            source=self.source_path,
             sdk=self.sdk_dir,
             thirdparty_lib=self.sdk_thirdparty_lib,
             dry_run=self.dry_run,
@@ -86,8 +96,22 @@ class UnitreeG1TTS:
 
     def _ensure_binary(self):
         if self.binary_path.exists() and os.access(self.binary_path, os.X_OK):
-            _unitree_log("bridge_binary_ready", binary=self.binary_path)
-            return
+            binary_mtime = self.binary_path.stat().st_mtime
+            dependency_paths = [self.source_path, self.build_script]
+            stale_dependencies = [
+                str(path)
+                for path in dependency_paths
+                if path.exists() and path.stat().st_mtime > binary_mtime
+            ]
+            if not stale_dependencies:
+                _unitree_log("bridge_binary_ready", binary=self.binary_path)
+                return
+            _unitree_log(
+                "bridge_binary_stale",
+                binary=self.binary_path,
+                stale_dependencies=";".join(stale_dependencies),
+                reason="源码或构建脚本更新，重新构建桥接程序",
+            )
         if not self.auto_build:
             raise FileNotFoundError(f"Unitree G1 TTS 桥接程序不存在: {self.binary_path}")
         if not self.build_script.exists():
@@ -133,6 +157,7 @@ class UnitreeG1TTS:
             return tts_index
 
         duration = self._estimate_duration(clean_text)
+        bridge_hold_seconds = duration + self.bridge_hold_extra_seconds if self.bridge_hold_enabled else 0.0
         start = time.perf_counter()
         _unitree_log(
             "tts_request_start",
@@ -142,6 +167,7 @@ class UnitreeG1TTS:
             speaker=self.speaker_id,
             volume=self.volume,
             estimated_duration=f"{duration:.3f}s",
+            bridge_hold_seconds=f"{bridge_hold_seconds:.3f}s",
         )
         used_volume = False
         volume_attempted = False
@@ -156,6 +182,7 @@ class UnitreeG1TTS:
                     "--network", self.network_interface,
                     "--speaker", str(self.speaker_id),
                     "--timeout", str(self.timeout),
+                    "--hold-seconds", f"{bridge_hold_seconds:.3f}",
                     "--text", clean_text,
                 ]
                 if include_volume:
@@ -207,13 +234,15 @@ class UnitreeG1TTS:
             self.volume_applied = True
         with self.lock:
             now = time.monotonic()
-            self.pending_until = max(now, self.pending_until) + duration
+            self.pending_until = max(now, self.pending_until) + self.post_bridge_wait_seconds
         _unitree_log(
             "tts_request_done",
             text=clean_text,
             tts_index=tts_index,
             elapsed=f"{elapsed:.3f}s",
             estimated_duration=f"{duration:.3f}s",
+            bridge_hold_seconds=f"{bridge_hold_seconds:.3f}s",
+            post_bridge_wait_seconds=f"{self.post_bridge_wait_seconds:.3f}s",
             stdout=stdout[-1000:],
         )
         return tts_index

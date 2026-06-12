@@ -1,6 +1,9 @@
+#include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <thread>
 
 #include <unitree/robot/channel/channel_factory.hpp>
 #include <unitree/robot/g1/audio/g1_audio_client.hpp>
@@ -10,7 +13,7 @@ namespace {
 void PrintUsage(const char* program) {
   std::cerr << "用法: " << program
             << " --network <网卡名> --text <播报文本> [--speaker <编号>]"
-            << " [--volume <0-100>] [--timeout <秒>]" << std::endl;
+            << " [--volume <0-100>] [--timeout <秒>] [--hold-seconds <秒>]" << std::endl;
 }
 
 bool ReadNextValue(int argc, char** argv, int* index, std::string* value) {
@@ -49,6 +52,7 @@ int main(int argc, char** argv) {
   int speaker_id = 0;
   int volume = -1;
   float timeout = 10.0F;
+  float hold_seconds = 0.0F;
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -81,6 +85,12 @@ int main(int argc, char** argv) {
         return 2;
       }
       timeout = ParseFloat(value, "timeout");
+    } else if (arg == "--hold-seconds") {
+      if (!ReadNextValue(argc, argv, &i, &value)) {
+        PrintUsage(argv[0]);
+        return 2;
+      }
+      hold_seconds = ParseFloat(value, "hold-seconds");
     } else if (arg == "--help" || arg == "-h") {
       PrintUsage(argv[0]);
       return 0;
@@ -102,11 +112,13 @@ int main(int argc, char** argv) {
   if (volume < -1) {
     volume = -1;
   }
+  hold_seconds = std::clamp(hold_seconds, 0.0F, 60.0F);
 
   try {
     std::cout << "Unitree G1 TTS开始: network=" << network_interface
               << ", speaker=" << speaker_id << ", volume=" << volume
-              << ", timeout=" << timeout << ", text_len=" << text.size()
+              << ", timeout=" << timeout << ", hold_seconds=" << hold_seconds
+              << ", text_len=" << text.size()
               << std::endl;
     unitree::robot::ChannelFactory::Instance()->Init(0, network_interface);
     unitree::robot::g1::AudioClient client;
@@ -124,6 +136,13 @@ int main(int argc, char** argv) {
 
     int32_t ret = client.TtsMaker(text, speaker_id);
     std::cout << "Unitree G1 TTS请求完成: ret=" << ret << std::endl;
+    if (ret == 0 && hold_seconds > 0.0F) {
+      std::cout << "Unitree G1 TTS保持客户端存活: seconds=" << hold_seconds
+                << std::endl;
+      std::this_thread::sleep_for(std::chrono::milliseconds(
+          static_cast<int>(hold_seconds * 1000.0F)));
+      std::cout << "Unitree G1 TTS保持完成" << std::endl;
+    }
     return ret;
   } catch (const std::exception& exc) {
     std::cerr << "Unitree G1 TTS异常: " << exc.what() << std::endl;

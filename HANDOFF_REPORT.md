@@ -914,3 +914,56 @@
 
 - 本轮新增/调整的日志点：统一容器和联调启动时打印 TTS 后端、Unitree 网卡、音量以及“每次请求设置音量”配置；Unitree TTS 原有日志继续记录请求开始、返回码、耗时、音量、网卡、speaker id 和估算播放时长。
 - 这些日志用于诊断 TTS 后端是否选错、Unitree 音量配置是否生效、请求是否成功到达 G1 音频服务，以及后续是否仍存在“接口成功但现场无声”的硬件侧问题。
+
+## 本轮补充：修复 Unitree TTS 桥接进程过早退出
+
+### 背景和目标
+
+本轮继续处理 Aaron 现场反馈：workflow 正常执行，机器人手臂动作正常，但机器人没有播报语音。上一轮已确认 28185、TtsMaker 返回码和音量设置均正常，但现场仍无声，因此本轮进一步对比宇树官方 SDK 示例。
+
+### 当前状态
+
+已完成：
+
+- 已运行宇树官方 `g1_audio_client_example eno1` 示例；Aaron 现场确认确实听到了声音，而且包含中文和英文播报。
+- 已确认 G1 本体扬声器和宇树 SDK 音频服务可用，问题不在机器人硬件、网卡或 SDK 基础通信。
+- 已定位关键差异：官方示例在 `TtsMaker` 后会继续 `Sleep(5)` 或 `Sleep(8)`，保持 DDS 客户端进程存活；项目自定义 `unitree_g1_tts_bridge` 原先在 `TtsMaker ret=0` 后立即退出，可能导致请求被接收但 DDS 客户端过早销毁，现场听不到完整播报。
+- 已修改 `scripts/unitree_g1_tts_bridge.cpp`，新增 `--hold-seconds` 参数；`TtsMaker ret=0` 后会按指定秒数保持客户端存活，并记录保持开始和结束日志。
+- 已修改 `rabbitbot/audio/unitree_g1_tts.py`，按台词估算时长向桥接程序传入 `--hold-seconds`，默认启用 `RABBITBOT_UNITREE_TTS_BRIDGE_HOLD=1`。
+- 已调整 Python 后端的命令超时时间，避免长句因为桥接进程保持存活而被本地超时杀掉。
+- 已调整 Python 后端的 `wait_speech` 逻辑：桥接程序内部已等待主要播报时长后，`wait_speech` 只保留短尾部缓冲，避免台词间隔翻倍。
+- 已增强桥接二进制自动重建逻辑：当 C++ 源码或构建脚本比现有二进制更新时，启动 TTS 会自动重建桥接程序，避免继续使用旧二进制。
+- 已完成 C++ 桥接程序重建，`--help` 输出已包含 `--hold-seconds`。
+- 已直接运行新桥接程序发送“桥接保持修复测试。”并保持 4 秒，Aaron 现场确认已经听到该句。
+- 已重启当前容器内 28185 TTS 服务，并发送“HTTP路径修复测试。”；接口返回 `{"out_text":"0"}`，`wait_speech` 返回 `TTS finished`。
+- 已验证 TTS 日志显示 `bridge_hold_enabled=True`、`bridge_hold_seconds=3.500s`，桥接 stdout 包含“保持客户端存活”和“保持完成”。
+
+未完成：
+
+- 仍需在下一次完整 workflow 中确认所有台词与动作并发节奏是否合适。
+
+### 已验证的事实
+
+- 官方 SDK 示例可让现场听到声音，证明 G1 本体音频链路可用。
+- 官方 SDK 示例在 TTS 后保持进程存活，这是项目桥接程序此前缺少的行为。
+- 项目自定义桥接程序增加保持后，现场已确认直接桥接测试句可听到。
+- 28185 HTTP 路径已经使用新桥接保持逻辑，日志显示 HTTP 请求耗时约等于保持时长，而不是立即返回。
+
+### 阻塞问题
+
+- 当前无代码层面阻塞。
+
+### 建议的下一步
+
+- 下一步可运行 workflow 开场验证台词和动作并发节奏。
+- 如果台词间隔偏慢，优先微调 `RABBITBOT_UNITREE_TTS_BRIDGE_HOLD_EXTRA_SECONDS` 或 `_estimate_duration`，不要移除 `--hold-seconds`。
+
+### 注意事项
+
+- 后续如果调短 `RABBITBOT_UNITREE_TTS_BRIDGE_HOLD_EXTRA_SECONDS` 或关闭 `RABBITBOT_UNITREE_TTS_BRIDGE_HOLD`，可能再次出现 `TtsMaker ret=0` 但现场无声的问题。
+- Unitree TTS 没有可靠播放完成回调时，桥接保持时长仍基于文本长度估算；如台词衔接过慢或过快，应调整估算公式或相关环境变量，而不是移除桥接保持逻辑。
+
+### 其它信息
+
+- 本轮新增日志点：桥接程序打印 `hold_seconds`、保持客户端存活开始和结束；Python 后端打印 `bridge_hold_seconds`、`post_bridge_wait_seconds`、命令超时和自动重建原因。
+- 这些日志用于诊断 DDS 客户端生命周期是否覆盖真实播报窗口，以及二进制是否已经包含最新桥接逻辑。
