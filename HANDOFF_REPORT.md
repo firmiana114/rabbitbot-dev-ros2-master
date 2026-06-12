@@ -1190,3 +1190,61 @@ Aaron 指出导览 workflow 的提示词会强调机器人只是导览机器人�
 
 - 本轮新增/调整日志点：workflow 启动日志新增 `stream_tts`、`vlm_stream`、`vlm_max_tokens`、`prompt_profile`；VLM 推理开始日志新增 `stream`、`max_tokens`、`prompt_profile`；关闭 VLM token 流式时新增回退路径日志；完整回答分句播报结束后新增分段数量、已播报字符数和等待耗时日志。
 - 生成时间：2026-06-16 19:30:00
+
+## 本轮补充：QA 模式触发导览 workflow 整合
+
+### 背景和目标
+
+Aaron 要求将 QA workflow 与导览 workflow 整合：系统默认处于 QA 语音问答模式；当 QA 识别到“开始导览”口令后，启动原有导览流程；导览过程中不允许语音打断；导览结束后恢复 QA 模式。要求导览流程本身继续沿用现有严格 DOCX workflow、导航闸门、点位和返航编排，不改导览台词和动作执行逻辑。
+
+### 当前状态
+
+已完成：
+
+- `rabbitbot/agno_agents/vlm_qa_workflow.py` 已新增导览触发逻辑：默认口令为 `开始导览`，可通过 `RABBITBOT_QA_GUIDE_TRIGGER_PHRASES` 配置多个逗号分隔口令。
+- QA workflow 收到导览口令后，会向共享命令文件写入 `go`，并进入导览等待状态；等待期间不再调用 STT 监听，也不会进入 VLM 问答，因此导览过程中不会被 QA 打断。
+- QA workflow 会读取导览状态文件，观察 `guide_running` 到 `guide_finished_waiting_back` 或 `qa_listening` 的状态变化；导览完成后恢复 QA 监听。
+- `scripts_1/start_nav_bridge_workflow_loop.sh` 已默认启用 QA 模式：`RABBITBOT_NAV_WORKFLOW_ENABLE_QA=1` 时默认同时启用 VLM 与 STT 基础服务。
+- 导航 loop 已新增共享状态文件：默认宿主路径为 `runtime/nav_workflow_control/guide_state`，容器路径为 `/workspace/projects/rabbitbot-dev-ros2-master/runtime/nav_workflow_control/guide_state`。
+- 导航 loop 已将命令文件默认从 `/tmp/rabbitbot_nav_workflow_control/command` 调整到项目内 `runtime/nav_workflow_control/command`，确保容器内 QA 与宿主 loop 通过项目挂载访问同一个命令文件。
+- `scripts_1/send_nav_workflow_command.sh` 已同步使用项目内控制目录，外部终端的 `go/back/quit` 仍可用。
+- `scripts/start_vlm_qa_workflow.bash` 和 `scripts_1/start_unified_vlm_qa_workflow.sh` 已补充导览触发相关环境变量说明和透传。
+- 导航 loop 已在关键阶段写入状态：`starting`、`guide_preparing`、`qa_listening`、`guide_running`、`guide_finished_waiting_back`、`returning`、`guide_prepare_failed`、`qa_disabled`。
+- 导航 loop 的运行时健康检查已补充 VLM 8000 检查；默认 QA 模式下如果 VLM 掉线，会在 loop 日志中明确显示 `VLM(8000)`。
+
+未完成：
+
+- 本轮未重启 `rabbitbot-loop.service`，未启动新的导览流程，也未发送语音或文件 `go/back` 命令，避免现场真机误动作。
+- 本轮未做完整实机验证：尚未确认默认 QA 模式启动后 VLM/STT 冷启动耗时、语音识别“开始导览”的现场准确率、导览结束恢复 QA 的实机节奏。
+
+### 已验证的事实
+
+- 已通过 `PYTHONPYCACHEPREFIX=/tmp/rabbitbot_pycache_check python3 -m py_compile rabbitbot/agno_agents/vlm_qa_workflow.py scripts/run_vlm_qa_workflow.py rabbitbot/agno_agents/workflow.py`。
+- 已通过 `bash -n` 检查：`scripts_1/start_nav_bridge_workflow_loop.sh`、`scripts_1/send_nav_workflow_command.sh`、`scripts/start_vlm_qa_workflow.bash`、`scripts_1/start_unified_vlm_qa_workflow.sh`、`scripts_1/start_unified_integration_workflow.sh`。
+- 已通过轻量 Python helper 验证：`请开始导览` 和 `开始，导览！` 能命中导览触发，普通问题 `介绍一下你自己` 不会误触发；状态文件读取 `state=qa_listening` 正常。
+- 已执行 `git diff --check`，未发现空白或补丁格式问题。
+- 尝试运行 `python3 -m pytest tests/control_console -q` 失败，原因为系统 pytest 加载用户目录 anyio 插件时报 `ModuleNotFoundError: No module named '_pytest.scope'`；改用 `py310/bin/python -m pytest` 失败，原因为 `py310` 环境未安装 pytest。该问题属于测试环境依赖不一致，不是本轮代码路径的运行断言失败。
+
+### 阻塞问题
+
+- 实机验证仍需有人值守后重启 `rabbitbot-loop.service`；新 loop 默认会启动 VLM/STT，冷启动和资源占用明显高于原先只启动导览底座的模式。
+- 当前运行中的 `rabbitbot-loop.service` 是本轮修改前启动的旧进程；不重启服务不会加载本轮 QA/导览整合逻辑。
+
+### 建议的下一步
+
+- 在确认现场安全后执行 `sudo systemctl restart rabbitbot-loop.service`，等待 VLM/STT/TTS/导航桥接全部就绪。
+- 观察 `runtime/nav_workflow_control/guide_state`，确认状态最终进入 `qa_listening`。
+- 用语音说“开始导览”，或用 `bash scripts_1/send_nav_workflow_command.sh go` 做非语音等价验证；确认状态切到 `guide_running`，导览期间 QA 日志不再出现新的 STT 监听轮次。
+- 导览结束后确认状态切到 `guide_finished_waiting_back`，QA workflow 恢复监听并可回答普通问题。
+- 如需下一轮导览，仍需先按原有流程发送 `back` 完成返航，待 loop 重新预启动下一轮导览并回到 `qa_listening` 后再说“开始导览”。
+
+### 注意事项
+
+- 新共享控制目录默认为 `runtime/nav_workflow_control`；如果现场仍用旧的 `/tmp/rabbitbot_nav_workflow_control/command` 手写命令，将不会被新 loop 默认读取，除非显式设置 `RABBITBOT_NAV_WORKFLOW_CONTROL_DIR`。
+- QA 只在状态为空、`qa_listening` 或 `waiting_go` 时接受“开始导览”；如果状态为 `guide_running`、`guide_finished_waiting_back` 或 `returning`，会播报默认不可用提示，避免重复启动导览。
+- 默认不在触发导览前额外播报“好的，开始导览”，避免改变原导览开场节奏；如需导览结束后播报恢复提示，可设置 `RABBITBOT_QA_GUIDE_RESUME_SPEECH`。
+- 本轮新增日志点：QA 记录导览口令命中、命令文件写入、导览状态变化、等待超时和恢复 QA；导航 loop 记录 QA workflow 启停、状态文件写入、VLM/STT 默认启用、VLM 健康检查失败原因。
+
+### 其它信息
+
+- 生成时间：2026-06-17 00:00:00

@@ -81,6 +81,44 @@ def _text_preview(text: str, max_chars: int = 24) -> str:
     return f"{compact[:max_chars]}..."
 
 
+def _env_csv(name: str, default: str) -> tuple[str, ...]:
+    raw_value = os.getenv(name, default)
+    values = tuple(item.strip() for item in raw_value.split(",") if item.strip())
+    return values or tuple(item.strip() for item in default.split(",") if item.strip())
+
+
+def _normalize_command_text(text: str) -> str:
+    return "".join(ch for ch in _normalize_text(text).lower() if ch.isalnum() or "一" <= ch <= "鿿")
+
+
+def _is_guide_trigger_text(text: str, phrases: tuple[str, ...]) -> bool:
+    normalized_text = _normalize_command_text(text)
+    if not normalized_text:
+        return False
+    for phrase in phrases:
+        normalized_phrase = _normalize_command_text(phrase)
+        if normalized_phrase and normalized_phrase in normalized_text:
+            return True
+    return False
+
+
+def _read_state_file(path: Path) -> str:
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("state="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        return ""
+    return ""
+
+
+def _write_atomic_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp_path.write_text(text, encoding="utf-8")
+    tmp_path.replace(path)
+
+
 def _setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
@@ -161,10 +199,18 @@ class QAWorkflowConfig:
     vlm_max_tokens: int
     vlm_stream: bool
     thinking_speech: str
+    speak_thinking_speech: bool
     startup_speech: str
     stream_tts: bool
     dialogue_log_path: str
     exit_words: set[str]
+    guide_trigger_phrases: tuple[str, ...]
+    guide_command_file: str
+    guide_state_file: str
+    guide_start_timeout_seconds: float
+    guide_finish_timeout_seconds: float
+    guide_resume_speech: str
+    guide_unavailable_speech: str
 
     @classmethod
     def from_env(cls) -> "QAWorkflowConfig":
@@ -180,10 +226,27 @@ class QAWorkflowConfig:
             vlm_max_tokens=_env_int("RABBITBOT_QA_VLM_MAX_TOKENS", min(256, max(64, answer_max_chars))),
             vlm_stream=_env_bool("RABBITBOT_QA_VLM_STREAM", "0"),
             thinking_speech=os.getenv("RABBITBOT_QA_THINKING_SPEECH", "我听到了，让我想一想。"),
+            speak_thinking_speech=_env_bool("RABBITBOT_QA_SPEAK_THINKING_SPEECH", "0"),
             startup_speech=os.getenv("RABBITBOT_QA_STARTUP_SPEECH", "你好，请问需要我做些什么吗？"),
             stream_tts=_env_bool("RABBITBOT_QA_STREAM_TTS", "1"),
             dialogue_log_path=os.getenv("RABBITBOT_QA_DIALOGUE_LOG", "").strip(),
             exit_words={word.strip().lower() for word in raw_exit_words.split(",") if word.strip()},
+            guide_trigger_phrases=_env_csv("RABBITBOT_QA_GUIDE_TRIGGER_PHRASES", "开始导览"),
+            guide_command_file=os.getenv(
+                "RABBITBOT_QA_GUIDE_COMMAND_FILE",
+                str(PROJECT_ROOT / "runtime" / "nav_workflow_control" / "command"),
+            ).strip(),
+            guide_state_file=os.getenv(
+                "RABBITBOT_QA_GUIDE_STATE_FILE",
+                str(PROJECT_ROOT / "runtime" / "nav_workflow_control" / "guide_state"),
+            ).strip(),
+            guide_start_timeout_seconds=_env_float("RABBITBOT_QA_GUIDE_START_TIMEOUT_SECONDS", 90.0),
+            guide_finish_timeout_seconds=_env_float("RABBITBOT_QA_GUIDE_FINISH_TIMEOUT_SECONDS", 1200.0),
+            guide_resume_speech=os.getenv("RABBITBOT_QA_GUIDE_RESUME_SPEECH", "").strip(),
+            guide_unavailable_speech=os.getenv(
+                "RABBITBOT_QA_GUIDE_UNAVAILABLE_SPEECH",
+                "导览流程正在准备或尚未返航，请稍后再试。",
+            ).strip(),
         )
 
 
@@ -196,6 +259,7 @@ class VLMQAWorkflow:
         self.turn_count = 0
         self.success_count = 0
         self.failure_count = 0
+        self.guide_trigger_count = 0
         self.start_time = time.perf_counter()
         self.dialogue_log_path = self._init_dialogue_log()
 
@@ -254,6 +318,115 @@ class VLMQAWorkflow:
             audio_input_execute(self.ctx.stt_agent, "stop_async")
         except Exception as exc:
             LOGGER.warning("停止 STT 异步监听失败：type=%s, error=%s", type(exc).__name__, exc)
+
+    def _current_guide_state(self) -> str:
+        if not self.config.guide_state_file:
+            return ""
+        return _read_state_file(Path(self.config.guide_state_file))
+
+    def _send_guide_start_command(self, user_text: str) -> bool:
+        command_path = Path(self.config.guide_command_file)
+        state = self._current_guide_state()
+        allowed_states = {"", "qa_listening", "waiting_go"}
+        if state not in allowed_states:
+            LOGGER.warning(
+                "导览触发被拒绝：turn=%s, state=%s, command_file=%s, state_file=%s",
+                self.turn_count,
+                state or "未设置",
+                command_path,
+                self.config.guide_state_file,
+            )
+            if self.config.guide_unavailable_speech:
+                tts_sound(self.ctx.tts_agent, self.config.guide_unavailable_speech, "zh")
+                tts_wait(self.ctx.tts_agent)
+                self._write_dialogue_log("回答", self.config.guide_unavailable_speech)
+            return False
+
+        started_at = time.perf_counter()
+        try:
+            _write_atomic_text(command_path, "go\n")
+        except OSError as exc:
+            elapsed = time.perf_counter() - started_at
+            LOGGER.exception(
+                "导览触发命令写入失败：turn=%s, command_file=%s, type=%s, elapsed=%.3fs",
+                self.turn_count,
+                command_path,
+                type(exc).__name__,
+                elapsed,
+            )
+            raise
+        elapsed = time.perf_counter() - started_at
+        LOGGER.info(
+            "导览触发命令已写入：turn=%s, command_file=%s, state=%s, text_hash=%s, elapsed=%.3fs",
+            self.turn_count,
+            command_path,
+            state or "未设置",
+            _text_digest(user_text),
+            elapsed,
+        )
+        return True
+
+    def _wait_for_guide_completion(self) -> None:
+        started_at = time.perf_counter()
+        start_deadline = started_at + self.config.guide_start_timeout_seconds
+        finish_deadline = started_at + self.config.guide_finish_timeout_seconds
+        last_state: Optional[str] = None
+        saw_running = False
+        LOGGER.info(
+            "暂停问答并等待导览完成：turn=%s, state_file=%s, start_timeout=%.1fs, finish_timeout=%.1fs",
+            self.turn_count,
+            self.config.guide_state_file,
+            self.config.guide_start_timeout_seconds,
+            self.config.guide_finish_timeout_seconds,
+        )
+        while time.perf_counter() < finish_deadline and not self.stop_requested:
+            state = self._current_guide_state()
+            if state != last_state:
+                LOGGER.info(
+                    "导览状态变化：turn=%s, previous=%s, current=%s, elapsed=%.3fs",
+                    self.turn_count,
+                    last_state or "未设置",
+                    state or "未设置",
+                    time.perf_counter() - started_at,
+                )
+                last_state = state
+            if state == "guide_running":
+                saw_running = True
+            if saw_running and state in {"guide_finished_waiting_back", "qa_listening"}:
+                elapsed = time.perf_counter() - started_at
+                LOGGER.info("导览已完成，恢复问答监听：turn=%s, final_state=%s, elapsed=%.3fs", self.turn_count, state, elapsed)
+                if self.config.guide_resume_speech:
+                    tts_sound(self.ctx.tts_agent, self.config.guide_resume_speech, "zh")
+                    tts_wait(self.ctx.tts_agent)
+                    self._write_dialogue_log("回答", self.config.guide_resume_speech)
+                return
+            if not saw_running and time.perf_counter() >= start_deadline:
+                LOGGER.error(
+                    "导览启动等待超时，恢复问答监听：turn=%s, last_state=%s, elapsed=%.3fs",
+                    self.turn_count,
+                    state or "未设置",
+                    time.perf_counter() - started_at,
+                )
+                if self.config.guide_unavailable_speech:
+                    tts_sound(self.ctx.tts_agent, self.config.guide_unavailable_speech, "zh")
+                    tts_wait(self.ctx.tts_agent)
+                    self._write_dialogue_log("回答", self.config.guide_unavailable_speech)
+                return
+            time.sleep(0.5)
+
+        LOGGER.error(
+            "导览完成等待超时，恢复问答监听：turn=%s, last_state=%s, elapsed=%.3fs",
+            self.turn_count,
+            last_state or "未设置",
+            time.perf_counter() - started_at,
+        )
+
+    def _handle_guide_trigger(self, user_text: str) -> None:
+        self.guide_trigger_count += 1
+        self._write_dialogue_log("系统", "收到开始导览口令，暂停问答并启动导览。")
+        if not self._send_guide_start_command(user_text):
+            return
+        self._wait_for_guide_completion()
 
     def _capture_image(self) -> Optional[np.ndarray]:
         if not self.config.include_image:
@@ -577,9 +750,36 @@ class VLMQAWorkflow:
                 self._write_dialogue_log("回答", exit_answer)
                 break
 
+            if _is_guide_trigger_text(user_text, self.config.guide_trigger_phrases):
+                LOGGER.info(
+                    "收到开始导览口令：turn=%s, trigger_count=%s, phrases=%s, text_hash=%s",
+                    self.turn_count,
+                    self.guide_trigger_count + 1,
+                    ";".join(self.config.guide_trigger_phrases),
+                    _text_digest(user_text),
+                )
+                try:
+                    self._handle_guide_trigger(user_text)
+                    self.success_count += 1
+                except Exception as exc:
+                    self.failure_count += 1
+                    LOGGER.exception("导览触发流程失败：turn=%s, type=%s", self.turn_count, type(exc).__name__)
+                    error_answer = "抱歉，导览启动失败，请稍后再试。"
+                    tts_sound(self.ctx.tts_agent, error_answer, "zh")
+                    self._write_dialogue_log("回答", error_answer)
+                await asyncio.sleep(self.config.idle_sleep_seconds)
+                continue
+
             try:
                 if self.config.thinking_speech:
-                    tts_sound(self.ctx.tts_agent, self.config.thinking_speech, "zh")
+                    LOGGER.info(
+                        "收到用户问题后的思考提示：turn=%s, speak=%s, text=%s",
+                        self.turn_count,
+                        self.config.speak_thinking_speech,
+                        self.config.thinking_speech,
+                    )
+                    if self.config.speak_thinking_speech:
+                        tts_sound(self.ctx.tts_agent, self.config.thinking_speech, "zh")
                 image = self._capture_image()
                 if self.config.stream_tts:
                     self._call_vlm_with_stream_tts(user_text, image)
@@ -596,10 +796,11 @@ class VLMQAWorkflow:
 
         total_elapsed = time.perf_counter() - self.start_time
         LOGGER.info(
-            "问答 workflow 结束：turns=%s, success=%s, failure=%s, elapsed=%.3fs",
+            "问答 workflow 结束：turns=%s, success=%s, failure=%s, guide_triggers=%s, elapsed=%.3fs",
             self.turn_count,
             self.success_count,
             self.failure_count,
+            self.guide_trigger_count,
             total_elapsed,
         )
 

@@ -5,7 +5,9 @@
 set -euo pipefail
 
 COMMAND="${1:-}"
-CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_CONTROL_DIR:-/tmp/rabbitbot_nav_workflow_control}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_CONTROL_DIR:-${PROJECT_DIR}/runtime/nav_workflow_control}"
 COMMAND_FILE="${RABBITBOT_NAV_WORKFLOW_COMMAND_FILE:-${CONTROL_DIR}/command}"
 
 case "${COMMAND}" in

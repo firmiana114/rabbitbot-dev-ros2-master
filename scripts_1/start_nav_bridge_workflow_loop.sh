@@ -15,6 +15,10 @@
 #   RABBITBOT_NAV_WORKFLOW_HEALTH_CHECK_INTERVAL_SECONDS：等待命令和运行期间的健康检查间隔秒数。
 #   RABBITBOT_NAV_WORKFLOW_LOST_PROCESS_GRACE_SECONDS：workflow 进程丢失后等待状态文件落盘的宽限秒数。
 #   RABBITBOT_NAV_WORKFLOW_BACK_RETRY_LIMIT：返航失败后自动恢复导航桥接并重试的次数，默认 1。
+#   RABBITBOT_NAV_WORKFLOW_ENABLE_QA：是否默认启动 QA 语音模式，默认 1。
+#   RABBITBOT_QA_GUIDE_TRIGGER_PHRASES：QA 中触发导览的口令，默认“开始导览”。
+#   RABBITBOT_QA_GUIDE_START_TIMEOUT_SECONDS：QA 写入 go 后等待导览开始的超时秒数。
+#   RABBITBOT_QA_GUIDE_FINISH_TIMEOUT_SECONDS：QA 暂停监听并等待导览结束的超时秒数。
 #   RABBITBOT_DIALOGUE_INDEX：选择 conf/dialogue_<序号>.json，未设置时默认 0。
 #   RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX：旧版台词序号变量，仅在 RABBITBOT_DIALOGUE_INDEX 未设置时兜底。
 #   RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE：直接指定台词 JSON 文件完整路径，优先级高于序号。
@@ -43,8 +47,12 @@ CONTAINER_NAME="${CONTAINER_NAME:-rabbitbot-unified-runtime}"
 CONTAINER_RABBITBOT_DIR="${CONTAINER_RABBITBOT_DIR:-/workspace/projects/rabbitbot-dev-ros2-master}"
 CONTAINER_LOG_DIR="${CONTAINER_LOG_DIR:-${CONTAINER_RABBITBOT_DIR}/logs/unified_runtime}"
 HOST_LOG_DIR="${HOST_LOG_DIR:-${PROJECT_DIR}/logs}"
-CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_CONTROL_DIR:-/tmp/rabbitbot_nav_workflow_control}"
+CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_CONTROL_DIR:-${PROJECT_DIR}/runtime/nav_workflow_control}"
+CONTAINER_CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_CONTAINER_CONTROL_DIR:-${CONTAINER_RABBITBOT_DIR}/runtime/nav_workflow_control}"
 COMMAND_FILE="${RABBITBOT_NAV_WORKFLOW_COMMAND_FILE:-${CONTROL_DIR}/command}"
+CONTAINER_COMMAND_FILE="${RABBITBOT_NAV_WORKFLOW_CONTAINER_COMMAND_FILE:-${CONTAINER_CONTROL_DIR}/command}"
+GUIDE_STATE_FILE="${RABBITBOT_NAV_WORKFLOW_GUIDE_STATE_FILE:-${CONTROL_DIR}/guide_state}"
+CONTAINER_GUIDE_STATE_FILE="${RABBITBOT_NAV_WORKFLOW_CONTAINER_GUIDE_STATE_FILE:-${CONTAINER_CONTROL_DIR}/guide_state}"
 RUN_DIR="${HOST_LOG_DIR}/nav_workflow_control"
 POINT_1_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_1:-(1.9105, -1.6180, -0.0029, 0.0265, -0.2046, 0.9785)}"
 POINT_1_TO_2_TRANSITION_TASK="${RABBITBOT_NAV_WORKFLOW_POINT_1_TO_2_TRANSITION:-(8.6465, -2.5763, 0.0547, 0.0907, 0.5347, 0.8384)}"
@@ -64,7 +72,30 @@ RABBITBOT_WORKFLOW_NON_INTEGRATION="${RABBITBOT_WORKFLOW_NON_INTEGRATION:-0}"
 RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE:-0}"
 RABBITBOT_UNIFIED_ATTACH_STDIN="${RABBITBOT_UNIFIED_ATTACH_STDIN:-0}"
 RABBITBOT_TTS_STRICT_FAILURE="${RABBITBOT_TTS_STRICT_FAILURE:-0}"
-RABBITBOT_UNIFIED_START_STT="${RABBITBOT_UNIFIED_START_STT:-0}"
+RABBITBOT_NAV_WORKFLOW_ENABLE_QA="${RABBITBOT_NAV_WORKFLOW_ENABLE_QA:-1}"
+if [ "${RABBITBOT_NAV_WORKFLOW_ENABLE_QA}" = "1" ]; then
+    DEFAULT_UNIFIED_START_VLM=1
+    DEFAULT_UNIFIED_START_STT=1
+else
+    DEFAULT_UNIFIED_START_VLM=0
+    DEFAULT_UNIFIED_START_STT=0
+fi
+RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM:-${DEFAULT_UNIFIED_START_VLM}}"
+RABBITBOT_UNIFIED_START_EMBEDDING="${RABBITBOT_UNIFIED_START_EMBEDDING:-0}"
+RABBITBOT_UNIFIED_START_STT="${RABBITBOT_UNIFIED_START_STT:-${DEFAULT_UNIFIED_START_STT}}"
+RABBITBOT_QA_LISTEN_TIMEOUT="${RABBITBOT_QA_LISTEN_TIMEOUT:-30}"
+RABBITBOT_QA_INCLUDE_IMAGE="${RABBITBOT_QA_INCLUDE_IMAGE:-0}"
+RABBITBOT_QA_IMAGE_SOURCE="${RABBITBOT_QA_IMAGE_SOURCE:-robot}"
+RABBITBOT_QA_MAX_ANSWER_CHARS="${RABBITBOT_QA_MAX_ANSWER_CHARS:-180}"
+RABBITBOT_QA_STREAM_TTS="${RABBITBOT_QA_STREAM_TTS:-1}"
+RABBITBOT_QA_VLM_STREAM="${RABBITBOT_QA_VLM_STREAM:-0}"
+RABBITBOT_QA_VLM_MAX_TOKENS="${RABBITBOT_QA_VLM_MAX_TOKENS:-}"
+RABBITBOT_QA_VERBOSE="${RABBITBOT_QA_VERBOSE:-0}"
+RABBITBOT_QA_GUIDE_TRIGGER_PHRASES="${RABBITBOT_QA_GUIDE_TRIGGER_PHRASES:-开始导览}"
+RABBITBOT_QA_GUIDE_START_TIMEOUT_SECONDS="${RABBITBOT_QA_GUIDE_START_TIMEOUT_SECONDS:-90}"
+RABBITBOT_QA_GUIDE_FINISH_TIMEOUT_SECONDS="${RABBITBOT_QA_GUIDE_FINISH_TIMEOUT_SECONDS:-1200}"
+RABBITBOT_QA_GUIDE_RESUME_SPEECH="${RABBITBOT_QA_GUIDE_RESUME_SPEECH:-}"
+RABBITBOT_QA_GUIDE_UNAVAILABLE_SPEECH="${RABBITBOT_QA_GUIDE_UNAVAILABLE_SPEECH:-导览流程正在准备或尚未返航，请稍后再试。}"
 RABBITBOT_DIALOGUE_INDEX="${RABBITBOT_DIALOGUE_INDEX:-}"
 RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX="${RABBITBOT_DOCX_GUIDE_DIALOGUE_INDEX:-}"
 RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE="${RABBITBOT_DOCX_GUIDE_DIALOGUE_FILE:-}"
@@ -96,6 +127,10 @@ current_gate_file=""
 current_gate_ready_file=""
 current_host_gate_file=""
 current_host_gate_ready_file=""
+QA_HOST_PID_FILE="${HOST_WORKFLOW_CONTROL_DIR}/vlm_qa.pid"
+CONTAINER_QA_PID_FILE="${CONTAINER_WORKFLOW_CONTROL_DIR}/vlm_qa.pid"
+HOST_QA_LOG_DIR="${HOST_WORKFLOW_RUN_DIR}/vlm_qa_workflow"
+CONTAINER_QA_LOG_DIR="${CONTAINER_WORKFLOW_RUN_DIR}/vlm_qa_workflow"
 last_runtime_health_check_ms=0
 
 log_info() {
@@ -329,6 +364,9 @@ base_services_health_ok() {
     if ! port_open 7687; then
         problems+=("Neo4j(7687)")
     fi
+    if [ "${RABBITBOT_UNIFIED_START_VLM}" = "1" ] && ! http_ok http://127.0.0.1:8000/v1/models; then
+        problems+=("VLM(8000)")
+    fi
     if ! http_ok http://127.0.0.1:28185/docs; then
         problems+=("TTS(28185)")
     fi
@@ -371,6 +409,21 @@ check_runtime_health_periodic() {
         return $?
     fi
     return 0
+}
+
+write_guide_state() {
+    local state="$1"
+    local detail="${2:-}"
+    mkdir -p "$(dirname "${GUIDE_STATE_FILE}")"
+    local tmp_file="${GUIDE_STATE_FILE}.$$"
+    {
+        printf 'state=%s\n' "${state}"
+        printf 'run_id=%s\n' "${current_run_id:-}"
+        printf 'detail=%s\n' "${detail}"
+        date '+time=%Y-%m-%d %H:%M:%S'
+    } >"${tmp_file}"
+    mv "${tmp_file}" "${GUIDE_STATE_FILE}"
+    log_info "导览状态已更新：state=${state}, detail=${detail:-无}, file=${GUIDE_STATE_FILE}"
 }
 
 wait_port() {
@@ -436,6 +489,91 @@ workflow_running() {
     docker exec "${CONTAINER_NAME}" bash -lc 'pgrep -f "[e]xamples/run_kuavo_agno.py" >/dev/null || pgrep -f "[s]cripts/run_kuavo_agno_workflow.py" >/dev/null || pgrep -f "[s]cripts/start_kuavo_agno_workflow.bash" >/dev/null' >/dev/null 2>&1
 }
 
+vlm_qa_workflow_running() {
+    docker exec "${CONTAINER_NAME}" bash -lc 'pgrep -f "[r]un_vlm_qa_workflow.py" >/dev/null || pgrep -f "[s]cripts/start_vlm_qa_workflow.bash" >/dev/null' >/dev/null 2>&1
+}
+
+stop_existing_vlm_qa_workflow() {
+    docker exec "${CONTAINER_NAME}" bash -lc '
+set +e
+pids="$( { pgrep -f "[r]un_vlm_qa_workflow.py" || true; pgrep -f "[s]cripts/start_vlm_qa_workflow.bash" || true; } | awk "NF && !seen[\$1]++ {print \$1}" )"
+[ -z "${pids}" ] && exit 0
+echo "[INFO] 停止已有 QA workflow 进程: ${pids}"
+kill -TERM ${pids} 2>/dev/null || true
+sleep 2
+remaining="$( { pgrep -f "[r]un_vlm_qa_workflow.py" || true; pgrep -f "[s]cripts/start_vlm_qa_workflow.bash" || true; } | awk "NF && !seen[\$1]++ {print \$1}" )"
+[ -n "${remaining}" ] && kill -KILL ${remaining} 2>/dev/null || true
+' >/dev/null 2>&1 || true
+}
+
+start_qa_workflow() {
+    if [ "${RABBITBOT_NAV_WORKFLOW_ENABLE_QA}" != "1" ]; then
+        write_guide_state "qa_disabled" "RABBITBOT_NAV_WORKFLOW_ENABLE_QA=0"
+        log_info "QA 语音模式已关闭，继续只使用外部 go/back 命令。"
+        return 0
+    fi
+    if [ "${RABBITBOT_UNIFIED_START_VLM}" != "1" ] || [ "${RABBITBOT_UNIFIED_START_STT}" != "1" ]; then
+        log_warn "QA 语音模式需要 VLM 和 STT；当前 VLM=${RABBITBOT_UNIFIED_START_VLM}, STT=${RABBITBOT_UNIFIED_START_STT}。"
+    fi
+
+    stop_existing_vlm_qa_workflow
+    mkdir -p "${HOST_QA_LOG_DIR}" "$(dirname "${QA_HOST_PID_FILE}")"
+    rm -f "${QA_HOST_PID_FILE}"
+    local qa_run_id
+    qa_run_id="$(date +%Y%m%d_%H%M%S)"
+    log_info "启动 QA 语音模式：run_id=${qa_run_id}, trigger=${RABBITBOT_QA_GUIDE_TRIGGER_PHRASES}, command_file=${COMMAND_FILE}, state_file=${GUIDE_STATE_FILE}"
+    docker exec -d \
+        -e RABBITBOT_DIR="${CONTAINER_RABBITBOT_DIR}" \
+        -e RABBITBOT_LOG_DIR="${CONTAINER_QA_LOG_DIR}" \
+        -e RABBITBOT_QA_LOG_DIR="${CONTAINER_QA_LOG_DIR}" \
+        -e RABBITBOT_QA_PID_FILE="${CONTAINER_QA_PID_FILE}" \
+        -e RABBITBOT_QA_RUN_ID="${qa_run_id}" \
+        -e RABBITBOT_QA_LISTEN_TIMEOUT="${RABBITBOT_QA_LISTEN_TIMEOUT}" \
+        -e RABBITBOT_QA_INCLUDE_IMAGE="${RABBITBOT_QA_INCLUDE_IMAGE}" \
+        -e RABBITBOT_QA_IMAGE_SOURCE="${RABBITBOT_QA_IMAGE_SOURCE}" \
+        -e RABBITBOT_QA_MAX_ANSWER_CHARS="${RABBITBOT_QA_MAX_ANSWER_CHARS}" \
+        -e RABBITBOT_QA_STREAM_TTS="${RABBITBOT_QA_STREAM_TTS}" \
+        -e RABBITBOT_QA_VLM_STREAM="${RABBITBOT_QA_VLM_STREAM}" \
+        -e RABBITBOT_QA_VLM_MAX_TOKENS="${RABBITBOT_QA_VLM_MAX_TOKENS}" \
+        -e RABBITBOT_QA_VERBOSE="${RABBITBOT_QA_VERBOSE}" \
+        -e RABBITBOT_QA_GUIDE_TRIGGER_PHRASES="${RABBITBOT_QA_GUIDE_TRIGGER_PHRASES}" \
+        -e RABBITBOT_QA_GUIDE_COMMAND_FILE="${CONTAINER_COMMAND_FILE}" \
+        -e RABBITBOT_QA_GUIDE_STATE_FILE="${CONTAINER_GUIDE_STATE_FILE}" \
+        -e RABBITBOT_QA_GUIDE_START_TIMEOUT_SECONDS="${RABBITBOT_QA_GUIDE_START_TIMEOUT_SECONDS}" \
+        -e RABBITBOT_QA_GUIDE_FINISH_TIMEOUT_SECONDS="${RABBITBOT_QA_GUIDE_FINISH_TIMEOUT_SECONDS}" \
+        -e RABBITBOT_QA_GUIDE_RESUME_SPEECH="${RABBITBOT_QA_GUIDE_RESUME_SPEECH}" \
+        -e RABBITBOT_QA_GUIDE_UNAVAILABLE_SPEECH="${RABBITBOT_QA_GUIDE_UNAVAILABLE_SPEECH}" \
+        -e PYTHONUNBUFFERED=1 \
+        "${CONTAINER_NAME}" bash -lc '
+set -euo pipefail
+cd "${RABBITBOT_DIR}"
+mkdir -p "${RABBITBOT_QA_LOG_DIR}" "$(dirname "${RABBITBOT_QA_PID_FILE}")"
+log_path="${RABBITBOT_QA_LOG_DIR}/vlm_qa_workflow_${RABBITBOT_QA_RUN_ID}.log"
+ln -sfn "${log_path}" "${RABBITBOT_QA_LOG_DIR}/vlm_qa_workflow_latest.log"
+echo "QA workflow日志: ${log_path}" >>"${log_path}"
+setsid bash scripts/start_vlm_qa_workflow.bash >>"${log_path}" 2>&1 &
+echo "$!" >"${RABBITBOT_QA_PID_FILE}"
+' >/dev/null
+    sleep 0.5
+    if [ -s "${QA_HOST_PID_FILE}" ]; then
+        log_info "QA workflow 已启动：pid=$(cat "${QA_HOST_PID_FILE}"), log_dir=${HOST_QA_LOG_DIR}"
+    else
+        log_warn "QA workflow PID 文件尚未写入：${QA_HOST_PID_FILE}，请查看 ${HOST_QA_LOG_DIR} 日志。"
+    fi
+}
+stop_qa_workflow() {
+    if [ -s "${QA_HOST_PID_FILE}" ]; then
+        local qa_pid
+        qa_pid="$(cat "${QA_HOST_PID_FILE}" 2>/dev/null || true)"
+        if [ -n "${qa_pid}" ]; then
+            log_info "正在停止 QA workflow 进程组：pgid=${qa_pid}"
+            docker exec "${CONTAINER_NAME}" bash -lc "kill -TERM -- -'${qa_pid}' 2>/dev/null || kill -TERM '${qa_pid}' 2>/dev/null || true; sleep 2; kill -KILL -- -'${qa_pid}' 2>/dev/null || true" >/dev/null 2>&1 || true
+        fi
+        rm -f "${QA_HOST_PID_FILE}"
+    fi
+    stop_existing_vlm_qa_workflow
+}
+
 current_workflow_process_active() {
     if [ -z "${current_pid_file}" ] || [ ! -s "${current_pid_file}" ]; then
         return 1
@@ -477,6 +615,7 @@ cleanup() {
     local reason="${1:-EXIT}"
     trap - INT TERM EXIT
     stop_workflow_tail
+    stop_qa_workflow
     stop_current_workflow
     stop_nav_bridge "${reason}"
 }
@@ -486,7 +625,9 @@ trap 'cleanup TERM; exit 143' TERM
 trap 'cleanup EXIT' EXIT
 
 prepare_runtime() {
-    mkdir -p "${CONTROL_DIR}" "${RUN_DIR}" "${HOST_LOG_DIR}" "${HOST_WORKFLOW_RUN_DIR}" "${HOST_WORKFLOW_CONTROL_DIR}"
+    mkdir -p "${CONTROL_DIR}" "${RUN_DIR}" "${HOST_LOG_DIR}" "${HOST_WORKFLOW_RUN_DIR}" "${HOST_WORKFLOW_CONTROL_DIR}" "${HOST_QA_LOG_DIR}"
+    write_guide_state "starting" "导航 loop 初始化"
+    cleanup_stale_nav_processes
     resolve_nav_pcd_path
     require_path "${NAV_BRIDGE_SCRIPT}"
     require_path "${ROS_SETUP}"
@@ -509,9 +650,29 @@ stop_nav_bridge() {
     nav_group_pid=""
 }
 
+cleanup_stale_nav_processes() {
+    log_info "清理旧导航桥接相关进程"
+    pkill -TERM -f '[u]vicorn humble_robot_agent_bridge:app' 2>/dev/null || true
+    pkill -TERM -f '[p]ython3 -m uvicorn humble_robot_agent_bridge:app' 2>/dev/null || true
+    pkill -TERM -f '[g]oGoalNavigation66' 2>/dev/null || true
+    pkill -TERM -f '[g]1ArmOfficialActionServer' 2>/dev/null || true
+    pkill -TERM -f '[t]ail -n \+1 -F .*/01_goGoalNavigation66\.log' 2>/dev/null || true
+    sleep 2
+    pkill -KILL -f '[u]vicorn humble_robot_agent_bridge:app' 2>/dev/null || true
+    pkill -KILL -f '[p]ython3 -m uvicorn humble_robot_agent_bridge:app' 2>/dev/null || true
+    pkill -KILL -f '[g]oGoalNavigation66' 2>/dev/null || true
+    pkill -KILL -f '[g]1ArmOfficialActionServer' 2>/dev/null || true
+    pkill -KILL -f '[t]ail -n \+1 -F .*/01_goGoalNavigation66\.log' 2>/dev/null || true
+    if ss -ltnp 2>/dev/null | grep -q ':28180'; then
+        log_warn "28180 端口在启动前仍被占用："
+        ss -ltnp 2>/dev/null | grep ':28180' >&2 || true
+    fi
+}
+
 start_nav_bridge() {
     if port_open 28180; then
-        log_error "28180 端口已被占用，无法由本脚本统一拉起导航桥接。请先停止旧导航桥接或占用进程。"
+        log_error "28180 端口在旧进程清理后仍被占用，无法由本脚本统一拉起导航桥接。"
+        ss -ltnp 2>/dev/null | grep ':28180' >&2 || true
         return 1
     fi
 
@@ -572,6 +733,8 @@ ensure_unified_services() {
         RABBITBOT_WORKFLOW_NON_INTEGRATION="${RABBITBOT_WORKFLOW_NON_INTEGRATION}" \
         RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE}" \
         RABBITBOT_UNIFIED_ATTACH_STDIN="${RABBITBOT_UNIFIED_ATTACH_STDIN}" \
+        RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM}" \
+        RABBITBOT_UNIFIED_START_EMBEDDING="${RABBITBOT_UNIFIED_START_EMBEDDING}" \
         RABBITBOT_UNIFIED_START_STT="${RABBITBOT_UNIFIED_START_STT}" \
         WAIT_DEFAULT_SECONDS="${WAIT_DEFAULT_SECONDS}" \
         WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS}" \
@@ -995,9 +1158,11 @@ main() {
     ensure_unified_services
     runtime_health_ok "启动完成复查"
 
-    log_info "导航桥接与基础服务已就绪。命令循环开始。"
+    start_qa_workflow
+    log_info "导航桥接、基础服务与 QA 模式已就绪。命令循环开始。"
     while true; do
         queued_back_after_workflow=0
+        write_guide_state "guide_preparing" "预启动导览 workflow"
         if ! check_runtime_health_periodic "循环开始"; then
             log_warn "循环开始前健康检查失败，尝试恢复后重新进入循环"
             recover_runtime_services "循环开始健康检查失败" || sleep "${RETURN_FAILURE_WAIT_SECONDS}"
@@ -1011,12 +1176,14 @@ main() {
             continue
         fi
         if ! wait_workflow_gate_ready; then
+            write_guide_state "guide_prepare_failed" "workflow预启动不可用"
             stop_workflow_tail
             stop_current_workflow
             recover_runtime_services "workflow预启动不可用" || sleep "${RETURN_FAILURE_WAIT_SECONDS}"
             log_warn "本轮 workflow 预启动不可用，重新预启动"
             continue
         fi
+        write_guide_state "qa_listening" "导览 workflow 已停在 go 闸门"
         if ! wait_go_or_back; then
             stop_workflow_tail
             stop_current_workflow
@@ -1026,6 +1193,7 @@ main() {
         fi
         if [ "${WAITED_COMMAND}" = "back" ]; then
             log_info "等待 go 阶段收到 back，停止预启动 workflow 后直接返航"
+            write_guide_state "returning" "等待go阶段收到back"
             stop_workflow_tail
             stop_current_workflow
             complete_return_to_start_or_wait_retry "等待go阶段收到back"
@@ -1033,13 +1201,16 @@ main() {
             continue
         fi
         release_workflow_gate
+        write_guide_state "guide_running" "run_id=${current_run_id}"
         monitor_workflow_until_finished
+        write_guide_state "guide_finished_waiting_back" "run_id=${current_run_id}, exit_code=$(cat "${current_exit_code_file}" 2>/dev/null || echo unknown)"
         if [ "${queued_back_after_workflow}" = "1" ]; then
             log_info "使用 workflow 运行期间预接收的 back 命令进入返航"
             queued_back_after_workflow=0
         else
             wait_command back "back 返回起点"
         fi
+        write_guide_state "returning" "workflow结束后back"
         complete_return_to_start_or_wait_retry "workflow结束后back"
         log_info "返航流程结束，继续预启动下一次 workflow。"
     done
