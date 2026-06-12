@@ -1024,3 +1024,57 @@ Aaron 要求将 `ShuHao-orin` 上已经完成的 TTS/STT 逻辑和 `qa_workflow`
 
 - 本轮新增/调整日志点：TTS 启动检查会记录 auto 判定开始、接口状态、carrier/IP 检查结果、桥接构建状态、Unitree 音频服务探测开始/成功/失败和最终后端；QA workflow 会记录启动配置、每轮监听、STT 输入摘要、VLM 推理耗时、流式 TTS 分段、问答日志写入和异常失败路径。
 - 生成时间：2026-06-16 18:10:00
+
+## 本轮补充：AGX QA workflow 运行测试与 VLM 流式阻塞
+
+### 背景和目标
+
+Aaron 要求在 AGX 上实际测试 QA workflow，重点确认 STT/TTS 设备选择、通过 28184 `/exec inject_text_async` 纯命令行注入问题，以及多句回答场景下的流式 TTS 行为。
+
+### 当前状态
+
+已完成：
+
+- 启动 `scripts_1/start_unified_vlm_qa_workflow.sh`，验证统一容器能拉起 Neo4j、VLM、TTS、STT、Memory 和 Robot Agent。
+- 验证 VLM 冷启动约 4 分钟量级，启动日志显示模型加载、torch compile、graph capture 和 8000 API server 就绪。
+- 验证 TTS auto 设备选择逻辑，发现首次 `GetVolume` 探测缺少 `LD_LIBRARY_PATH`，导致 `libddsc.so.0` 找不到并错误回退 local；已修复 `scripts/start_tts_app.bash`，探测前自动加入 Unitree SDK2 thirdparty 动态库路径。
+- 修复后 TTS auto 成功选择 Unitree：`GetVolume ret=0, volume=100`，28185 `/exec` 就绪。
+- 验证 STT 设备选择：STT 选择 `NVIDIA Jetson AGX Orin APE: - (hw:1,0)`，index=4，并成功监听 28184。
+- 使用 Aaron 指定的 curl 方式向 28184 注入文本，接口返回 HTTP 200 和 `utterance_id`。
+- 第一轮短问题“你好，请用一句话介绍你自己”成功完成：QA workflow 收到文本、调用 VLM、流式输出首 token，并拆成 2 个 TTS 分段播报。
+- 多句问题测试暴露 prompt 质量问题：原 prompt 会让模型复述“用户问题/回答要求”；已调整 QA prompt，最终文本模式改为直接传用户原文，并增加 `RABBITBOT_QA_VLM_MAX_TOKENS` 上限。
+- 已停止本轮测试启动的 `rabbitbot-unified-runtime` 容器，释放 28180、28182、28184、28185、8000、7687 等端口，避免留下高资源占用服务。
+
+未完成：
+
+- 多句流式问答没有达到可交付效果。测试中 vLLM 流式接口在多次异常/中断后进入无响应状态，后续 `stream=true` curl 和 `stream=false` curl 均在 20 秒内无有效返回。
+- 本轮未继续重启 VLM 做第四轮完整复测，避免反复加载模型和长时间占用现场资源。
+
+### 已验证的事实
+
+- TTS auto 选择和 Unitree 探测修复有效：日志包含 `Unitree桥接动态库路径已设置`、`Unitree音频服务探测通过`、`effective=unitree`。
+- STT 注入命令有效，例如注入多句问题时返回 `HTTP=200` 和对应 `utterance_id`。
+- QA workflow 的流式 TTS 机制本身可工作：日志中出现多个 `流式 TTS 分段已提交`，并调用 28185 `/exec` 播报。
+- 当前最大问题不是 STT 注入或 TTS 分段，而是 VLM 输出质量与流式接口稳定性：多句问题出现重复复述，之后 VLM 8000 进入请求无有效返回状态。
+- 直接非流式 vLLM 原始问题曾返回内容，说明模型服务在干净状态下可推理；但异常流式请求/中断后服务可能变为不健康。
+
+### 阻塞问题
+
+- QA workflow 的多句流式问答仍有阻塞：当前 vLLM 流式接口不稳定，且 prompt 稳定性不足。需要进一步隔离 vLLM 流式接口、Python SDK 客户端和 prompt 采样参数。
+
+### 建议的下一步
+
+- 下轮先不启动完整 QA workflow，直接用 8000 做最小化 curl 矩阵测试：`stream=false/true`、原始用户问题、短 prompt、不同 `max_tokens`，确认哪个组合稳定。
+- 如果 `stream=true` 持续不稳定，可先为 QA workflow 增加非流式 VLM fallback，然后再做 TTS 分段播放。
+- 若继续使用流式 VLM，应给 `_create_vlm_stream()` 增加首 token 超时和异常恢复日志，避免 workflow 卡死。
+- 继续保留本轮 TTS `LD_LIBRARY_PATH` 修复；该修复是明确有效的兼容性修复。
+
+### 注意事项
+
+- 本轮停止了测试容器，AGX 结束时没有保持 RabbitBot 基础服务运行。
+- 本轮修改后仍需提交：`rabbitbot/agno_agents/vlm_qa_workflow.py` 和 `scripts/start_tts_app.bash`。
+
+### 其它信息
+
+- 本轮新增/调整日志点：TTS auto 探测新增 Unitree 桥接动态库路径日志；QA workflow 的 VLM token 上限可通过 `RABBITBOT_QA_VLM_MAX_TOKENS` 调整，后续排查可结合 `VLM 首 token 到达`、`VLM 流式问答完成` 和 `流式 TTS 分段已提交` 判断卡点。
+- 生成时间：2026-06-16 18:55:00

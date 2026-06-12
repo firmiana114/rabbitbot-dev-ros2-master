@@ -19,6 +19,9 @@ RABBITBOT_UNITREE_TTS_AUTO_PROBE="${RABBITBOT_UNITREE_TTS_AUTO_PROBE:-1}"
 RABBITBOT_UNITREE_TTS_PROBE_TIMEOUT="${RABBITBOT_UNITREE_TTS_PROBE_TIMEOUT:-3}"
 RABBITBOT_UNITREE_TTS_BINARY="${RABBITBOT_UNITREE_TTS_BINARY:-build/unitree_g1_tts_bridge}"
 RABBITBOT_UNITREE_TTS_BUILD_SCRIPT="${RABBITBOT_UNITREE_TTS_BUILD_SCRIPT:-scripts/build_unitree_g1_tts_bridge.sh}"
+PROJECT_DIR="$(pwd)"
+PROJECTS_DIR="$(cd "${PROJECT_DIR}/.." && pwd)"
+ARCH="$(uname -m)"
 
 tts_start_log() {
     printf '[%s] TTS启动检查: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -110,6 +113,26 @@ ensure_unitree_probe_binary() {
     return 1
 }
 
+unitree_probe_library_path() {
+    local candidates=(
+        "/workspace/projects/unitree_sdk2/thirdparty/lib/${ARCH}"
+        "${PROJECTS_DIR}/unitree_sdk2/thirdparty/lib/${ARCH}"
+        "/mnt/ssd/navgation/projects/unitree_sdk2/thirdparty/lib/${ARCH}"
+    )
+    local path=""
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        if [ -d "${candidate}" ]; then
+            if [ -z "${path}" ]; then
+                path="${candidate}"
+            else
+                path="${path}:${candidate}"
+            fi
+        fi
+    done
+    printf '%s' "${path}"
+}
+
 unitree_audio_probe() {
     if ! env_enabled "${RABBITBOT_UNITREE_TTS_AUTO_PROBE}"; then
         tts_start_log "Unitree音频服务探测跳过：reason=RABBITBOT_UNITREE_TTS_AUTO_PROBE=${RABBITBOT_UNITREE_TTS_AUTO_PROBE}"
@@ -121,6 +144,13 @@ unitree_audio_probe() {
 
     probe_stdout="/tmp/rabbitbot_unitree_tts_probe.stdout"
     probe_stderr="/tmp/rabbitbot_unitree_tts_probe.stderr"
+    probe_library_path="$(unitree_probe_library_path)"
+    if [ -n "${probe_library_path}" ]; then
+        export LD_LIBRARY_PATH="${probe_library_path}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+        tts_start_log "Unitree桥接动态库路径已设置：ld_library_path=${probe_library_path}"
+    else
+        tts_start_log "Unitree桥接动态库路径未找到，将按当前 LD_LIBRARY_PATH 探测：arch=${ARCH}"
+    fi
     timeout_seconds="$(python - "${RABBITBOT_UNITREE_TTS_PROBE_TIMEOUT}" <<'PY'
 import math
 import sys

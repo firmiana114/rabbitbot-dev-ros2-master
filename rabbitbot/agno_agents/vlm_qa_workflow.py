@@ -277,38 +277,34 @@ class VLMQAWorkflow:
         LOGGER.info("已读取机器人图像：shape=%s, elapsed=%.3fs", image.shape, elapsed)
         return image
 
-    def _build_prompt(self, user_text: str, has_image: bool) -> str:
-        visual_rule = "请结合当前画面回答用户问题。" if has_image else "当前没有可用画面，请只根据用户问题回答。"
+    def _vlm_max_tokens(self) -> int:
+        return _env_int("RABBITBOT_QA_VLM_MAX_TOKENS", min(256, max(64, self.config.answer_max_chars)))
+
+    def _build_visual_prompt(self, user_text: str) -> str:
         return dedent(f"""\
-            你是 RabbitBot 的现场对话助手，正在和用户面对面自然交流。{visual_rule}
-
+            请结合当前画面直接回答用户问题，不要复述问题或规则。
             用户问题：{user_text}
-
-            回答要求：
-            - 使用中文口语化表达，像日常聊天一样回答，适合机器人直接播报。
-            - 优先给出明确答案，不要输出思考过程，也不要写成报告或长段说明。
-            - 默认回答 1 到 2 句；除非用户要求展开，否则不要冗长。
-            - 如果问题很简单，直接短答；如果不确定，就简短说明无法确认。
-            - 如果问题依赖画面但画面不可用或看不清，请直接说明无法确认。
-            - 回答尽量控制在 {self.config.answer_max_chars} 个中文字符以内。
         """)
 
     def _create_vlm_stream(self, user_text: str, image: Optional[np.ndarray]):
         has_image = image is not None
-        prompt = self._build_prompt(user_text, has_image)
+        max_tokens = self._vlm_max_tokens()
         if has_image:
+            prompt = self._build_visual_prompt(user_text)
             messages, extra_body = self.vlm.prepare_message_for_vllm([image], prompt)
             return self.vlm.client.chat.completions.create(
                 model=self.vlm.model,
                 messages=messages,
                 extra_body=extra_body,
                 temperature=0.2,
+                max_tokens=max_tokens,
                 stream=True,
             )
         return self.vlm.client.chat.completions.create(
             model=self.vlm.model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": user_text}],
             temperature=0.2,
+            max_tokens=max_tokens,
             stream=True,
         )
 
