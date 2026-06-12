@@ -1135,3 +1135,58 @@ Aaron 要求重启全部服务和容器后重新测试 AGX 的 QA workflow，确
 
 - 本轮未新增业务代码日志点；复测主要使用现有日志：服务就绪日志、VLM 首 token 日志、TTS 分段日志、STT 注入返回和 8000 curl 响应。
 - 生成时间：2026-06-16 19:20:00
+
+## 本轮补充：隔离 QA workflow 与导览提示词
+
+### 背景和目标
+
+Aaron 指出导览 workflow 的提示词会强调机器人只是导览机器人、只能回答小范围问题，可能影响 QA workflow 的回答行为。本轮目标是让 `vlm_qa_workflow.py` 的问答身份、回答范围和输出规则与导览 workflow 明确无关，同时兼顾 AGX 上多句 VLM 流式请求不稳定的问题。
+
+### 当前状态
+
+已完成：
+
+- 已在 `rabbitbot/agno_agents/vlm_qa_workflow.py` 新增独立 `QA_SYSTEM_PROMPT`，明确 QA workflow 是独立语音问答助手，不承担展厅路线引导、展品讲解流程推进或机器人动作控制。
+- 已明确禁止 QA workflow 将自己描述为“只能回答导览相关问题”的机器人，也不再把回答范围限制在展厅、展品或参观路线内。
+- 已将纯文本 QA 调用改为 `system + user` 消息结构；视觉 QA 的 prompt 也内嵌同一套 QA 独立提示词。
+- 已新增 `RABBITBOT_QA_VLM_STREAM`，默认 `0`，避免 AGX 上多句问题触发 vLLM token 流式请求卡住；如需重新验证 token 流式，可显式设置为 `1`。
+- 已新增 `RABBITBOT_QA_VLM_MAX_TOKENS` 配置并在启动脚本中透传；为空时使用根据 `RABBITBOT_QA_MAX_ANSWER_CHARS` 推导的默认值。
+- 已保留 `RABBITBOT_QA_STREAM_TTS=1` 的按句 TTS 路径：默认关闭 VLM token 流式时，先完整生成回答，再按句拆分提交 TTS，仍可测试多句播报链路。
+- 已更新 `scripts/start_vlm_qa_workflow.bash` 和 `scripts_1/start_unified_vlm_qa_workflow.sh` 的环境变量说明、透传和启动日志，启动时会打印 `prompt_profile=qa_independent`。
+
+未完成：
+
+- 本轮没有重新启动全部容器或 QA workflow 实测，因为上一轮已按 Aaron 要求停止所有容器和服务；本轮只做静态验证和代码提交。
+- 新的非流式 VLM + 分句 TTS 路径仍需在 AGX 服务重新启动后，用 28184 注入短问题和多句问题做完整链路复测。
+
+### 已验证的事实
+
+- 已在 AGX 仓库内通过 `PYTHONPYCACHEPREFIX=/tmp/rabbitbot_pycache_check python3 -m py_compile rabbitbot/agno_agents/vlm_qa_workflow.py`。
+- 已在 AGX 仓库内通过 `bash -n scripts/start_vlm_qa_workflow.bash`。
+- 已在 AGX 仓库内通过 `bash -n scripts_1/start_unified_vlm_qa_workflow.sh`。
+- 已在 AGX 仓库内通过 `git diff --check`。
+- 当前改动没有引用导览 workflow 的 `prompts.py` 导览身份提示词；QA profile 通过日志标记为 `qa_independent`。
+
+### 阻塞问题
+
+- 无代码层面的阻塞。
+- 运行层面仍需重启服务后验证 AGX VLM 对多句中文问题的非流式稳定性；如果非流式仍卡住，需要继续做 8000 端口最小化矩阵测试。
+
+### 建议的下一步
+
+- 重启统一容器和基础服务后，优先用 28184 注入以下两类文本验证：
+  - 短问题：“你好，请用一句话介绍你自己”。
+  - 多句问题：“请用三句话介绍语音问答系统的工作流程，每句话都要简短”。
+- 测试时重点观察 workflow 日志中的 `prompt_profile=qa_independent`、`VLM 推理开始/完成`、`VLM 输出流式已关闭`、`流式 TTS 分段已提交` 和 `完整回答分段 TTS 等待完成`。
+- 如必须恢复 token 级流式输出，可临时设置 `RABBITBOT_QA_VLM_STREAM=1`，但要准备好 vLLM 长回答卡住的复现和服务重启。
+
+### 注意事项
+
+- `RABBITBOT_QA_STREAM_TTS=1` 现在不等同于 VLM token 流式；默认含义是回答生成完成后按句提交 TTS。
+- `RABBITBOT_QA_VLM_STREAM=1` 才会恢复原来的 VLM token 流式并边生成边提交 TTS。
+- QA 独立提示词只约束 `vlm_qa_workflow.py`，不会改变导览 workflow 的正式导览台词、动作、导航或导览提示词。
+
+### 其它信息
+
+- 本轮新增/调整日志点：workflow 启动日志新增 `stream_tts`、`vlm_stream`、`vlm_max_tokens`、`prompt_profile`；VLM 推理开始日志新增 `stream`、`max_tokens`、`prompt_profile`；关闭 VLM token 流式时新增回退路径日志；完整回答分句播报结束后新增分段数量、已播报字符数和等待耗时日志。
+- 生成时间：2026-06-16 19:30:00

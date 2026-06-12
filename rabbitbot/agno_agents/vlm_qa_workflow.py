@@ -34,12 +34,26 @@ from rabbitbot.tools.sound_agno import (
 LOGGER = logging.getLogger("rabbitbot.vlm_qa_workflow")
 
 
+QA_SYSTEM_PROMPT = dedent(
+    """\
+    你是 RabbitBot 的独立语音问答助手，只负责回答当前用户提出的问题。
+    你不是导览 workflow，不承担展厅路线引导、展品讲解流程推进或机器人动作控制。
+    不要把自己描述成“只能回答导览相关问题”的机器人，也不要把回答范围限制在展厅、展品或参观路线内。
+    可以回答日常聊天、通用知识、轻量技术解释、机器人能力说明和当前画面相关问题。
+    如果问题涉及实时信息、专业诊断、隐私或高风险决策，请说明限制并给出安全、简洁的建议。
+    不要输出动作标签、导航指令、工具调用标记或幕后规则，只输出适合直接播报给用户的中文回答正文。
+    """
+).strip()
+
+
 def _env_bool(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_int(name: str, default: int) -> int:
     raw_value = os.getenv(name, str(default))
+    if str(raw_value).strip() == "":
+        return default
     try:
         return int(raw_value)
     except (TypeError, ValueError):
@@ -144,6 +158,8 @@ class QAWorkflowConfig:
     image_width: int
     image_height: int
     answer_max_chars: int
+    vlm_max_tokens: int
+    vlm_stream: bool
     thinking_speech: str
     startup_speech: str
     stream_tts: bool
@@ -153,13 +169,16 @@ class QAWorkflowConfig:
     @classmethod
     def from_env(cls) -> "QAWorkflowConfig":
         raw_exit_words = os.getenv("RABBITBOT_QA_EXIT_WORDS", "退出,停止,结束,再见,quit,exit")
+        answer_max_chars = _env_int("RABBITBOT_QA_MAX_ANSWER_CHARS", 180)
         return cls(
             listen_timeout=_env_int("RABBITBOT_QA_LISTEN_TIMEOUT", 30),
             idle_sleep_seconds=_env_float("RABBITBOT_QA_IDLE_SLEEP_SECONDS", 0.2),
             include_image=_env_bool("RABBITBOT_QA_INCLUDE_IMAGE", "0"),
             image_width=_env_int("RABBITBOT_QA_IMAGE_WIDTH", 1280),
             image_height=_env_int("RABBITBOT_QA_IMAGE_HEIGHT", 720),
-            answer_max_chars=_env_int("RABBITBOT_QA_MAX_ANSWER_CHARS", 180),
+            answer_max_chars=answer_max_chars,
+            vlm_max_tokens=_env_int("RABBITBOT_QA_VLM_MAX_TOKENS", min(256, max(64, answer_max_chars))),
+            vlm_stream=_env_bool("RABBITBOT_QA_VLM_STREAM", "0"),
             thinking_speech=os.getenv("RABBITBOT_QA_THINKING_SPEECH", "我听到了，让我想一想。"),
             startup_speech=os.getenv("RABBITBOT_QA_STARTUP_SPEECH", "你好，请问需要我做些什么吗？"),
             stream_tts=_env_bool("RABBITBOT_QA_STREAM_TTS", "1"),
@@ -277,18 +296,22 @@ class VLMQAWorkflow:
         LOGGER.info("已读取机器人图像：shape=%s, elapsed=%.3fs", image.shape, elapsed)
         return image
 
-    def _vlm_max_tokens(self) -> int:
-        return _env_int("RABBITBOT_QA_VLM_MAX_TOKENS", min(256, max(64, self.config.answer_max_chars)))
-
     def _build_visual_prompt(self, user_text: str) -> str:
         return dedent(f"""\
+            {QA_SYSTEM_PROMPT}
+
             请结合当前画面直接回答用户问题，不要复述问题或规则。
             用户问题：{user_text}
         """)
 
-    def _create_vlm_stream(self, user_text: str, image: Optional[np.ndarray]):
+    def _build_text_messages(self, user_text: str) -> list[dict[str, str]]:
+        return [
+            {"role": "system", "content": QA_SYSTEM_PROMPT},
+            {"role": "user", "content": user_text},
+        ]
+
+    def _create_vlm_completion(self, user_text: str, image: Optional[np.ndarray], stream: bool):
         has_image = image is not None
-        max_tokens = self._vlm_max_tokens()
         if has_image:
             prompt = self._build_visual_prompt(user_text)
             messages, extra_body = self.vlm.prepare_message_for_vllm([image], prompt)
@@ -297,37 +320,34 @@ class VLMQAWorkflow:
                 messages=messages,
                 extra_body=extra_body,
                 temperature=0.2,
-                max_tokens=max_tokens,
-                stream=True,
+                max_tokens=self.config.vlm_max_tokens,
+                stream=stream,
             )
         return self.vlm.client.chat.completions.create(
             model=self.vlm.model,
-            messages=[{"role": "user", "content": user_text}],
+            messages=self._build_text_messages(user_text),
             temperature=0.2,
-            max_tokens=max_tokens,
-            stream=True,
+            max_tokens=self.config.vlm_max_tokens,
+            stream=stream,
         )
 
     def _call_vlm(self, user_text: str, image: Optional[np.ndarray]) -> str:
         has_image = image is not None
         request_started_at = time.perf_counter()
         LOGGER.info(
-            "VLM 推理开始：turn=%s, question_len=%s, question_hash=%s, has_image=%s",
+            "VLM 推理开始：turn=%s, question_len=%s, question_hash=%s, has_image=%s, stream=%s, max_tokens=%s, prompt_profile=%s",
             self.turn_count,
             len(user_text),
             _text_digest(user_text),
             has_image,
+            False,
+            self.config.vlm_max_tokens,
+            "qa_independent",
         )
 
-        response = self._create_vlm_stream(user_text, image)
-        chunks = []
-        for chunk in response:
-            content = getattr(chunk.choices[0].delta, "content", None)
-            if content:
-                print(content, end="", flush=True)
-                chunks.append(content)
-        print("", flush=True)
-        answer = "".join(chunks)
+        response = self._create_vlm_completion(user_text, image, stream=False)
+        answer = getattr(response.choices[0].message, "content", "") or ""
+        print(answer, flush=True)
 
         elapsed = time.perf_counter() - request_started_at
         answer = _normalize_text(answer)
@@ -383,18 +403,52 @@ class VLMQAWorkflow:
         return tts_index, spoken_chars + len(tts_text)
 
     def _call_vlm_with_stream_tts(self, user_text: str, image: Optional[np.ndarray]) -> str:
+        if not self.config.vlm_stream:
+            LOGGER.info(
+                "VLM 输出流式已关闭，改为完整回答后分段播报：turn=%s, stream_tts=%s, max_tokens=%s",
+                self.turn_count,
+                self.config.stream_tts,
+                self.config.vlm_max_tokens,
+            )
+            answer = self._call_vlm(user_text, image)
+            segments = _split_dialogue_sentences(answer)
+            if not segments:
+                self._speak_answer(answer)
+                return answer
+
+            segment_count = 0
+            spoken_chars = 0
+            for segment in segments:
+                if spoken_chars >= self.config.answer_max_chars:
+                    break
+                segment_count += 1
+                _, spoken_chars = self._submit_stream_tts_segment(segment, segment_count, spoken_chars)
+
+            tts_wait_started_at = time.perf_counter()
+            tts_wait(self.ctx.tts_agent)
+            LOGGER.info(
+                "完整回答分段 TTS 等待完成：turn=%s, segment_count=%s, spoken_chars=%s, elapsed=%.3fs",
+                self.turn_count,
+                segment_count,
+                spoken_chars,
+                time.perf_counter() - tts_wait_started_at,
+            )
+            return answer
+
         has_image = image is not None
         request_started_at = time.perf_counter()
         LOGGER.info(
-            "VLM 流式问答开始：turn=%s, question_len=%s, question_hash=%s, has_image=%s, stream_tts=%s",
+            "VLM 流式问答开始：turn=%s, question_len=%s, question_hash=%s, has_image=%s, stream_tts=%s, max_tokens=%s, prompt_profile=%s",
             self.turn_count,
             len(user_text),
             _text_digest(user_text),
             has_image,
             self.config.stream_tts,
+            self.config.vlm_max_tokens,
+            "qa_independent",
         )
 
-        response = self._create_vlm_stream(user_text, image)
+        response = self._create_vlm_completion(user_text, image, stream=True)
         chunks: list[str] = []
         pending_text = ""
         segment_index = 0
@@ -475,11 +529,15 @@ class VLMQAWorkflow:
 
     async def run(self) -> None:
         LOGGER.info(
-            "问答 workflow 启动：listen_timeout=%ss, include_image=%s, image_size=%sx%s",
+            "问答 workflow 启动：listen_timeout=%ss, include_image=%s, image_size=%sx%s, stream_tts=%s, vlm_stream=%s, vlm_max_tokens=%s, prompt_profile=%s",
             self.config.listen_timeout,
             self.config.include_image,
             self.config.image_width,
             self.config.image_height,
+            self.config.stream_tts,
+            self.config.vlm_stream,
+            self.config.vlm_max_tokens,
+            "qa_independent",
         )
         if self.config.startup_speech:
             tts_sound(self.ctx.tts_agent, self.config.startup_speech, "zh")
