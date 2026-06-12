@@ -858,3 +858,59 @@
 
 - 本轮未修改业务代码或脚本，因此没有新增代码日志点。
 - 本轮使用已有日志完成排查，关键日志点包括：导航地图加载和重定位、统一基础服务就绪、workflow 闸门释放、TTS 请求开始/完成、动作 HTTP 请求/回执、导航目标发送、导航状态轮询和底层障碍物提示。
+
+## 本轮补充：修复 TTS 请求成功但现场无声问题
+
+### 背景和目标
+
+本轮目标是按 Aaron 要求排查并修复“机器人 TTS 不能说话”的现场问题。重点区分 28185 TTS 服务不可用、音频后端配置错误、外接音响缺失和 Unitree G1 本体 TTS 请求返回成功但现场无声等情况。
+
+### 当前状态
+
+已完成：
+
+- 已确认 `rabbitbot-unified-runtime` 容器正在运行，28185 TTS 服务端口开放，`/docs` 可访问。
+- 已确认当前 TTS 服务运行后端为 `RABBITBOT_TTS_BACKEND=unitree`，不是之前验证过的 Orin 本地外接 USB 音响后端。
+- 已确认宿主机当前 `aplay -l` 和 `lsusb` 均未识别到之前交接报告中成功出声的 USB 音响 `BT67`。
+- 已确认 Orin 到 G1 的 `eno1` 网卡在线，`192.168.123.222/24` 正常，且可 ping 通 G1 侧 `192.168.123.161`。
+- 已用正确表单格式向 28185 `/exec` 发送短句“TTS诊断测试。”，接口返回 `{"out_text":"3"}`，随后 `wait_speech` 返回 `TTS finished`。
+- 已修改 `scripts_1/unified_runtime/start_unified_container.sh` 和 `scripts_1/start_unified_integration_workflow.sh`，将 `RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST` 默认值设为 `1`，并在启动 TTS 时显式透传该变量。
+- 已增强统一容器和联调启动日志，启动时会打印 Unitree TTS 是否“每次请求设置音量”，便于后续判断配置是否生效。
+- 已重启当前容器内 TTS 服务，28185 `/docs` 恢复可访问。
+- 已发送短句“TTS修复验证。”，接口返回 `{"out_text":"0"}`，随后 `wait_speech` 返回 `TTS finished`。
+- 已验证新日志生效：初始化日志显示 `set_volume_each_request=True`，本轮短句桥接日志显示 `volume=100`、`SetVolume ret=0`、`TtsMaker ret=0`。
+
+未完成：
+
+- 本轮无法通过 SSH 直接确认现场是否实际听到声音，需要现场人工听感确认。
+- 外接 USB 音响 `BT67` 当前未被系统识别；如现场希望继续使用外接音响，需要重新插拔、换线或恢复 USB 音响后，再切回 `RABBITBOT_TTS_BACKEND=local` 并重建/重启容器。
+
+### 已验证的事实
+
+- 当前 TTS 日志显示 Unitree 本体 TTS 初始化成功：网卡 `eno1`，speaker `0`，音量 `100`。
+- 当前 TTS 日志显示多次 `TtsMaker` 请求返回 `ret=0`，包括 workflow 开场台词和本轮诊断短句。
+- 旧逻辑只在首次请求设置音量，后续请求桥接程序日志中 `volume=-1`，如果 G1 音频服务在运行中重置音量，可能出现请求成功但实际静音。
+- 新逻辑会让 TTS 启动脚本默认每次请求都携带音量设置，降低机器人端音量状态漂移导致静音的风险。
+- 当前运行中的 TTS 已按新逻辑启动，不需要等待下一次容器重建才生效。
+
+### 阻塞问题
+
+- 当前没有代码层面的阻塞。
+- 现场层面仍需人工确认本体扬声器是否实际出声。
+- 如果现场必须使用 `BT67` 外接音响，当前阻塞是 AGX-orin 没有识别到该 USB 音响硬件。
+
+### 建议的下一步
+
+- 现场听感确认本体 TTS 是否已经恢复。
+- 如果仍无声，优先检查 G1 本体音频服务或扬声器状态；软件侧 28185、DDS 网络和 `TtsMaker ret=0` 均已确认正常。
+- 如果要切回外接音响，先确认 `aplay -l` 或 `lsusb` 能看到 `BT67`，再用 `RABBITBOT_TTS_BACKEND=local RECREATE_CONTAINER=1 RUN_WORKFLOW_AFTER_START=0` 重建统一容器基础服务。
+
+### 注意事项
+
+- 当前 `BT67` 缺失时不要强行切到 local 后端，否则 `scripts/start_tts_app.bash` 会因为找不到稳定外接输出设备而拒绝启动 TTS。
+- Unitree 本体 TTS 的 `TtsMaker` 只能确认机器人音频服务接受请求，不能通过 SSH 证明扬声器实际发声。
+
+### 其它信息
+
+- 本轮新增/调整的日志点：统一容器和联调启动时打印 TTS 后端、Unitree 网卡、音量以及“每次请求设置音量”配置；Unitree TTS 原有日志继续记录请求开始、返回码、耗时、音量、网卡、speaker id 和估算播放时长。
+- 这些日志用于诊断 TTS 后端是否选错、Unitree 音量配置是否生效、请求是否成功到达 G1 音频服务，以及后续是否仍存在“接口成功但现场无声”的硬件侧问题。

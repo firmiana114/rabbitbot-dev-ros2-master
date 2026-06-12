@@ -72,6 +72,7 @@ RABBITBOT_UNITREE_TTS_INTERFACE="${RABBITBOT_UNITREE_TTS_INTERFACE:-eno1}"
 RABBITBOT_UNITREE_TTS_VOLUME="${RABBITBOT_UNITREE_TTS_VOLUME:-100}"
 RABBITBOT_UNITREE_TTS_SPEAKER_ID="${RABBITBOT_UNITREE_TTS_SPEAKER_ID:-0}"
 RABBITBOT_UNITREE_TTS_TIMEOUT="${RABBITBOT_UNITREE_TTS_TIMEOUT:-10}"
+RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST="${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST:-1}"
 
 log_info() {
     echo -e "\033[32m[INFO]\033[0m $1"
@@ -196,6 +197,8 @@ ensure_compatible_container() {
     container_unitree_interface="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNITREE_TTS_INTERFACE || true)"
     local container_unitree_volume
     container_unitree_volume="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNITREE_TTS_VOLUME || true)"
+    local container_unitree_set_volume_each_request
+    container_unitree_set_volume_each_request="$(container_env_value "${CONTAINER_NAME}" RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST || true)"
     local incompatible_reason=""
     if [ "${container_auto_start}" != "0" ]; then
         incompatible_reason="旧的自启动 workflow 模式"
@@ -211,6 +214,8 @@ ensure_compatible_container() {
         incompatible_reason="Unitree TTS 网卡配置变化：container=${container_unitree_interface:-eno1}, expected=${RABBITBOT_UNITREE_TTS_INTERFACE}"
     elif [ "${RABBITBOT_TTS_BACKEND}" = "unitree" ] && [ "${container_unitree_volume:-85}" != "${RABBITBOT_UNITREE_TTS_VOLUME}" ]; then
         incompatible_reason="Unitree TTS 音量配置变化：container=${container_unitree_volume:-85}, expected=${RABBITBOT_UNITREE_TTS_VOLUME}"
+    elif [ "${RABBITBOT_TTS_BACKEND}" = "unitree" ] && [ "${container_unitree_set_volume_each_request:-0}" != "${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST}" ]; then
+        incompatible_reason="Unitree TTS 每次请求设置音量配置变化：container=${container_unitree_set_volume_each_request:-0}, expected=${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST}"
     fi
 
     if [ -n "${incompatible_reason}" ]; then
@@ -243,7 +248,7 @@ create_container_if_needed() {
     fi
 
     log_info "创建统一容器基础服务底座：${CONTAINER_NAME}"
-    log_info "TTS 默认后端：${RABBITBOT_TTS_BACKEND}，Unitree 网卡：${RABBITBOT_UNITREE_TTS_INTERFACE}，音量：${RABBITBOT_UNITREE_TTS_VOLUME}"
+    log_info "TTS 默认后端：${RABBITBOT_TTS_BACKEND}，Unitree 网卡：${RABBITBOT_UNITREE_TTS_INTERFACE}，音量：${RABBITBOT_UNITREE_TTS_VOLUME}，每次请求设置音量：${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST}"
     docker create \
         --name "${CONTAINER_NAME}" \
         --network host \
@@ -261,6 +266,7 @@ create_container_if_needed() {
         -e RABBITBOT_UNITREE_TTS_VOLUME="${RABBITBOT_UNITREE_TTS_VOLUME}" \
         -e RABBITBOT_UNITREE_TTS_SPEAKER_ID="${RABBITBOT_UNITREE_TTS_SPEAKER_ID}" \
         -e RABBITBOT_UNITREE_TTS_TIMEOUT="${RABBITBOT_UNITREE_TTS_TIMEOUT}" \
+        -e RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST="${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST}" \
         -e RABBITBOT_WORKFLOW_VERBOSE="${RABBITBOT_WORKFLOW_VERBOSE}" \
         -e RABBITBOT_TTS_STRICT_FAILURE="${RABBITBOT_TTS_STRICT_FAILURE}" \
         -e RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM}" \
