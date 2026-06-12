@@ -281,3 +281,53 @@ Aaron 要求通过 SSH 接手 AGX-orin 上 `/mnt/ssd/navgation/projects/rabbitbo
 - 本轮没有新增或调整代码日志点。
 - 本轮使用的关键日志包括：`logs/vlm_qa_workflow/vlm_qa_workflow_20260612_051412.log`、`logs/vlm_qa_workflow/vlm_qa_dialogue_20260612_051414.log`、`logs/nav_workflow_control/rabbitbot_workflow_20260612_131441.log`、`logs/unified_runtime/rabbitbot_tts.log`。
 - 生成时间：2026-06-17
+
+## 本轮补充：放宽 QA 问答提示词
+
+### 背景和目标
+
+Aaron 反馈当前提示词可能收得过紧，导致大模型经常回答“抱歉无法回答”。本轮目标是放宽 QA workflow 的系统提示词，让模型在信息不足或问题较宽泛时优先尝试给出有用回答，而不是直接拒答。
+
+### 当前状态
+
+已完成：
+
+- 已检查 `rabbitbot/agno_agents/vlm_qa_workflow.py` 的 `QA_SYSTEM_PROMPT`，确认当前 QA 提示词虽然已经解除导览范围限制，但仍缺少“信息不足时先合理回答或追问”的明确要求。
+- 已在历史 QA 日志中确认出现过“很抱歉，您没有提供足够的信息让我能够回答您的问题。”这类保守拒答。
+- 已将 QA 系统提示词放宽为 `qa_broad`：明确 RabbitBot 是开放式中文语音问答助手，可回答日常聊天、通用知识、轻量技术解释、机器人能力说明、园区导览和当前画面相关问题。
+- 已新增提示词约束：用户问题不完整或上下文不足时，不要直接说无法回答；先按最可能含义给出简短有用回答，并在结尾补一句澄清问题。
+- 已调整实时信息、专业诊断、法律医疗金融等高风险问题策略：不编造事实，但应给通用背景、判断思路和安全建议，而不是直接拒答。
+- 已保留必要边界：不泄露隐私、不执行危险或违法请求，不模拟导航命令，不输出动作标签或工具调用标记。
+- 已将启动日志中的 `prompt_profile` 从 `qa_independent` 改为 `qa_broad`，便于现场确认新提示词是否生效。
+
+未完成：
+
+- 本轮未重启当前正在运行的 QA/导览服务；已运行进程不会热加载本次代码改动。需要重启 `rabbitbot-loop.service` 或重新启动 QA workflow 后，新提示词才会生效。
+- 本轮未做在线 VLM 问答实测，避免干扰当前现场运行状态。
+
+### 已验证的事实
+
+- `PYTHONPYCACHEPREFIX=/tmp/rabbitbot_pycache_check python3 -m py_compile rabbitbot/agno_agents/vlm_qa_workflow.py` 通过。
+- `bash -n scripts/start_vlm_qa_workflow.bash` 通过。
+- `git diff --check` 通过。
+- 轻量检查确认提示词包含“开放式中文语音问答助手”“不要直接说无法回答”“只有在问题明显不可理解”等关键放宽规则。
+
+### 阻塞问题
+
+无代码层面阻塞。运行层面唯一注意点是：必须重启 QA/导览相关进程后，`qa_broad` 提示词才会实际参与问答。
+
+### 建议的下一步
+
+- 现场安全窗口内重启 `rabbitbot-loop.service` 或 QA workflow，让新提示词生效。
+- 用之前容易触发“无法回答”的问题做对比测试，重点观察问答日志是否从拒答变为“给出合理回答 + 必要澄清”。
+- 如果仍然过于保守，可继续降低系统提示中的风险措辞，或针对常见现场问题加 few-shot 示例。
+
+### 注意事项
+
+- 本轮只放宽 QA workflow，不改严格 DOCX 导览台词和导览 workflow 的导航/动作逻辑。
+- 导览触发口令“开始导览”仍由外部流程处理，QA 回答中不会模拟导航命令。
+
+### 其它信息
+
+- 本轮调整的日志点：启动日志和 VLM 推理日志中的 `prompt_profile` 改为 `qa_broad`，用于确认运行进程是否加载新提示词。
+- 生成时间：2026-06-17

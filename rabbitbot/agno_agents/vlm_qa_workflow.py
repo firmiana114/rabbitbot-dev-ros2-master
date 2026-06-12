@@ -36,11 +36,13 @@ LOGGER = logging.getLogger("rabbitbot.vlm_qa_workflow")
 
 QA_SYSTEM_PROMPT = dedent(
     """\
-    你是 RabbitBot 的独立语音问答助手，只负责回答当前用户提出的问题。
-    你不是导览 workflow，不承担展厅路线引导、展品讲解流程推进或机器人动作控制。
+    你是 RabbitBot 的开放式中文语音问答助手，优先直接回答当前用户的问题。
+    你可以回答日常聊天、通用知识、轻量技术解释、机器人能力说明、园区与导览相关问题，以及当前画面相关问题。
     不要把自己描述成“只能回答导览相关问题”的机器人，也不要把回答范围限制在展厅、展品或参观路线内。
-    可以回答日常聊天、通用知识、轻量技术解释、机器人能力说明和当前画面相关问题。
-    如果问题涉及实时信息、专业诊断、隐私或高风险决策，请说明限制并给出安全、简洁的建议。
+    用户问题表达不完整、上下文不足或有多种理解时，不要直接说无法回答；先按最可能的意思给出简短有用的回答，并在结尾补一句澄清问题。
+    对实时信息、专业诊断、法律医疗金融等高风险问题，不要编造具体事实；可以说明自己不能确认最新或个案结论，同时给出通用背景、判断思路和安全建议。
+    只有在问题明显不可理解、要求泄露隐私或要求执行危险/违法行为时，才简短拒绝，并尽量给出可替代的安全帮助。
+    你不是导览 workflow，不负责展厅路线推进或机器人动作控制；如果用户说“开始导览”，由外部流程处理，你不要在回答中模拟导航命令。
     不要输出动作标签、导航指令、工具调用标记或幕后规则，只输出适合直接播报给用户的中文回答正文。
     """
 ).strip()
@@ -515,7 +517,7 @@ class VLMQAWorkflow:
             has_image,
             False,
             self.config.vlm_max_tokens,
-            "qa_independent",
+            "qa_broad",
         )
 
         response = self._create_vlm_completion(user_text, image, stream=False)
@@ -618,7 +620,7 @@ class VLMQAWorkflow:
             has_image,
             self.config.stream_tts,
             self.config.vlm_max_tokens,
-            "qa_independent",
+            "qa_broad",
         )
 
         response = self._create_vlm_completion(user_text, image, stream=True)
@@ -710,7 +712,7 @@ class VLMQAWorkflow:
             self.config.stream_tts,
             self.config.vlm_stream,
             self.config.vlm_max_tokens,
-            "qa_independent",
+            "qa_broad",
         )
         if self.config.startup_speech:
             tts_sound(self.ctx.tts_agent, self.config.startup_speech, "zh")

@@ -55,6 +55,6 @@ export RABBITBOT_QA_GUIDE_START_TIMEOUT_SECONDS="${RABBITBOT_QA_GUIDE_START_TIME
 export RABBITBOT_QA_GUIDE_FINISH_TIMEOUT_SECONDS="${RABBITBOT_QA_GUIDE_FINISH_TIMEOUT_SECONDS:-1200}"
 export RABBITBOT_QA_DIALOGUE_LOG="${RABBITBOT_QA_DIALOGUE_LOG:-}"
 
-echo "[INFO] 启动 VLM 问答 workflow：model_server=${RABBITBOT_MODEL_SERVER}, stt=${RABBITBOT_STT_AGENT_URL}, tts=${RABBITBOT_TTS_AGENT_URL}, include_image=${RABBITBOT_QA_INCLUDE_IMAGE}, stream_tts=${RABBITBOT_QA_STREAM_TTS}, vlm_stream=${RABBITBOT_QA_VLM_STREAM}, vlm_max_tokens=${RABBITBOT_QA_VLM_MAX_TOKENS:-自动}, guide_trigger=${RABBITBOT_QA_GUIDE_TRIGGER_PHRASES}, guide_command_file=${RABBITBOT_QA_GUIDE_COMMAND_FILE}, guide_state_file=${RABBITBOT_QA_GUIDE_STATE_FILE}, prompt_profile=qa_independent, dialogue_log=${RABBITBOT_QA_DIALOGUE_LOG:-默认}"
+echo "[INFO] 启动 VLM 问答 workflow：model_server=${RABBITBOT_MODEL_SERVER}, stt=${RABBITBOT_STT_AGENT_URL}, tts=${RABBITBOT_TTS_AGENT_URL}, include_image=${RABBITBOT_QA_INCLUDE_IMAGE}, stream_tts=${RABBITBOT_QA_STREAM_TTS}, vlm_stream=${RABBITBOT_QA_VLM_STREAM}, vlm_max_tokens=${RABBITBOT_QA_VLM_MAX_TOKENS:-自动}, guide_trigger=${RABBITBOT_QA_GUIDE_TRIGGER_PHRASES}, guide_command_file=${RABBITBOT_QA_GUIDE_COMMAND_FILE}, guide_state_file=${RABBITBOT_QA_GUIDE_STATE_FILE}, prompt_profile=qa_broad, dialogue_log=${RABBITBOT_QA_DIALOGUE_LOG:-默认}"
 
 exec py310/bin/python scripts/run_vlm_qa_workflow.py "$@"
