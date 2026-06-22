@@ -111,7 +111,16 @@ Aaron 本轮要求撤销此前为“每前往一个地点”增加的导览引�
 - 原因判断：workflow 正在等待 TTS 播放队列完成，TTS 播放线程卡住或外放设备阻塞，导致导览不进入下一段台词，也不会继续后续导航。
 - 建议：现场先确认是否仍在播放或外放设备是否断连；若确认无声音且流程不前进，可优先重启 TTS 或恢复外接音响，再视需要重启导览流程。后续代码层面建议给 TTS 播放等待增加超时和更明确的阻塞日志。
 
+### 补充说明：TTS 卡住的具体原因
+
+- 进一步排查确认，TTS 卡住不是模型生成慢，而是音频播放层阻塞：`tts_index=45` 已完成 `tts_generate_done` 和 `tts_play_start`，但没有 `tts_play_done`。
+- 代码路径显示 `tts_play_done` 只有在 `rabbitbot/audio/run_tts_espnet.py` 中 `SDOutputStream.play_and_wait()` 返回后才会记录；该函数内部调用 `sounddevice.OutputStream.write(audio)`，因此卡点在 PortAudio/ALSA 输出流写入阶段。
+- 内核日志在 11:33:08 记录 `usb 1-4.2: reset full-speed USB device number 5 using tegra-xusb`，该设备就是 `REDMI Speaker 2-6002` 所在 USB 路径；随后 `pulseaudio` 对该设备报 `Failed to find a working profile` 和 `Failed to load module module-alsa-card`。
+- TTS 启动时日志记录 REDMI 输出设备 index 为 5，但 reset 后容器内 `sounddevice.query_devices()` 显示 REDMI 变为 index 4，index 5 变成 Jetson APE 默认设备；说明设备 reset 后 PortAudio 序号/流状态发生变化，TTS 进程仍持有启动时创建的旧 `OutputStream`。
+- 直接原因判断：REDMI 外放设备发生 USB reset/重新枚举，TTS 没有重建输出流，也没有播放超时保护，导致下一句音频写入旧输出流时一直阻塞。
+- 建议修复方向：启动时不要长期缓存易失效的 PortAudio index 和 `OutputStream`；播放前按设备名重新解析 REDMI；`stream.write()` 外围增加播放超时、错误日志和自动重建输出流；外部恢复层面优先检查 REDMI 音响供电、线缆、USB 口和自动省电/断连问题。
+
 ## 其它信息
 
-- 本轮没有新增或调整代码日志点；本次排查主要依靠 `rabbitbot_workflow_20260622_112905.log`、`nav_bridge_20260622_112853.log`、`rabbitbot_tts.log`、`/api/status` 和 `/go_to_status`。日志已足够确认当前卡点在 TTS 播放未完成，而不是导航未到达。
+- 本轮没有新增或调整代码日志点；本次排查主要依靠 `rabbitbot_workflow_20260622_112905.log`、`nav_bridge_20260622_112853.log`、`rabbitbot_tts.log`、`/api/status`、`/go_to_status`、`journalctl` 内核/音频日志和容器内 `sounddevice.query_devices()`。日志已足够确认当前卡点在 REDMI 音响 USB reset 后的 TTS 播放流阻塞，而不是导航未到达。
 - 生成时间：2026-06-22
