@@ -5,11 +5,14 @@ import time
 import json
 import argparse
 import requests
+import re
 import soundfile as sf
 import sounddevice as sd
 import librosa
 import threading
 import queue
+import subprocess
+import tempfile
 import torch
 from datetime import datetime
 from kokoro import KPipeline, KModel
@@ -144,6 +147,169 @@ def _resolve_output_device(preferred_device_name=None, fallback_device_id=None, 
                 f"fallback={fallback_device_id}, last_error={last_error}"
             )
         time.sleep(1.0)
+
+
+def _alsa_device_from_name(device_name):
+    match = re.search(r"\(hw:(\d+),(\d+)\)", str(device_name or ""))
+    if not match:
+        return None
+    return f"plughw:{match.group(1)},{match.group(2)}"
+
+
+class FfmpegAlsaOutputStream(object):
+
+    def __init__(self, device_id, target_sr, preferred_device_name=None):
+        self.device_id = device_id
+        self.target_sr = target_sr
+        self.preferred_device_name = preferred_device_name
+        self.allow_builtin = os.getenv("RABBITBOT_TTS_ALLOW_BUILTIN", "0").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        self.ffmpeg_bin = os.getenv("RABBITBOT_TTS_FFMPEG_BIN", "ffmpeg").strip() or "ffmpeg"
+        self.override_alsa_device = os.getenv("RABBITBOT_TTS_FFMPEG_ALSA_DEVICE", "").strip() or None
+        self.temp_dir = os.getenv("RABBITBOT_TTS_PLAYBACK_TMPDIR", "/tmp/rabbitbot_tts_playback").strip()
+        self.alsa_device = None
+        os.makedirs(self.temp_dir, exist_ok=True)
+        self.restart()
+
+    def _resolve_alsa_device(self, wait_seconds=0.0):
+        if self.override_alsa_device:
+            _tts_trace(
+                "tts_ffmpeg_alsa_device_override",
+                device_id=self.device_id,
+                text=self.override_alsa_device,
+                target_sr=self.target_sr,
+                preferred=self.preferred_device_name,
+            )
+            return self.device_id, self.override_alsa_device, float(self.target_sr), self.override_alsa_device
+        device_id, device_name, target_sr = _resolve_output_device(
+            preferred_device_name=self.preferred_device_name,
+            fallback_device_id=self.device_id,
+            wait_seconds=wait_seconds,
+            allow_builtin=self.allow_builtin,
+        )
+        alsa_device = _alsa_device_from_name(device_name)
+        if not alsa_device:
+            raise RuntimeError(f"无法从输出设备名称解析 ALSA 设备: {device_name}")
+        return device_id, device_name, float(target_sr), alsa_device
+
+    def restart(self):
+        device_id, device_name, target_sr, alsa_device = self._resolve_alsa_device()
+        self.device_id = device_id
+        self.target_sr = target_sr
+        self.alsa_device = alsa_device
+        _tts_trace(
+            "tts_ffmpeg_alsa_device_resolved",
+            device_id=self.device_id,
+            text=device_name,
+            target_sr=self.target_sr,
+            alsa_device=self.alsa_device,
+            preferred=self.preferred_device_name,
+        )
+
+    def restart_after_device_error(self, wait_seconds):
+        device_id, device_name, target_sr, alsa_device = self._resolve_alsa_device(wait_seconds=wait_seconds)
+        self.device_id = device_id
+        self.target_sr = target_sr
+        self.alsa_device = alsa_device
+        _tts_trace(
+            "tts_output_device_reselected",
+            device_id=self.device_id,
+            text=device_name,
+            target_sr=self.target_sr,
+            alsa_device=self.alsa_device,
+            preferred=self.preferred_device_name,
+        )
+
+    def stop(self):
+        _tts_trace("tts_ffmpeg_alsa_stop", device_id=self.device_id, alsa_device=self.alsa_device)
+
+    def play_and_wait(self, audio, timeout_seconds=None):
+        if not self.alsa_device:
+            self.restart()
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                prefix="tts_play_",
+                suffix=".wav",
+                dir=self.temp_dir,
+                delete=False,
+            ) as tmp_file:
+                tmp_path = tmp_file.name
+            sf.write(tmp_path, audio, int(float(self.target_sr)), "PCM_16")
+            cmd = [
+                self.ffmpeg_bin,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-i",
+                tmp_path,
+                "-f",
+                "alsa",
+                self.alsa_device,
+            ]
+            _tts_trace(
+                "tts_ffmpeg_play_start",
+                device_id=self.device_id,
+                target_sr=self.target_sr,
+                alsa_device=self.alsa_device,
+                timeout=round(timeout_seconds, 3) if timeout_seconds else None,
+            )
+            start_time = time.perf_counter()
+            try:
+                result = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=timeout_seconds,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                _tts_trace(
+                    "tts_ffmpeg_play_timeout",
+                    device_id=self.device_id,
+                    alsa_device=self.alsa_device,
+                    timeout=round(timeout_seconds, 3) if timeout_seconds else None,
+                    error_type=type(exc).__name__,
+                    error=exc,
+                )
+                raise TTSPlaybackTimeout(f"ffmpeg ALSA 播放超时: timeout={timeout_seconds:.3f}s") from exc
+            elapsed = time.perf_counter() - start_time
+            if result.returncode != 0:
+                stderr_preview = (result.stderr or "").strip().replace("\n", " ")[:500]
+                _tts_trace(
+                    "tts_ffmpeg_play_error",
+                    device_id=self.device_id,
+                    alsa_device=self.alsa_device,
+                    elapsed=round(elapsed, 6),
+                    returncode=result.returncode,
+                    stderr=stderr_preview,
+                )
+                raise RuntimeError(
+                    f"ffmpeg ALSA 播放失败: returncode={result.returncode}, stderr={stderr_preview}"
+                )
+            _tts_trace(
+                "tts_ffmpeg_play_done",
+                device_id=self.device_id,
+                alsa_device=self.alsa_device,
+                elapsed=round(elapsed, 6),
+            )
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except FileNotFoundError:
+                    pass
+                except Exception as exc:
+                    _tts_trace(
+                        "tts_ffmpeg_temp_cleanup_error",
+                        device_id=self.device_id,
+                        text=tmp_path,
+                        error_type=type(exc).__name__,
+                        error=exc,
+                    )
 
 
 class SDOutputStream(object):
@@ -374,6 +540,7 @@ class EspnetTTS(object):
         self.output_device_recover_wait_seconds = _tts_env_float("RABBITBOT_TTS_OUTPUT_RECOVER_WAIT_SECONDS", 12.0)
         self.play_retry_sleep_seconds = _tts_env_float("RABBITBOT_TTS_PLAY_RETRY_SLEEP_SECONDS", 1.0)
         self.play_retry_limit = _tts_env_int("RABBITBOT_TTS_PLAY_RETRY_LIMIT", 0)
+        self.playback_backend = os.getenv("RABBITBOT_TTS_PLAYBACK_BACKEND", "ffmpeg_alsa").strip().lower()
         if self.device_id is not None and self.device_id >= 0:
             try:
                 resolved_id, resolved_name, resolved_sr = _resolve_output_device(
@@ -404,7 +571,26 @@ class EspnetTTS(object):
                 )
                 info = sd.query_devices(self.device_id, 'output')
                 self.target_sr = info["default_samplerate"]
-            self.sd_stream = SDOutputStream(self.device_id, self.target_sr, self.preferred_device_name)
+            if self.playback_backend in {"ffmpeg", "ffmpeg_alsa", "alsa_subprocess"}:
+                _tts_trace(
+                    "tts_playback_backend_selected",
+                    device_id=self.device_id,
+                    text=self.playback_backend,
+                    preferred=self.preferred_device_name,
+                )
+                self.sd_stream = FfmpegAlsaOutputStream(
+                    self.device_id,
+                    self.target_sr,
+                    self.preferred_device_name,
+                )
+            else:
+                _tts_trace(
+                    "tts_playback_backend_selected",
+                    device_id=self.device_id,
+                    text="sounddevice",
+                    preferred=self.preferred_device_name,
+                )
+                self.sd_stream = SDOutputStream(self.device_id, self.target_sr, self.preferred_device_name)
         else:
             print("EspnetTTS: 未配置输出音频设备，将跳过实际播放")
         self.debug_mode = debug_mode

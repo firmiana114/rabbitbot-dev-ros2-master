@@ -164,6 +164,18 @@ Aaron 本轮要求撤销此前为“每前往一个地点”增加的导览引�
 - 当前状态：主循环已重新启动并回到 `qa_listening`，workflow 停在 go 闸门；最新状态接口显示定位成功，位姿约为 `x=-2.389, y=-0.6117`。
 - 未验证事项：本轮没有人为拔插或强制 reset REDMI 外放，因此实际 USB reset 后的自动恢复路径尚未在现场完整复现；代码已覆盖超时、重扫设备、重建输出流和重试同一句的路径。
 
+### 修复 TTS 底层播放崩溃导致后续不讲话
+
+- 目标：Aaron 反馈多个点位到达后很久才讲话，点位4后直接不讲话，当前站在点位6附近发呆；本轮先排查原因，再修复 TTS 服务因 REDMI/ALSA 异常直接崩溃的问题。
+- 现象：`rabbitbot_tts.log` 在 13:13 左右出现大量 PortAudio/ALSA `PaAlsaStreamComponent_RegisterChannels` 断言错误，随后 `uvicorn tts_app:app` 以 `Aborted (core dumped)` 退出；容器内 28185 端口无 TTS 进程。
+- 原因：上一轮的 sounddevice 超时和重建逻辑只能处理 Python 层异常；这次是 PortAudio/ALSA 在 C 层直接 abort 进程，Python 无法捕获，导致 TTS API 服务退出，后续 workflow 请求 TTS 只有 `Connection refused`。
+- 导览状态：run_id `20260622_130416` 中点位6的复星创富台词请求发生在 TTS 崩溃后，workflow 记录 `workflow_tts_request_invalid_response` 后继续进入点位7；随后点位7导航目标 `(-8.7774, 27.1503, ...)` 一直为 `NavigationStatus.ACTIVE`，因此当前站在点位6附近发呆主要是点位6到点位7导航未完成。
+- 修改：`rabbitbot/audio/run_tts_espnet.py` 新增默认 `ffmpeg_alsa` 播放后端，将每句音频写入临时 wav 后交给独立 `ffmpeg -f alsa` 子进程播放，避免 PortAudio/ALSA C 层 abort 直接拖垮 TTS 服务进程；保留 `sounddevice` 后端作为 `RABBITBOT_TTS_PLAYBACK_BACKEND=sounddevice` 的回退选项。
+- 日志：新增 `tts_playback_backend_selected`、`tts_ffmpeg_alsa_device_resolved`、`tts_ffmpeg_play_start`、`tts_ffmpeg_play_done`、`tts_ffmpeg_play_error`、`tts_ffmpeg_play_timeout`、`tts_ffmpeg_temp_cleanup_error`，用于定位播放后端、ALSA 设备、播放耗时、子进程返回码和临时文件清理问题。
+- 验证：容器内 `/opt/venv/bin/python -m py_compile` 和 `py310/bin/python -m py_compile` 通过；`ffmpeg` 静音打开 `plughw:3,0` 成功；单独恢复 TTS 后日志显示选中 `ffmpeg_alsa`，解析到 `REDMI Speaker 2-6002` 的 `plughw:3,0`，启动自检句均出现 `tts_ffmpeg_play_done` 和 `tts_play_done`。
+- 当前状态：TTS 进程已恢复并监听 28185；主 workflow 未重启，仍在 run_id `20260622_130416` 中，导览状态为 `guide_running`，点位7导航仍持续 ACTIVE，状态接口显示定位状态待确认。
+- 注意：本次修复解决 TTS 服务被 ALSA abort 拖死的问题；点位6到点位7导航持续 ACTIVE 仍需现场处理障碍、定位状态或重新采点，属于独立导航问题。
+
 ## 其它信息
 
 - 本轮新增 QA 导览触发日志字段 `match_reason` 和 `text_preview`，用于判断口令是精确命中、同音归一、短口令还是编辑距离触发；本次排查同时依靠 `vlm_qa_workflow_20260622_114516.log`、`vlm_qa_dialogue_20260622_034518.log`、STT 日志和 `/api/status` 确认未触发原因。
