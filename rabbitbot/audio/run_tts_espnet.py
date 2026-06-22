@@ -45,11 +45,116 @@ class TTSStatus(Enum):
     STOPPED = 1
 
 
+class TTSPlaybackTimeout(RuntimeError):
+    pass
+
+
+def _tts_env_float(name, default):
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value == "":
+        return default
+    try:
+        return float(raw_value)
+    except ValueError:
+        _tts_trace("tts_env_invalid_float", text=name, value=raw_value, default=default)
+        return default
+
+
+def _tts_env_int(name, default):
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value == "":
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        _tts_trace("tts_env_invalid_int", text=name, value=raw_value, default=default)
+        return default
+
+
+def _output_device_candidates(preferred_device_name=None, allow_builtin=False):
+    preferred_name = (preferred_device_name or "").strip().lower()
+    builtin_keywords = (
+        "orin",
+        "jetson",
+        "tegra",
+        "nvidia",
+        "hda",
+        "hdmi",
+        "ape",
+        "admaif",
+        "tegrasnd",
+    )
+    candidates = []
+    devices = sd.query_devices()
+    for index, device in enumerate(devices):
+        output_channels = int(device.get("max_output_channels", 0))
+        if output_channels <= 0:
+            continue
+        name = str(device.get("name", ""))
+        normalized_name = name.lower()
+        builtin = any(keyword in normalized_name for keyword in builtin_keywords)
+        matched = preferred_name in normalized_name if preferred_name else not builtin
+        if matched or (allow_builtin and not preferred_name):
+            candidates.append({
+                "index": index,
+                "name": name,
+                "channels": output_channels,
+                "builtin": builtin,
+                "matched": matched,
+            })
+    preferred = [
+        candidate for candidate in candidates
+        if candidate["matched"] and (allow_builtin or not candidate["builtin"])
+    ]
+    fallback = [
+        candidate for candidate in candidates
+        if allow_builtin and candidate["builtin"]
+    ]
+    return preferred or fallback
+
+
+def _resolve_output_device(preferred_device_name=None, fallback_device_id=None, wait_seconds=0.0, allow_builtin=False):
+    preferred_name = (preferred_device_name or "").strip().lower()
+    deadline = time.monotonic() + max(0.0, wait_seconds)
+    last_error = None
+    while True:
+        try:
+            candidates = _output_device_candidates(preferred_device_name, allow_builtin=allow_builtin)
+            if candidates:
+                selected = candidates[0]
+                info = sd.query_devices(selected["index"], "output")
+                return selected["index"], selected["name"], float(info["default_samplerate"])
+            if fallback_device_id is not None:
+                info = sd.query_devices(fallback_device_id, "output")
+                fallback_name = str(info.get("name", fallback_device_id))
+                if not preferred_name or preferred_name in fallback_name.lower():
+                    return fallback_device_id, fallback_name, float(info["default_samplerate"])
+        except Exception as exc:
+            last_error = exc
+            _tts_trace(
+                "tts_output_device_resolve_error",
+                text=preferred_device_name,
+                fallback_device_id=fallback_device_id,
+                error_type=type(exc).__name__,
+                error=exc,
+            )
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"无法找到可用 TTS 输出设备: preferred={preferred_device_name}, "
+                f"fallback={fallback_device_id}, last_error={last_error}"
+            )
+        time.sleep(1.0)
+
+
 class SDOutputStream(object):
 
-    def __init__(self, device_id, target_sr):
+    def __init__(self, device_id, target_sr, preferred_device_name=None):
         self.device_id = device_id
         self.target_sr = target_sr
+        self.preferred_device_name = preferred_device_name
+        self.allow_builtin = os.getenv("RABBITBOT_TTS_ALLOW_BUILTIN", "0").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
         self.play_finish_event = threading.Event()
         self.stream = None
         self.stream_lock = threading.Lock()
@@ -58,30 +163,117 @@ class SDOutputStream(object):
     def play_finish_cb(self):
         self.play_finish = True
 
-    def play_and_wait(self, audio):
+    def _close_stream_unlocked(self, stream, reason):
+        if stream is None:
+            return
+        try:
+            _tts_trace("tts_output_stream_abort", device_id=self.device_id, text=reason)
+            stream.abort()
+        except Exception as exc:
+            _tts_trace(
+                "tts_output_stream_abort_error",
+                device_id=self.device_id,
+                text=reason,
+                error_type=type(exc).__name__,
+                error=exc,
+            )
+        try:
+            _tts_trace("tts_output_stream_close", device_id=self.device_id, text=reason)
+            stream.close()
+        except Exception as exc:
+            _tts_trace(
+                "tts_output_stream_close_error",
+                device_id=self.device_id,
+                text=reason,
+                error_type=type(exc).__name__,
+                error=exc,
+            )
+
+    def _stream_write_in_thread(self, stream, audio, result_q):
+        try:
+            stream.write(audio)
+            result_q.put((True, None))
+        except Exception as exc:
+            result_q.put((False, exc))
+
+    def play_and_wait(self, audio, timeout_seconds=None):
         with self.stream_lock:
-            self.play_finish = False
-            self.play_finish_event.clear()
+            stream = self.stream
+        if stream is None:
+            self.restart()
+            with self.stream_lock:
+                stream = self.stream
+        if stream is None:
+            raise RuntimeError("TTS 输出流未创建，无法播放")
+        result_q = queue.Queue(maxsize=1)
+        writer = threading.Thread(
+            target=self._stream_write_in_thread,
+            args=(stream, audio, result_q),
+            daemon=True,
+        )
+        writer.start()
+        writer.join(timeout=timeout_seconds)
+        if writer.is_alive():
+            with self.stream_lock:
+                if self.stream is stream:
+                    self.stream = None
+            self._close_stream_unlocked(stream, reason=f"play_timeout_{timeout_seconds:.3f}s")
+            raise TTSPlaybackTimeout(f"sounddevice 输出超时: timeout={timeout_seconds:.3f}s")
+        success, error = result_q.get_nowait()
+        if not success:
+            with self.stream_lock:
+                if self.stream is stream:
+                    self.stream = None
+            self._close_stream_unlocked(stream, reason="play_error")
+            raise error
+
+    def restart_after_device_error(self, wait_seconds):
+        with self.stream_lock:
             if self.stream is not None:
-                self.stream.write(audio)
-        #while not self.play_finish:
-        #    time.sleep(0.1)
-        #print("SDOutputStream: Wait ...")
-        #self.play_finish_event.wait()
-        #print("SDOutputStream: Play and wait finish!")
+                stream = self.stream
+                self.stream = None
+            else:
+                stream = None
+        self._close_stream_unlocked(stream, reason="device_error_recover")
+        device_id, device_name, target_sr = _resolve_output_device(
+            preferred_device_name=self.preferred_device_name,
+            fallback_device_id=self.device_id,
+            wait_seconds=wait_seconds,
+            allow_builtin=self.allow_builtin,
+        )
+        with self.stream_lock:
+            self.device_id = device_id
+            self.target_sr = target_sr
+            self.stream = None
+        _tts_trace(
+            "tts_output_device_reselected",
+            device_id=self.device_id,
+            text=device_name,
+            target_sr=self.target_sr,
+            preferred=self.preferred_device_name,
+        )
+        self.restart()
 
     def stop(self):
         with self.stream_lock:
             self.play_finish = True
             if self.stream is not None:
-                self.stream.stop()
-                self.stream.close()
+                stream = self.stream
                 self.stream = None
+            else:
+                stream = None
+        self._close_stream_unlocked(stream, reason="stop")
 
     def restart(self):
         with self.stream_lock:
             if self.stream is not None:
                 return
+            _tts_trace(
+                "tts_output_stream_open",
+                device_id=self.device_id,
+                target_sr=self.target_sr,
+                preferred=self.preferred_device_name,
+            )
             self.stream = sd.OutputStream(device=self.device_id,
                                           samplerate=self.target_sr,
                                           channels=1,
@@ -172,10 +364,47 @@ class EspnetTTS(object):
         self.device_id = device_id
         self.target_sr = self.orig_sr
         self.sd_stream = None
+        self.preferred_device_name = (
+            os.getenv("TTS_DEVICE_NAME")
+            or os.getenv("RABBITBOT_PREFERRED_LOCAL_TTS_DEVICE")
+            or ""
+        ).strip() or None
+        self.play_timeout_grace_seconds = _tts_env_float("RABBITBOT_TTS_PLAY_TIMEOUT_GRACE_SECONDS", 8.0)
+        self.play_timeout_min_seconds = _tts_env_float("RABBITBOT_TTS_PLAY_TIMEOUT_MIN_SECONDS", 10.0)
+        self.output_device_recover_wait_seconds = _tts_env_float("RABBITBOT_TTS_OUTPUT_RECOVER_WAIT_SECONDS", 12.0)
+        self.play_retry_sleep_seconds = _tts_env_float("RABBITBOT_TTS_PLAY_RETRY_SLEEP_SECONDS", 1.0)
+        self.play_retry_limit = _tts_env_int("RABBITBOT_TTS_PLAY_RETRY_LIMIT", 0)
         if self.device_id is not None and self.device_id >= 0:
-            info = sd.query_devices(self.device_id, 'output')
-            self.target_sr = info["default_samplerate"]
-            self.sd_stream = SDOutputStream(self.device_id, self.target_sr)
+            try:
+                resolved_id, resolved_name, resolved_sr = _resolve_output_device(
+                    preferred_device_name=self.preferred_device_name,
+                    fallback_device_id=self.device_id,
+                    wait_seconds=0.0,
+                    allow_builtin=os.getenv("RABBITBOT_TTS_ALLOW_BUILTIN", "0").strip().lower()
+                    in {"1", "true", "yes", "on"},
+                )
+                if resolved_id != self.device_id:
+                    _tts_trace(
+                        "tts_output_device_startup_reselected",
+                        device_id=resolved_id,
+                        text=resolved_name,
+                        previous_device_id=self.device_id,
+                        target_sr=resolved_sr,
+                        preferred=self.preferred_device_name,
+                    )
+                self.device_id = resolved_id
+                self.target_sr = resolved_sr
+            except Exception as exc:
+                _tts_trace(
+                    "tts_output_device_startup_resolve_failed",
+                    device_id=self.device_id,
+                    text=self.preferred_device_name,
+                    error_type=type(exc).__name__,
+                    error=exc,
+                )
+                info = sd.query_devices(self.device_id, 'output')
+                self.target_sr = info["default_samplerate"]
+            self.sd_stream = SDOutputStream(self.device_id, self.target_sr, self.preferred_device_name)
         else:
             print("EspnetTTS: 未配置输出音频设备，将跳过实际播放")
         self.debug_mode = debug_mode
@@ -303,33 +532,7 @@ class EspnetTTS(object):
             else:
                 wav_data = wav
             if self.sd_stream is not None:
-                data_resampled = librosa.resample(wav_data, orig_sr=self.orig_sr, target_sr=self.target_sr)
-                #sd.play(data_resampled, self.target_sr, device=self.device_id)
-                #sd.wait()
-                try:
-                    play_start = time.perf_counter()
-                    _tts_trace(
-                        "tts_play_start",
-                        tts_index=tts_index,
-                        text=self.tts_trace_texts.get(tts_index),
-                        samples=len(data_resampled),
-                        target_sr=self.target_sr,
-                    )
-                    self.tts_queue[tts_index] = 1
-                    self.sd_stream.play_and_wait(data_resampled)
-                    _tts_trace(
-                        "tts_play_done",
-                        tts_index=tts_index,
-                        text=self.tts_trace_texts.get(tts_index),
-                        elapsed=round(time.perf_counter() - play_start, 6),
-                    )
-                except Exception as exc:
-                    _tts_trace(
-                        "tts_play_error",
-                        tts_index=tts_index,
-                        text=self.tts_trace_texts.get(tts_index),
-                        error=exc,
-                    )
+                self._play_wav_with_recovery(wav_data, tts_index, generation)
             else:
                 self.tts_queue[tts_index] = 1
                 _tts_trace("tts_play_skipped_no_device", tts_index=tts_index, text=self.tts_trace_texts.get(tts_index))
@@ -337,6 +540,124 @@ class EspnetTTS(object):
             #self.wav_q.done()
         if self.debug_mode:
             print("WAV worker exit")
+
+    def _tts_play_timeout_seconds(self, sample_count, target_sr):
+        expected_seconds = sample_count / max(float(target_sr), 1.0)
+        return max(
+            self.play_timeout_min_seconds,
+            expected_seconds + self.play_timeout_grace_seconds,
+        )
+
+    def _play_wav_with_recovery(self, wav_data, tts_index, generation):
+        attempt = 0
+        text = self.tts_trace_texts.get(tts_index)
+        while self.status == TTSStatus.RUNNING and generation == self.interrupt_generation:
+            attempt += 1
+            target_sr = float(self.sd_stream.target_sr)
+            data_resampled = librosa.resample(wav_data, orig_sr=self.orig_sr, target_sr=target_sr)
+            timeout_seconds = self._tts_play_timeout_seconds(len(data_resampled), target_sr)
+            play_start = time.perf_counter()
+            _tts_trace(
+                "tts_play_start",
+                tts_index=tts_index,
+                text=text,
+                samples=len(data_resampled),
+                target_sr=target_sr,
+                attempt=attempt,
+                timeout=round(timeout_seconds, 3),
+                device_id=self.sd_stream.device_id,
+                preferred=self.preferred_device_name,
+            )
+            self.tts_queue[tts_index] = 1
+            try:
+                self.sd_stream.play_and_wait(data_resampled, timeout_seconds=timeout_seconds)
+                self.target_sr = self.sd_stream.target_sr
+                _tts_trace(
+                    "tts_play_done",
+                    tts_index=tts_index,
+                    text=text,
+                    elapsed=round(time.perf_counter() - play_start, 6),
+                    attempt=attempt,
+                    device_id=self.sd_stream.device_id,
+                )
+                return True
+            except TTSPlaybackTimeout as exc:
+                _tts_trace(
+                    "tts_play_timeout",
+                    tts_index=tts_index,
+                    text=text,
+                    elapsed=round(time.perf_counter() - play_start, 6),
+                    attempt=attempt,
+                    timeout=round(timeout_seconds, 3),
+                    device_id=self.sd_stream.device_id,
+                    error=exc,
+                )
+            except Exception as exc:
+                _tts_trace(
+                    "tts_play_error",
+                    tts_index=tts_index,
+                    text=text,
+                    elapsed=round(time.perf_counter() - play_start, 6),
+                    attempt=attempt,
+                    device_id=self.sd_stream.device_id,
+                    error_type=type(exc).__name__,
+                    error=exc,
+                )
+
+            if self.play_retry_limit > 0 and attempt >= self.play_retry_limit:
+                _tts_trace(
+                    "tts_play_retry_limit_reached",
+                    tts_index=tts_index,
+                    text=text,
+                    attempt=attempt,
+                    retry_limit=self.play_retry_limit,
+                )
+                return False
+
+            if self.status != TTSStatus.RUNNING or generation != self.interrupt_generation:
+                _tts_trace(
+                    "tts_play_retry_cancelled",
+                    tts_index=tts_index,
+                    text=text,
+                    attempt=attempt,
+                    status=self.status,
+                    generation=generation,
+                    current_generation=self.interrupt_generation,
+                )
+                return False
+
+            try:
+                if self.play_retry_sleep_seconds > 0:
+                    time.sleep(self.play_retry_sleep_seconds)
+                _tts_trace(
+                    "tts_play_recover_start",
+                    tts_index=tts_index,
+                    text=text,
+                    attempt=attempt,
+                    wait=self.output_device_recover_wait_seconds,
+                    preferred=self.preferred_device_name,
+                )
+                self.sd_stream.restart_after_device_error(self.output_device_recover_wait_seconds)
+            except Exception as exc:
+                _tts_trace(
+                    "tts_play_recover_error",
+                    tts_index=tts_index,
+                    text=text,
+                    attempt=attempt,
+                    wait=self.output_device_recover_wait_seconds,
+                    error_type=type(exc).__name__,
+                    error=exc,
+                )
+                time.sleep(max(1.0, self.play_retry_sleep_seconds))
+        _tts_trace(
+            "tts_play_aborted_by_status",
+            tts_index=tts_index,
+            text=text,
+            generation=generation,
+            current_generation=self.interrupt_generation,
+            status=self.status,
+        )
+        return False
 
     def put_text(self, text):
         if self.debug_mode:

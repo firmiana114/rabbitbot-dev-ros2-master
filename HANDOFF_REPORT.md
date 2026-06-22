@@ -151,6 +151,19 @@ Aaron 本轮要求撤销此前为“每前往一个地点”增加的导览引�
 - 原因判断：机器人停止不是导航问题，而是 TTS 播放层在 USB 音频设备重置后卡在旧输出流，workflow 等待 TTS 队列完成而无法继续。
 - 建议：现场优先处理 REDMI 音响 USB 连接、供电和自动省电/断连问题；临时恢复可考虑重启 TTS 服务，但会影响当前播放队列。代码层面仍建议增加播放超时、设备重建和更明确的音频设备重置诊断日志。
 
+### 修复 REDMI 外放重置后的 TTS 播放恢复
+
+- 目标：解决 REDMI Speaker USB 重置后 TTS 写入旧音频流卡住的问题，并保证恢复后继续播放同一句，不吞掉已排队台词；同时提交当前已有的点位7坐标调整。
+- 修改：`rabbitbot/audio/run_tts_espnet.py` 增加 TTS 播放超时、输出设备按名称重扫、输出流重建和同一句音频重试逻辑；默认优先使用 `TTS_DEVICE_NAME` 或 `RABBITBOT_PREFERRED_LOCAL_TTS_DEVICE` 指定的 REDMI 设备，避免设备重枚举后继续使用旧 index。
+- 修改：播放线程只在音频确认播放完成后才减少待播放数量；发生超时、输出流异常或设备重建时，会等待短暂恢复时间后重新解析设备并重试同一个 wav，避免 workflow 误判 TTS 队列已清空。
+- 配置：新增可调环境变量 `RABBITBOT_TTS_PLAY_TIMEOUT_GRACE_SECONDS`、`RABBITBOT_TTS_PLAY_TIMEOUT_MIN_SECONDS`、`RABBITBOT_TTS_OUTPUT_RECOVER_WAIT_SECONDS`、`RABBITBOT_TTS_PLAY_RETRY_SLEEP_SECONDS`、`RABBITBOT_TTS_PLAY_RETRY_LIMIT`，默认无限重试，直到新一轮 TTS 生成或服务停止取消旧句。
+- 日志：新增或增强 `tts_output_stream_open`、`tts_play_start`、`tts_play_done`、`tts_play_timeout`、`tts_play_error`、`tts_play_recover_start`、`tts_output_device_reselected`、`tts_output_stream_abort_error` 等日志，便于定位播放阶段、设备 id、尝试次数、超时时间、恢复耗时和失败原因。
+- 点位：`conf/dialogue_0.json` 保留并提交当前未提交的点位7坐标调整，便于避开点位6到点位7路径上的障碍卡顿风险。
+- 验证：远端 Docker 环境内 `/opt/venv/bin/python -m py_compile rabbitbot/audio/run_tts_espnet.py` 和 `py310/bin/python -m py_compile rabbitbot/audio/run_tts_espnet.py` 均通过；`python3 -m json.tool conf/dialogue_0.json` 通过。
+- 验证：重启 `rabbitbot-unified-runtime` 后 TTS 使用 `REDMI Speaker 2-6002` 打开输出流，短句“语音恢复测试。”成功完成 `tts_play_start` 到 `tts_play_done`。
+- 当前状态：主循环已重新启动并回到 `qa_listening`，workflow 停在 go 闸门；最新状态接口显示定位成功，位姿约为 `x=-2.389, y=-0.6117`。
+- 未验证事项：本轮没有人为拔插或强制 reset REDMI 外放，因此实际 USB reset 后的自动恢复路径尚未在现场完整复现；代码已覆盖超时、重扫设备、重建输出流和重试同一句的路径。
+
 ## 其它信息
 
 - 本轮新增 QA 导览触发日志字段 `match_reason` 和 `text_preview`，用于判断口令是精确命中、同音归一、短口令还是编辑距离触发；本次排查同时依靠 `vlm_qa_workflow_20260622_114516.log`、`vlm_qa_dialogue_20260622_034518.log`、STT 日志和 `/api/status` 确认未触发原因。
