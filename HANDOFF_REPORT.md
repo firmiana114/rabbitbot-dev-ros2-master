@@ -196,5 +196,5 @@ Aaron 本轮要求撤销此前为“每前往一个地点”增加的导览引�
 ## 其它信息
 
 - 本轮新增 QA 导览触发日志字段 `match_reason` 和 `text_preview`，用于判断口令是精确命中、同音归一、短口令还是编辑距离触发；本次排查同时依靠 `vlm_qa_workflow_20260622_114516.log`、`vlm_qa_dialogue_20260622_034518.log`、STT 日志和 `/api/status` 确认未触发原因。
-- 本轮本体语音测试与切换：宿主机因 GLIBC 版本不匹配无法直接运行桥接程序，容器内 `unitree_g1_tts_bridge` 通过 `eno1` 探测音量成功返回 `ret=0, volume=100`；中文本体播报后续已被现场确认可听见，接口测试“导览本体语音测试。”成功走 `Unitree本体TTS`；后续 Aaron 要求默认改回本地外放，已把 TTS 直接启动、统一容器内部启动和外层联调启动的默认后端恢复为 `local`，并按新默认重建 `rabbitbot-unified-runtime` 容器；验证 VLM 8000、TTS 28185、Memory 28182、Robot 28180 就绪，容器环境为 `RABBITBOT_TTS_BACKEND=local`，TTS 日志显示 REDMI 外放 `plughw:3,0` 播放完成，`AUTO_START_WORKFLOW=0` 未自动启动导览。
+- 本轮本体语音测试与切换：宿主机因 GLIBC 版本不匹配无法直接运行桥接程序，容器内 `unitree_g1_tts_bridge` 通过 `eno1` 探测音量成功返回 `ret=0, volume=100`；中文本体播报后续已被现场确认可听见，接口测试“导览本体语音测试。”成功走 `Unitree本体TTS`；后续 Aaron 要求默认改回本地外放，已把 TTS 直接启动、统一容器内部启动和外层联调启动的默认后端恢复为 `local`，并按新默认重建 `rabbitbot-unified-runtime` 容器；验证 VLM 8000、TTS 28185、Memory 28182、Robot 28180 就绪，容器环境为 `RABBITBOT_TTS_BACKEND=local`，TTS 日志显示 REDMI 外放 `plughw:3,0` 播放完成，`AUTO_START_WORKFLOW=0` 未自动启动导览；本轮还将点位13“各位再会！”动作从高挥手 `high_wave` 改为近身挥手 `face_wave`。
 - 生成时间：2026-06-22

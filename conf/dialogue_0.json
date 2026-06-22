@@ -206,7 +206,7 @@
           "text": "{leader_calling}、各位领导，下面请移步门外，乘坐无人驾驶小巴车深入了解我们园区。"
         },
         {
-          "action": "high_wave",
+          "action": "face_wave",
           "text": "各位再会！",
           "speak_with_action": true
         }
