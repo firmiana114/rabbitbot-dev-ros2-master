@@ -90,15 +90,82 @@ def _normalize_command_text(text: str) -> str:
     return "".join(ch for ch in _normalize_text(text).lower() if ch.isalnum() or "一" <= ch <= "鿿")
 
 
-def _is_guide_trigger_text(text: str, phrases: tuple[str, ...]) -> bool:
+GUIDE_TRIGGER_CONFUSION_MAP = str.maketrans(
+    {
+        "捣": "导",
+        "倒": "导",
+        "到": "导",
+        "道": "导",
+        "蹈": "导",
+        "岛": "导",
+        "揽": "览",
+        "缆": "览",
+        "烂": "览",
+        "蓝": "览",
+        "栏": "览",
+        "兰": "览",
+        "懒": "览",
+        "史": "始",
+    }
+)
+
+
+def _canonicalize_guide_trigger_text(text: str) -> str:
+    return _normalize_command_text(text).translate(GUIDE_TRIGGER_CONFUSION_MAP)
+
+
+def _edit_distance_at_most(left: str, right: str, limit: int) -> bool:
+    if abs(len(left) - len(right)) > limit:
+        return False
+    previous = list(range(len(right) + 1))
+    for left_index, left_char in enumerate(left, start=1):
+        current = [left_index]
+        row_min = current[0]
+        for right_index, right_char in enumerate(right, start=1):
+            insert_cost = current[right_index - 1] + 1
+            delete_cost = previous[right_index] + 1
+            replace_cost = previous[right_index - 1] + (left_char != right_char)
+            value = min(insert_cost, delete_cost, replace_cost)
+            current.append(value)
+            row_min = min(row_min, value)
+        if row_min > limit:
+            return False
+        previous = current
+    return previous[-1] <= limit
+
+
+def _guide_trigger_match_reason(text: str, phrases: tuple[str, ...]) -> Optional[str]:
     normalized_text = _normalize_command_text(text)
     if not normalized_text:
-        return False
+        return None
     for phrase in phrases:
         normalized_phrase = _normalize_command_text(phrase)
         if normalized_phrase and normalized_phrase in normalized_text:
-            return True
-    return False
+            return f"精确匹配:{normalized_phrase}"
+
+    canonical_text = _canonicalize_guide_trigger_text(text)
+    for phrase in phrases:
+        canonical_phrase = _canonicalize_guide_trigger_text(phrase)
+        if canonical_phrase and canonical_phrase in canonical_text:
+            return f"同音归一匹配:{canonical_phrase}"
+
+    start_words = ("开始", "启动", "开启", "进入", "进行", "带我", "请")
+    guide_words = ("导览", "讲解", "参观")
+    if any(word in canonical_text for word in guide_words):
+        if any(word in canonical_text for word in start_words):
+            return "导览意图匹配:动作词+导览词"
+        if len(canonical_text) <= 4:
+            return "导览意图匹配:短导览口令"
+
+    fuzzy_targets = ("开始导览", "始导览", "导览", "开始讲解", "开始参观", "启动导览")
+    for target in fuzzy_targets:
+        if len(canonical_text) <= max(6, len(target) + 1) and _edit_distance_at_most(canonical_text, target, 1):
+            return f"编辑距离匹配:{target}"
+    return None
+
+
+def _is_guide_trigger_text(text: str, phrases: tuple[str, ...]) -> bool:
+    return _guide_trigger_match_reason(text, phrases) is not None
 
 
 def _read_state_file(path: Path) -> str:
@@ -749,13 +816,16 @@ class VLMQAWorkflow:
                 self._write_dialogue_log("回答", exit_answer)
                 break
 
-            if _is_guide_trigger_text(user_text, self.config.guide_trigger_phrases):
+            guide_trigger_reason = _guide_trigger_match_reason(user_text, self.config.guide_trigger_phrases)
+            if guide_trigger_reason:
                 LOGGER.info(
-                    "收到开始导览口令：turn=%s, trigger_count=%s, phrases=%s, text_hash=%s",
+                    "收到开始导览口令：turn=%s, trigger_count=%s, phrases=%s, match_reason=%s, text_hash=%s, text_preview=%s",
                     self.turn_count,
                     self.guide_trigger_count + 1,
                     ";".join(self.config.guide_trigger_phrases),
+                    guide_trigger_reason,
                     _text_digest(user_text),
+                    _text_preview(user_text),
                 )
                 try:
                     self._handle_guide_trigger(user_text)

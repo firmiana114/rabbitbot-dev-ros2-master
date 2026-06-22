@@ -120,7 +120,17 @@ Aaron 本轮要求撤销此前为“每前往一个地点”增加的导览引�
 - 直接原因判断：REDMI 外放设备发生 USB reset/重新枚举，TTS 没有重建输出流，也没有播放超时保护，导致下一句音频写入旧输出流时一直阻塞。
 - 建议修复方向：启动时不要长期缓存易失效的 PortAudio index 和 `OutputStream`；播放前按设备名重新解析 REDMI；`stream.write()` 外围增加播放超时、错误日志和自动重建输出流；外部恢复层面优先检查 REDMI 音响供电、线缆、USB 口和自动省电/断连问题。
 
+### 修复开始导览口令误识别不触发
+
+- 目标：Aaron 反馈刚刚连续说两次“开始导览”，机器人没有启动导览 workflow。本轮排查并修改 QA 触发逻辑。
+- 原因：当前 `guide_state=qa_listening`，导览 workflow 已停在 go 闸门，服务状态正常；但 QA 日志显示 STT 将“开始导览”识别为“开始捣揽”“开始捣览”，另有一次识别为“史捣烂”。旧逻辑只精确包含默认触发词 `开始导览`，因此没有写入 `go` 命令，而是把误识别文本交给大模型回答。
+- 修改：在 `rabbitbot/agno_agents/vlm_qa_workflow.py` 增加导览口令容错匹配，将 `捣/倒/到/道/蹈/岛` 归一为 `导`，将 `揽/缆/烂/蓝/栏/兰/懒` 归一为 `览`，将 `史` 归一为 `始`；同时支持短口令 `导览`、动作词加导览词、以及有限编辑距离匹配。
+- 日志：导览触发日志新增 `match_reason` 和 `text_preview`，后续可以直接看出是精确匹配、同音归一、短口令还是编辑距离触发。
+- 验证：本地导入函数测试确认 `开始导览`、`开始捣揽`、`开始捣览`、`史捣烂`、`导览`、`开始讲解` 均可触发；`苏州有什么好玩的地方`、`导览服务是什么` 不触发。`python3 -m py_compile rabbitbot/agno_agents/vlm_qa_workflow.py` 通过。
+- 运行结果：直接 `systemctl restart rabbitbot-loop.service` 因需要交互授权失败；已改用控制台 `/api/restart` 接口重启导航主程序，服务已回到 `qa_listening`，新 QA 监听会加载本次容错逻辑。
+- 注意：当前状态为 `qa_listening`，但状态接口显示定位暂未成功，需要现场确认定位后再开始真实导览。
+
 ## 其它信息
 
-- 本轮没有新增或调整代码日志点；本次排查主要依靠 `rabbitbot_workflow_20260622_112905.log`、`nav_bridge_20260622_112853.log`、`rabbitbot_tts.log`、`/api/status`、`/go_to_status`、`journalctl` 内核/音频日志和容器内 `sounddevice.query_devices()`。日志已足够确认当前卡点在 REDMI 音响 USB reset 后的 TTS 播放流阻塞，而不是导航未到达。
+- 本轮新增 QA 导览触发日志字段 `match_reason` 和 `text_preview`，用于判断口令是精确命中、同音归一、短口令还是编辑距离触发；本次排查同时依靠 `vlm_qa_workflow_20260622_114516.log`、`vlm_qa_dialogue_20260622_034518.log`、STT 日志和 `/api/status` 确认未触发原因。
 - 生成时间：2026-06-22
