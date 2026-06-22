@@ -62,65 +62,6 @@
 
 ## 近期完整记录
 
-## 本轮补充：QA 触发导览 workflow 启动测试
-
-### 背景和目标
-
-本轮按 Aaron 要求对当前 workflow 做一轮启动链路测试，重点确认三件事：全部基础服务能否正常启动；默认进入 QA 问答模式后大模型是否能正常回答问题；通过命令形式向 STT 注入“开始导览”后，是否能触发导览 workflow 启动。Aaron 已说明机器人可能没有开启行走模式，因此本轮不把导航是否实际移动或到点作为成败标准。
-
-### 当前状态
-
-已完成：
-
-- 已确认测试开始前 Git 工作区干净，最新提交为 `9bded4f 修复控制台重启端口清理与 TTS 默认后端`。
-- 已确认 `rabbitbot-loop.service`、`rabbitbot-control-console.service` 和 `docker.service` 均为 `active`。
-- 已确认统一容器 `rabbitbot-unified-runtime` 正在运行。
-- 已确认关键端口均在监听：VLM `8000`、Neo4j `7687`、导航桥接 `28180`、Memory `28182`、STT `28184`、TTS `28185`。
-- 已确认 `runtime/nav_workflow_control/guide_state` 曾进入 `qa_listening`，表示导览 workflow 已预启动并停在 go 闸门，QA 模式处于待命。
-- 已通过 STT 注入接口发送普通问题：`你好，请用一句话介绍你自己`；接口返回 HTTP 200，`utterance_id=1`。
-- 已确认 QA/VLM/TTS 链路正常：TTS 日志显示回答被提交并播报，内容为“你好！”和“我是RabbitBot，一个能够回答各种问题的智能助手。”。
-- 已通过 STT 注入接口发送导览口令：`开始导览`；接口返回 HTTP 200，`utterance_id=2`。
-- 已确认导览被成功触发：`guide_state` 从 `qa_listening` 切换到 `guide_running`，导览 workflow 日志显示进入严格 DOCX 剧本并发送第一段导航目标。
-- 已确认导览启动后继续推进：workflow 完成开场 TTS、动作调用、`1到2过渡` 和 `跟随步行到点位2` 两个导航步骤，随后进入 `点咖啡` 台词段。
-
-未完成：
-
-- 本轮没有验证机器人真实行走、导航到点精度或完整导览闭环；Aaron 已明确本轮不关注导航是否成功。
-- 本轮没有执行 `back` 返航，也没有停止当前 `rabbitbot-loop.service`。
-- 本轮没有修改业务代码。
-
-### 已验证的事实
-
-- `guide_state` 最终为 `state=guide_running`、`run_id=20260612_131441`，说明导览已经进入运行态。
-- 服务最终仍保持可用：`rabbitbot-loop.service`、控制台和 Docker 为 active，28180/28182/28184/28185/8000/7687 仍在监听。
-- STT 注入普通问题和导览口令均返回 HTTP 200。
-- QA 问答路径使用当前配置 `vlm_stream=0`、`stream_tts=1`，普通问题已完成大模型回答和 TTS 分段播报。
-- 导览 workflow 日志显示第一段目标为 test9 点位 `(0.1797, -0.1793, 0.0022, 0.1118, 0.0196, 0.9935)`，并成功进入后续剧本步骤；该事实只用于证明导览流程启动，不用于评价导航是否成功。
-- 观察到一个非本轮判定项：进入 `点咖啡` 台词段后，TTS 已生成并入队 `tts_index=7..10`，但日志中只看到 `tts_index=7` 的 `tts_play_start`，未继续看到对应 `tts_play_done`；workflow 随后持续查询 `get_wav_count`。这不影响本轮“启动是否成功”的结论，但后续若要完整跑导览，需要单独排查 TTS 播放队列卡住风险。
-
-### 阻塞问题
-
-本轮目标无阻塞：服务启动、QA 问答、STT 口令触发导览启动三项均已验证通过。剩余风险是完整导览运行层面风险，主要是现场行走模式/导航状态和本轮观察到的 TTS 播放队列可能卡住。
-
-### 建议的下一步
-
-- 如果只验证“开始导览”触发链路，本轮已经满足要求。
-- 如果要继续验证完整导览，需要先确认机器人行走模式已开启，再观察导航和 `点咖啡` 后续台词是否继续播报。
-- 如后续发现卡在 `点咖啡`，优先检查 `logs/unified_runtime/rabbitbot_tts.log` 中 `tts_index=7` 是否缺少 `tts_play_done`，以及本地 REDMI 音响播放线程是否阻塞。
-- 如需恢复待命状态，可在现场确认安全后按既有流程停止或重启 `rabbitbot-loop.service`，或根据当前位置决定是否发送 `back`。
-
-### 注意事项
-
-- 本轮测试通过 STT `/exec` 的 `inject_text_async` 注入文本，不依赖真实麦克风识别。
-- 本轮没有因为导航状态做失败判定；机器人未开启行走模式时，导航是否移动不代表 workflow 启动失败。
-- 远端日志时间显示为 2026-06-12，当前会话日期为 2026-06-17；后续排查时应注意 AGX-orin 系统时间可能与当前会话日期不一致。
-
-### 其它信息
-
-- 本轮没有新增或调整代码日志点。
-- 本轮使用的关键日志包括：`logs/vlm_qa_workflow/vlm_qa_workflow_20260612_051412.log`、`logs/vlm_qa_workflow/vlm_qa_dialogue_20260612_051414.log`、`logs/nav_workflow_control/rabbitbot_workflow_20260612_131441.log`、`logs/unified_runtime/rabbitbot_tts.log`。
-- 生成时间：2026-06-17
-
 ## 本轮补充：放宽 QA 问答提示词
 
 ### 背景和目标
@@ -326,5 +267,57 @@ Aaron 反馈前端显示“服务仍未全部就绪，请查看状态或打开�
 ### 其它信息
 
 - 本轮没有新增或调整代码日志点；使用的关键日志为 `journalctl -u rabbitbot-loop.service`、`logs/unified_runtime/qwen2.5-vl-7b-gptq.log`、`logs/unified_runtime/rabbitbot_tts.log` 和 `/tmp/rabbitbot_tts_sounddevice.err`。
+- 生成时间：2026-06-22
+
+## 本轮补充：手动重启 TTS 并恢复导览链路
+
+### 背景和目标
+
+Aaron 要求在前端未就绪排查后“重启TTS试试”。本轮目标是在不改业务代码、不切换 TTS 后端的前提下，按当前 `local` 后端配置手动拉起 TTS，观察 28185 是否恢复，并确认控制台 ready 链路是否继续推进。
+
+### 当前状态
+
+已完成：
+
+- 已确认重启前容器内无 TTS 进程，28185 未监听，`guide_state` 仍为 `starting`。
+- 已在 `rabbitbot-unified-runtime` 容器内按现有配置手动启动 `scripts/start_tts_app.bash`，保留 `RABBITBOT_TTS_BACKEND=local`、`RABBITBOT_TTS_ALLOW_BUILTIN=0` 和首选设备 `REDMI Speaker 2-6002`。
+- TTS 本次启动成功，28185 已监听，`/exec wait_speech` 返回 `{"out_text":"TTS finished"}`。
+- loop 随后识别到 `TTS /exec 服务 (28185) 已就绪`，继续启动 STT 和 Memory Agent。
+- 28184、28182、28185、8000、28180、8080 均已监听。
+- `guide_state` 曾进入 `qa_listening`，随后 STT 真实识别到“开始导览”，workflow 释放 go 闸门并进入 `guide_running`。
+- 当前 workflow run_id 为 `20260622_100400`，已进入严格 DOCX 剧本和 test7 导览流程。
+
+未完成：
+
+- 本轮没有停止当前导览，没有发送 `back`，也没有人工干预机器人运动。
+- 未确认 TTS 本次为什么能成功检测到输出设备；可能是音响在排查过程中恢复可见，也可能是设备枚举延迟恢复。
+
+### 已验证的事实
+
+- `logs/unified_runtime/rabbitbot_tts.log` 显示 TTS 预热完成、Uvicorn 在 28185 启动，并处理 `/exec` 请求。
+- `journalctl -u rabbitbot-loop.service` 显示 `TTS /exec 服务 (28185) 已就绪`。
+- `runtime/nav_workflow_control/guide_state` 当前为 `state=guide_running`、`run_id=20260622_100400`。
+- STT 日志显示识别文本为“开始导览”，这解释了为什么系统从 `qa_listening` 继续切到 `guide_running`；本轮没有通过命令文件手动发送 `go`。
+- 最新 workflow 日志显示已加载 `conf/dialogue_0.json`，`map_file=test7.pcd`，并开始执行新增引导词，例如“一站式企业服务和交流路演中心板块”。
+
+### 阻塞问题
+
+当前未见服务级阻塞。剩余风险是导览正在运行中，需要现场确认机器人移动、TTS 播报、点位导航和后续点位7等待是否符合预期。
+
+### 建议的下一步
+
+- 现场观察当前导览是否按 test7 路线继续运行，重点听 TTS 是否稳定出声。
+- 如果需要中止或返航，应先确认现场安全，再用控制台返航或既有 `back` 流程处理。
+- 若下次重启仍出现 28185 不启动，优先查看 REDMI 音响连接和 `/tmp/rabbitbot_tts_sounddevice.err`。
+
+### 注意事项
+
+- 当前已进入 `guide_running`，控制台不会再显示“可开始导览”的待命状态；这是导览已开始，不是服务未就绪。
+- TTS 是手动在现有容器中拉起的；如后续重启整个容器或服务，仍需确认音频设备可见。
+- 本轮没有修改业务代码或配置。
+
+### 其它信息
+
+- 本轮没有新增或调整代码日志点；关键日志为 `logs/unified_runtime/rabbitbot_tts.log`、`logs/unified_runtime/rabbitbot_stt.log`、`logs/nav_workflow_control/rabbitbot_workflow_20260622_100400.log` 和 `journalctl -u rabbitbot-loop.service`。
 - 生成时间：2026-06-22
 
