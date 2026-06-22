@@ -62,64 +62,6 @@
 
 ## 近期完整记录
 
-## 本轮补充：QA 模式触发导览 workflow 整合
-
-### 背景和目标
-
-Aaron 要求将 QA workflow 与导览 workflow 整合：系统默认处于 QA 语音问答模式；当 QA 识别到“开始导览”口令后，启动原有导览流程；导览过程中不允许语音打断；导览结束后恢复 QA 模式。要求导览流程本身继续沿用现有严格 DOCX workflow、导航闸门、点位和返航编排，不改导览台词和动作执行逻辑。
-
-### 当前状态
-
-已完成：
-
-- `rabbitbot/agno_agents/vlm_qa_workflow.py` 已新增导览触发逻辑：默认口令为 `开始导览`，可通过 `RABBITBOT_QA_GUIDE_TRIGGER_PHRASES` 配置多个逗号分隔口令。
-- QA workflow 收到导览口令后，会向共享命令文件写入 `go`，并进入导览等待状态；等待期间不再调用 STT 监听，也不会进入 VLM 问答，因此导览过程中不会被 QA 打断。
-- QA workflow 会读取导览状态文件，观察 `guide_running` 到 `guide_finished_waiting_back` 或 `qa_listening` 的状态变化；导览完成后恢复 QA 监听。
-- `scripts_1/start_nav_bridge_workflow_loop.sh` 已默认启用 QA 模式：`RABBITBOT_NAV_WORKFLOW_ENABLE_QA=1` 时默认同时启用 VLM 与 STT 基础服务。
-- 导航 loop 已新增共享状态文件：默认宿主路径为 `runtime/nav_workflow_control/guide_state`，容器路径为 `/workspace/projects/rabbitbot-dev-ros2-master/runtime/nav_workflow_control/guide_state`。
-- 导航 loop 已将命令文件默认从 `/tmp/rabbitbot_nav_workflow_control/command` 调整到项目内 `runtime/nav_workflow_control/command`，确保容器内 QA 与宿主 loop 通过项目挂载访问同一个命令文件。
-- `scripts_1/send_nav_workflow_command.sh` 已同步使用项目内控制目录，外部终端的 `go/back/quit` 仍可用。
-- `scripts/start_vlm_qa_workflow.bash` 和 `scripts_1/start_unified_vlm_qa_workflow.sh` 已补充导览触发相关环境变量说明和透传。
-- 导航 loop 已在关键阶段写入状态：`starting`、`guide_preparing`、`qa_listening`、`guide_running`、`guide_finished_waiting_back`、`returning`、`guide_prepare_failed`、`qa_disabled`。
-- 导航 loop 的运行时健康检查已补充 VLM 8000 检查；默认 QA 模式下如果 VLM 掉线，会在 loop 日志中明确显示 `VLM(8000)`。
-
-未完成：
-
-- 本轮未重启 `rabbitbot-loop.service`，未启动新的导览流程，也未发送语音或文件 `go/back` 命令，避免现场真机误动作。
-- 本轮未做完整实机验证：尚未确认默认 QA 模式启动后 VLM/STT 冷启动耗时、语音识别“开始导览”的现场准确率、导览结束恢复 QA 的实机节奏。
-
-### 已验证的事实
-
-- 已通过 `PYTHONPYCACHEPREFIX=/tmp/rabbitbot_pycache_check python3 -m py_compile rabbitbot/agno_agents/vlm_qa_workflow.py scripts/run_vlm_qa_workflow.py rabbitbot/agno_agents/workflow.py`。
-- 已通过 `bash -n` 检查：`scripts_1/start_nav_bridge_workflow_loop.sh`、`scripts_1/send_nav_workflow_command.sh`、`scripts/start_vlm_qa_workflow.bash`、`scripts_1/start_unified_vlm_qa_workflow.sh`、`scripts_1/start_unified_integration_workflow.sh`。
-- 已通过轻量 Python helper 验证：`请开始导览` 和 `开始，导览！` 能命中导览触发，普通问题 `介绍一下你自己` 不会误触发；状态文件读取 `state=qa_listening` 正常。
-- 已执行 `git diff --check`，未发现空白或补丁格式问题。
-- 尝试运行 `python3 -m pytest tests/control_console -q` 失败，原因为系统 pytest 加载用户目录 anyio 插件时报 `ModuleNotFoundError: No module named '_pytest.scope'`；改用 `py310/bin/python -m pytest` 失败，原因为 `py310` 环境未安装 pytest。该问题属于测试环境依赖不一致，不是本轮代码路径的运行断言失败。
-
-### 阻塞问题
-
-- 实机验证仍需有人值守后重启 `rabbitbot-loop.service`；新 loop 默认会启动 VLM/STT，冷启动和资源占用明显高于原先只启动导览底座的模式。
-- 当前运行中的 `rabbitbot-loop.service` 是本轮修改前启动的旧进程；不重启服务不会加载本轮 QA/导览整合逻辑。
-
-### 建议的下一步
-
-- 在确认现场安全后执行 `sudo systemctl restart rabbitbot-loop.service`，等待 VLM/STT/TTS/导航桥接全部就绪。
-- 观察 `runtime/nav_workflow_control/guide_state`，确认状态最终进入 `qa_listening`。
-- 用语音说“开始导览”，或用 `bash scripts_1/send_nav_workflow_command.sh go` 做非语音等价验证；确认状态切到 `guide_running`，导览期间 QA 日志不再出现新的 STT 监听轮次。
-- 导览结束后确认状态切到 `guide_finished_waiting_back`，QA workflow 恢复监听并可回答普通问题。
-- 如需下一轮导览，仍需先按原有流程发送 `back` 完成返航，待 loop 重新预启动下一轮导览并回到 `qa_listening` 后再说“开始导览”。
-
-### 注意事项
-
-- 新共享控制目录默认为 `runtime/nav_workflow_control`；如果现场仍用旧的 `/tmp/rabbitbot_nav_workflow_control/command` 手写命令，将不会被新 loop 默认读取，除非显式设置 `RABBITBOT_NAV_WORKFLOW_CONTROL_DIR`。
-- QA 只在状态为空、`qa_listening` 或 `waiting_go` 时接受“开始导览”；如果状态为 `guide_running`、`guide_finished_waiting_back` 或 `returning`，会播报默认不可用提示，避免重复启动导览。
-- 默认不在触发导览前额外播报“好的，开始导览”，避免改变原导览开场节奏；如需导览结束后播报恢复提示，可设置 `RABBITBOT_QA_GUIDE_RESUME_SPEECH`。
-- 本轮新增日志点：QA 记录导览口令命中、命令文件写入、导览状态变化、等待超时和恢复 QA；导航 loop 记录 QA workflow 启停、状态文件写入、VLM/STT 默认启用、VLM 健康检查失败原因。
-
-### 其它信息
-
-- 生成时间：2026-06-17 00:00:00
-
 ## 本轮补充：控制台 ready 状态改用 QA/导览 guide_state
 
 ### 背景和目标
@@ -331,3 +273,55 @@ Aaron 反馈当前提示词可能收得过紧，导致大模型经常回答“�
 
 - 本轮调整的日志点：启动日志和 VLM 推理日志中的 `prompt_profile` 改为 `qa_broad`，用于确认运行进程是否加载新提示词。
 - 生成时间：2026-06-17
+
+## 本轮补充：阅读项目与交接报告并确认当前状态
+
+### 背景和目标
+
+Aaron 要求通过 SSH 登录 AGX-orin-FX，阅读 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master` 项目和交接报告，确认当前项目背景、近期工作、运行状态和工作区情况。本轮以读取、梳理和非侵入式检查为主，不启动或停止机器人相关服务，不触发导览、返航、TTS 播报或机器人移动。
+
+### 当前状态
+
+已完成：
+
+- 已通过 SSH 阅读项目根目录、README、控制台 README、Git 分支、最近提交、受版本管理文件清单和完整交接报告。
+- 已确认当前分支为 `June6_workflow`，最近提交包含 `eacade8 进一步放宽qa提示词`、`f8d2404 放宽 QA 问答提示词减少拒答`、`33c1500 压缩交接报告保留近期重点`。
+- 已确认当前业务入口主要包括：`rabbitbot/agno_agents/vlm_qa_workflow.py`、`rabbitbot/agno_agents/workflow.py`、`rabbitbot/control_console/`、`scripts_1/start_nav_bridge_workflow_loop.sh`、`scripts_1/unified_runtime/start_unified_container.sh`。
+- 已确认接手时存在 6 个未提交业务改动：`conf/dialogue_0.json`、`scripts/start_tts_app.bash`、`scripts_1/start_nav_bridge_workflow_loop.sh`、`scripts_1/start_unified_integration_workflow.sh`、`scripts_1/systemd/rabbitbot-loop.service`、`scripts_1/unified_runtime/start_unified_container.sh`。
+- 已读取这些未提交差异：`dialogue_0.json` 从短 test9 剧本切到 test7 地图和 13 个点位长导览；TTS 默认后端从 `auto` 调整为 `local`；导航 loop 增加运行时健康检查连续失败阈值并将 TTS 健康检查改为端口检查；统一集成脚本会在 TTS 端口存在但 `/exec` 不响应时判定容器不兼容；systemd 默认地图改为 `/home/unitree/test7.pcd`；统一容器启动脚本会清理疑似卡死的旧 TTS 进程。
+- 已确认当前运行状态文件为 `state=guide_finished_waiting_back`、`run_id=20260618_161702`、`exit_code=0`；`rabbitbot-loop.service` 当前为 inactive，`rabbitbot-control-console.service` 和 `docker.service` 为 active。
+
+未完成：
+
+- 本轮没有启动或停止任何服务，没有发送 `go/back`，没有验证真实机器人移动、真实语音识别或真实 TTS 出声。
+- 本轮没有评审或接管 6 个既有未提交业务改动的正确性，仅记录其内容并做基础格式检查。
+
+### 已验证的事实
+
+- `python3 -m json.tool conf/dialogue_0.json` 通过，当前已修改台词文件是合法 JSON。
+- `bash -n scripts/start_tts_app.bash` 通过。
+- `bash -n scripts_1/start_nav_bridge_workflow_loop.sh` 通过。
+- `bash -n scripts_1/start_unified_integration_workflow.sh` 和 `bash -n scripts_1/unified_runtime/start_unified_container.sh` 通过。
+- AGX 环境未安装 `rg`，本轮使用 `find`、`grep`、`git ls-files` 和 `sed` 替代读取项目结构。
+
+### 阻塞问题
+
+无阅读层面的阻塞。后续如果要继续处理当前 6 个业务改动，需要先确认这些改动是否都是现场期望保留的 test7 长路线、TTS 本地后端和 TTS 卡死恢复策略。
+
+### 建议的下一步
+
+- 如需验收当前未提交业务改动，优先在现场安全窗口确认 test7 地图、13 个点位路线和返航点是否与现场一致。
+- 如需恢复待命状态，先确认机器人现场位置和安全，再决定是否启动 `rabbitbot-loop.service` 或发送返航命令。
+- 如需提交当前 6 个业务改动，应先完成至少一次脚本级验证和必要的服务启动验证，并在提交前更新本交接报告。
+
+### 注意事项
+
+- 本轮只提交交接报告更新，未提交既有 6 个业务改动，避免混入非本轮产生的现场改动。
+- 当前 `rabbitbot-loop.service` 为 inactive，但 `guide_state` 保留在上次导览完成等待返航状态；后续判断 ready 时应同时看服务状态和 `guide_state`。
+- `conf/dialogue_0.json` 当前已跟踪且有大幅差异；修改或提交前应重点检查 map_file、点位顺序、过渡点和 `back_points`。
+
+### 其它信息
+
+- 本轮没有新增或调整代码日志点；仅确认既有未提交脚本中包含运行时健康检查失败阈值、健康恢复、TTS 端口卡死识别、旧 TTS 进程清理等日志或诊断输出。
+- 生成时间：2026-06-22
+
