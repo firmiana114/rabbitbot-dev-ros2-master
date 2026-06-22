@@ -62,57 +62,6 @@
 
 ## 近期完整记录
 
-## 本轮补充：阅读项目与交接报告并确认当前状态
-
-### 背景和目标
-
-Aaron 要求通过 SSH 登录 AGX-orin-FX，阅读 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master` 项目和交接报告，确认当前项目背景、近期工作、运行状态和工作区情况。本轮以读取、梳理和非侵入式检查为主，不启动或停止机器人相关服务，不触发导览、返航、TTS 播报或机器人移动。
-
-### 当前状态
-
-已完成：
-
-- 已通过 SSH 阅读项目根目录、README、控制台 README、Git 分支、最近提交、受版本管理文件清单和完整交接报告。
-- 已确认当前分支为 `June6_workflow`，最近提交包含 `eacade8 进一步放宽qa提示词`、`f8d2404 放宽 QA 问答提示词减少拒答`、`33c1500 压缩交接报告保留近期重点`。
-- 已确认当前业务入口主要包括：`rabbitbot/agno_agents/vlm_qa_workflow.py`、`rabbitbot/agno_agents/workflow.py`、`rabbitbot/control_console/`、`scripts_1/start_nav_bridge_workflow_loop.sh`、`scripts_1/unified_runtime/start_unified_container.sh`。
-- 已确认接手时存在 6 个未提交业务改动：`conf/dialogue_0.json`、`scripts/start_tts_app.bash`、`scripts_1/start_nav_bridge_workflow_loop.sh`、`scripts_1/start_unified_integration_workflow.sh`、`scripts_1/systemd/rabbitbot-loop.service`、`scripts_1/unified_runtime/start_unified_container.sh`。
-- 已读取这些未提交差异：`dialogue_0.json` 从短 test9 剧本切到 test7 地图和 13 个点位长导览；TTS 默认后端从 `auto` 调整为 `local`；导航 loop 增加运行时健康检查连续失败阈值并将 TTS 健康检查改为端口检查；统一集成脚本会在 TTS 端口存在但 `/exec` 不响应时判定容器不兼容；systemd 默认地图改为 `/home/unitree/test7.pcd`；统一容器启动脚本会清理疑似卡死的旧 TTS 进程。
-- 已确认当前运行状态文件为 `state=guide_finished_waiting_back`、`run_id=20260618_161702`、`exit_code=0`；`rabbitbot-loop.service` 当前为 inactive，`rabbitbot-control-console.service` 和 `docker.service` 为 active。
-
-未完成：
-
-- 本轮没有启动或停止任何服务，没有发送 `go/back`，没有验证真实机器人移动、真实语音识别或真实 TTS 出声。
-- 本轮没有评审或接管 6 个既有未提交业务改动的正确性，仅记录其内容并做基础格式检查。
-
-### 已验证的事实
-
-- `python3 -m json.tool conf/dialogue_0.json` 通过，当前已修改台词文件是合法 JSON。
-- `bash -n scripts/start_tts_app.bash` 通过。
-- `bash -n scripts_1/start_nav_bridge_workflow_loop.sh` 通过。
-- `bash -n scripts_1/start_unified_integration_workflow.sh` 和 `bash -n scripts_1/unified_runtime/start_unified_container.sh` 通过。
-- AGX 环境未安装 `rg`，本轮使用 `find`、`grep`、`git ls-files` 和 `sed` 替代读取项目结构。
-
-### 阻塞问题
-
-无阅读层面的阻塞。后续如果要继续处理当前 6 个业务改动，需要先确认这些改动是否都是现场期望保留的 test7 长路线、TTS 本地后端和 TTS 卡死恢复策略。
-
-### 建议的下一步
-
-- 如需验收当前未提交业务改动，优先在现场安全窗口确认 test7 地图、13 个点位路线和返航点是否与现场一致。
-- 如需恢复待命状态，先确认机器人现场位置和安全，再决定是否启动 `rabbitbot-loop.service` 或发送返航命令。
-- 如需提交当前 6 个业务改动，应先完成至少一次脚本级验证和必要的服务启动验证，并在提交前更新本交接报告。
-
-### 注意事项
-
-- 本轮只提交交接报告更新，未提交既有 6 个业务改动，避免混入非本轮产生的现场改动。
-- 当前 `rabbitbot-loop.service` 为 inactive，但 `guide_state` 保留在上次导览完成等待返航状态；后续判断 ready 时应同时看服务状态和 `guide_state`。
-- `conf/dialogue_0.json` 当前已跟踪且有大幅差异；修改或提交前应重点检查 map_file、点位顺序、过渡点和 `back_points`。
-
-### 其它信息
-
-- 本轮没有新增或调整代码日志点；仅确认既有未提交脚本中包含运行时健康检查失败阈值、健康恢复、TTS 端口卡死识别、旧 TTS 进程清理等日志或诊断输出。
-- 生成时间：2026-06-22
-
 ## 本轮补充：补充导览引导词、点位7等待和 TTS 读音调整
 
 ### 背景和目标
@@ -320,5 +269,56 @@ Aaron 反馈机器人在复星创富板块前面说完话后，走了几步停�
 ### 其它信息
 
 - 本轮没有新增或调整代码日志点；排查使用的关键日志为 `logs/nav_workflow_control/rabbitbot_workflow_20260622_100400.log`、`logs/nav_workflow_control/nav_bridge_20260622_095550.log`、`journalctl -u rabbitbot-loop.service` 和 `/api/status`。
+- 生成时间：2026-06-22
+
+## 本轮补充：移除点位7等待并收紧 STT 阈值
+
+### 背景和目标
+
+Aaron 要求先去掉点位7讲解后的 277 秒等待逻辑，并调整 STT 阈值，降低系统把其他人说话误识别成命令的概率。本轮修改台词 JSON 和 STT 默认启动参数，并重启容器内 STT 让新阈值立即生效。
+
+### 当前状态
+
+已完成：
+
+- 已从 `conf/dialogue_0.json` 点位7最后一段移除 `post_wait_seconds=277`。
+- 已收紧 `scripts/start_stt_funasr_app.bash` 的默认 STT 触发参数：`STT_VAD_SPEECH_THRES=0.20`、`STT_VAD_START_HITS=2`、`STT_MIN_RMS=0.045`、`STT_MIN_UTTERANCE_SEC=0.55`、`STT_INPUT_GAIN=0.75`。
+- 已同步 `stt_app_funasr.py` 直启默认值，避免绕过启动脚本时仍使用旧灵敏配置。
+- 已重启 `rabbitbot-unified-runtime` 容器内 STT 进程，28184 已重新监听。
+- STT 日志已确认新参数生效，输入设备仍为 `Wireless Mic Rx: USB Audio (hw:0,0)`。
+
+未完成：
+
+- 本轮没有重启 `rabbitbot-loop.service`；当前主 loop 此前已处于 failed，28180 不在监听，`guide_state` 可能仍保留旧 `guide_running` 状态。
+- 新 STT 阈值尚未做现场口令识别和旁人干扰对比测试。
+
+### 已验证的事实
+
+- `python3 -m json.tool conf/dialogue_0.json` 通过。
+- `PYTHONPYCACHEPREFIX=/tmp/rabbitbot_pycache_check python3 -m py_compile stt_app_funasr.py` 通过。
+- `bash -n scripts/start_stt_funasr_app.bash` 通过。
+- `git diff --check` 通过。
+- 28184、28185、28182、8000、8080 当前均在监听；28180 因主 loop 停止未监听。
+- STT 启动日志显示：`vad_thres=0.20, min_rms=0.045, min_utterance=0.55, input_gain=0.75`，Python 运行日志显示 `vad_start_hits=2`。
+
+### 阻塞问题
+
+代码和配置修改无阻塞。运行层面需要注意：STT 更保守后，远处或较小声命令不容易触发，需要现场确认用户站位和麦克风佩戴方式；如果漏识别明显，可在 `0.045` 和 `0.035` 之间回调 `STT_MIN_RMS`，或把 `STT_VAD_START_HITS` 从 2 改回 1。
+
+### 建议的下一步
+
+- 现场安全确认后重启 `rabbitbot-loop.service`，让主导览链路恢复。
+- 用目标讲解员正常距离说“开始导览”测试一次，再让旁人远处讲话测试是否不再误触发。
+- 如果仍误触发，继续提高 `STT_MIN_RMS` 或要求更明确的唤醒/导览口令；如果漏触发，则适当降低 `STT_MIN_RMS`。
+
+### 注意事项
+
+- 这次只是阈值过滤，不是声源定位；如果旁人距离麦克风很近或声音很大，仍可能被识别。
+- 当前 STT 是手动重启后的进程，后续统一容器或 loop 重启会按已提交的新默认值启动。
+- 本轮没有发送导航命令，没有移动机器人。
+
+### 其它信息
+
+- 本轮调整的日志点：未新增日志代码，但 STT 启动日志会打印完整过滤参数，语音触发日志会打印 `rms`、阈值和连续命中次数，便于后续判断阈值是否过松或过紧。
 - 生成时间：2026-06-22
 
