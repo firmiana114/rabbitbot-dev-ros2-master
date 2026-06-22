@@ -62,60 +62,6 @@
 
 ## 近期完整记录
 
-## 本轮补充：提交控制台端口清理与 TTS 默认后端调整
-
-### 背景和目标
-
-Aaron 要求通过 SSH 接手 AGX-orin 上 `/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master` 项目，阅读交接报告和项目本身，确认当前工作区未提交内容，并整理为一次提交，确保工作区干净。
-
-### 当前状态
-
-已完成：
-
-- 已阅读当前 `HANDOFF_REPORT.md`、项目 README、分支和最近提交，确认项目仍在 `June6_workflow` 分支。
-- 已确认接手时未提交内容集中在 5 个文件：`rabbitbot/control_console/commands.py`、`scripts/start_tts_app.bash`、`scripts_1/unified_runtime/start_unified_container.sh`、`tests/control_console/test_app.py`、`tests/control_console/test_commands.py`。
-- 已确认控制台重启/关闭导航主程序的逻辑从单次 `systemctl restart` 调整为 `stop -> 清理 28180 端口 -> start`，用于避免旧导航桥接进程残留占用端口。
-- 已补充控制台端口清理日志和重启/关闭流程日志，记录端口、sudo/fuser 路径、返回码、输出摘要、耗时、降级原因和超时失败原因。
-- 已修复端口清理降级判断：当 `sudo -n fuser` 输出需要密码或权限不足时，先识别为无权限并降级普通 `fuser`，避免把返回码 1 误判为 fuser 正常“无占用”。
-- 已补充测试覆盖：重启顺序必须为 `stop -> cleanup -> start`；sudo 无权限时会降级执行普通 `fuser`；已有控制台 API 测试同步 mock 端口清理。
-- 已确认 TTS 启动逻辑当前改为优先本地 `REDMI Speaker 2-6002`，未检测到首选本地音响时回退 Unitree G1 本体 TTS；统一容器默认 `RABBITBOT_TTS_BACKEND=local` 并显式透传首选本地设备。
-
-未完成：
-
-- 本轮未启动或停止 `rabbitbot-loop.service`、导航桥接、workflow 或统一容器，未触发机器人移动或播报。
-- 本轮未做真实控制台点击、真实 systemd 重启或真实 TTS 出声验证。
-
-### 已验证的事实
-
-- `PYTHONPATH=/mnt/ssd/navgation/projects/rabbitbot-dev-ros2-master PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q tests/control_console/test_commands.py tests/control_console/test_app.py` 通过，结果为 `48 passed`。
-- `PYTHONPYCACHEPREFIX=/tmp/rabbitbot_pycache_check python3 -m py_compile` 已验证控制台命令、控制台 app 和对应测试文件语法通过。
-- `bash -n scripts/start_tts_app.bash` 通过。
-- `bash -n scripts_1/unified_runtime/start_unified_container.sh` 通过。
-- `git diff --check` 通过。
-- 接手时 `pytest` 裸命令不存在；使用 `python3 -m pytest` 并设置 `PYTHONPATH` 后测试可正常运行。
-
-### 阻塞问题
-
-无代码层面的阻塞。剩余风险是运行验证类风险：端口清理、systemd stop/start 顺序和 TTS 本地音响优先策略尚未在真实现场控制台操作中验证。
-
-### 建议的下一步
-
-- 现场安全窗口内，通过网页控制台执行一次“关闭程序”和“一键重启”，确认日志中出现导航主程序关闭/重启开始、端口清理开始、端口清理完成和导航主程序重启完成。
-- 如果一键重启后仍提示 28180 占用，优先查看控制台服务日志中 `端口清理命令无权限`、`端口清理命令失败` 或 `端口清理超时` 记录。
-- 下次启动统一容器后确认 TTS 日志中的后端和设备选择，重点检查是否选择到 `REDMI Speaker 2-6002` 或按预期回退 Unitree。
-
-### 注意事项
-
-- 控制台端口清理使用 `fuser -k 28180/tcp`，属于会终止占用该端口进程的操作；只应在关闭或重启导航主程序流程中触发。
-- 日志只记录命令路径、端口、返回码和输出摘要，不记录敏感信息。
-- 本轮没有改动导览台词、导航点位、QA workflow 逻辑或 systemd unit 文件。
-
-### 其它信息
-
-- 本轮新增/调整的日志点包括：导航主程序关闭开始/完成、重启开始/完成、端口清理开始、fuser 命令执行、无权限降级、命令失败、命令完成、端口释放完成和端口释放超时。
-- 这些日志用于排查控制台停止/重启后 28180 端口仍被旧导航桥接占用、sudo 无权限、fuser 缺失、清理命令失败或端口迟迟未释放等问题。
-- 生成时间：2026-06-17
-
 ## 本轮补充：QA 触发导览 workflow 启动测试
 
 ### 背景和目标
@@ -327,5 +273,58 @@ Aaron 要求基于当前 test7 长导览台词继续调整：每次前往地点�
 ### 其它信息
 
 - 本轮新增/调整的日志点：没有新增代码日志模块；但一并提交的导航 loop 和统一容器脚本包含运行时健康检查连续失败日志、健康恢复日志、TTS 端口卡死识别日志和旧 TTS 进程清理日志，可用于排查 TTS 卡死和服务恢复问题。
+- 生成时间：2026-06-22
+
+## 本轮补充：排查控制台服务未就绪提示
+
+### 背景和目标
+
+Aaron 反馈前端显示“服务仍未全部就绪，请查看状态或打开日志排查”。本轮目标是通过 SSH 查看当前服务、端口、控制台 `/api/status`、`guide_state` 和相关日志，确认未就绪原因。本轮只做排查和记录，不改业务代码，不启动导览、不发送 `go/back`，不触发机器人移动。
+
+### 当前状态
+
+已完成：
+
+- 已确认 `rabbitbot-loop.service`、`rabbitbot-control-console.service`、`docker.service` 均为 active。
+- 已确认控制台 8080、导航桥接 28180、VLM 8000、Neo4j 7687 已监听。
+- 已确认控制台 `/api/status` 返回 `main_loop=running`、`nav_bridge.ready=true`、定位成功，地图为 `/home/unitree/test7.pcd`。
+- 已确认前端未就绪的直接原因是 `guide_state.state=starting`，未进入 `qa_listening`。
+- 已确认启动链路先等待 VLM，VLM 在 09:59:06 就绪；随后卡在 TTS `/exec` 服务 28185 就绪等待。
+- 已确认 TTS 日志显示：未找到稳定可用的外接输出音频设备，拒绝启动 TTS；容器内没有检测到 `REDMI Speaker 2-6002`，`aplay -l` 和 `pactl list short sinks` 也未列出可用输出设备。
+- 已确认当前容器环境为 `RABBITBOT_TTS_BACKEND=local`、`RABBITBOT_TTS_ALLOW_BUILTIN=0`，因此没有外接本地音响时 TTS 会按设计拒绝启动。
+
+未完成：
+
+- 本轮未修复 TTS 未就绪问题，未修改配置为 Unitree 后端或内置声卡回退。
+- 本轮未重启服务，未验证现场音响重新连接后的恢复情况。
+
+### 已验证的事实
+
+- `runtime/nav_workflow_control/guide_state` 当前为 `state=starting`、`detail=导航 loop 初始化`。
+- `logs/unified_runtime/qwen2.5-vl-7b-gptq.log` 显示 VLM 已启动并开放 `/v1/models`。
+- `logs/unified_runtime/rabbitbot_tts.log` 显示 TTS 因未找到稳定可用外接输出音频设备退出。
+- `/tmp/rabbitbot_tts_sounddevice.err` 在容器内记录多次“未检测到指定 TTS 输出设备: redmi speaker 2-6002”，最后一次扫描没有发现可用输出设备。
+- `/etc/systemd/system/rabbitbot-loop.service` 模板中的默认地图仍显示 test9，但 `runtime/rabbitbot-loop.env` 已覆盖为 `NAV_PCD_PATH="/home/unitree/test7.pcd"`；这不是本次未就绪原因。
+
+### 阻塞问题
+
+当前阻塞是 TTS 输出设备不可用：本地 TTS 后端要求检测到稳定外接音频输出，当前容器内看不到 REDMI 音响或任何可用输出设备，因此 28185 不会启动，后续 STT/Memory/QA 也无法完成，控制台无法进入 ready。
+
+### 建议的下一步
+
+- 优先现场确认 `REDMI Speaker 2-6002` 是否已连接、供电、配对，并能被 AGX/容器看到。
+- 如果现场允许临时用内置声卡或其它输出，需要设置 `RABBITBOT_TTS_ALLOW_BUILTIN=1` 并确认启动脚本会把该变量传给 TTS 子进程后再重启服务。
+- 如果希望不依赖本地 REDMI 音响，可改用 `RABBITBOT_TTS_BACKEND=unitree` 或恢复 `auto` 回退策略，并重启 `rabbitbot-loop.service` 验证。
+- TTS 修复后，等待 28185 启动，再观察后续 28184、28182 和 `guide_state=qa_listening`。
+
+### 注意事项
+
+- 当前不要直接点击“导览”作为排查动作，因为业务状态还没进入 `qa_listening`。
+- 仅 VLM 冷启动慢不是最终故障；VLM 已就绪，当前卡点是 TTS 设备不可见。
+- 如果修改 systemd 仓库模板，需要同步到 `/etc/systemd/system/rabbitbot-loop.service` 后执行 daemon-reload，否则系统实际 unit 仍保留旧模板内容。
+
+### 其它信息
+
+- 本轮没有新增或调整代码日志点；使用的关键日志为 `journalctl -u rabbitbot-loop.service`、`logs/unified_runtime/qwen2.5-vl-7b-gptq.log`、`logs/unified_runtime/rabbitbot_tts.log` 和 `/tmp/rabbitbot_tts_sounddevice.err`。
 - 生成时间：2026-06-22
 
