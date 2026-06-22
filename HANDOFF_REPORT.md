@@ -62,55 +62,6 @@
 
 ## 近期完整记录
 
-## 本轮补充：控制台 ready 状态改用 QA/导览 guide_state
-
-### 背景和目标
-
-Aaron 要求修正网页控制台 ready 状态口径：QA/导览整合后，旧 `workflow.ready` 只表示导览 workflow 预启动闸门 ready，不能再单独代表“可执行导览”。本轮目标是让 `/api/status` 返回新的 `guide_state`，并让前端“所有服务已加载成功，可执行相关操作”和“导览”按钮以 `guide_state.state=qa_listening` 为准，避免 `guide_state=starting` 等阶段误判 ready。
-
-### 当前状态
-
-已完成：
-
-- `ConsoleConfig` 新增 `guide_state_file`，默认路径与导航 loop 一致：`runtime/nav_workflow_control/guide_state`，也支持环境变量 `RABBITBOT_NAV_WORKFLOW_GUIDE_STATE_FILE` 覆盖。
-- `rabbitbot/control_console/status.py` 新增 `GuideState` 和 `read_guide_state()`，解析并返回 `state`、`run_id`、`detail`、`time`；文件不存在或为空时返回 `state=unknown`。
-- `/api/status` 已新增 `guide_state` 字段；即使主循环未运行，也会返回 `guide_state` 供前端诊断。
-- 前端 `servicesReady(data)` 已改为要求 `main_loop=running`、导航桥接 ready、且 `guide_state.state === 'qa_listening'`。
-- “导览”按钮已改为只在导航桥接 ready 且 `guide_state.state === 'qa_listening'` 时启用。
-- Workflow 卡片和整体状态文案已改为显示新业务状态：`starting`、`guide_preparing`、`qa_listening`、`guide_running`、`guide_finished_waiting_back`、`returning`、`guide_prepare_failed`、`qa_disabled`、`unknown`。
-- 旧 `workflow` 字段继续保留在 `/api/status` 中，作为诊断信息，不再覆盖新 `guide_state` 业务状态。
-
-未完成：
-
-- 本轮未在浏览器中人工点击验证页面；已通过后端接口和页面源码测试覆盖主要 ready 逻辑。
-
-### 已验证的事实
-
-- 已通过 `PYTHONPYCACHEPREFIX=/tmp/rabbitbot_pycache_check python3 -m py_compile rabbitbot/control_console/app.py rabbitbot/control_console/config.py rabbitbot/control_console/status.py tests/control_console/test_app.py tests/control_console/test_status.py`。
-- 已通过 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/control_console -q`，结果为 `62 passed`。
-- 已通过 `git diff --check`。
-- 新增测试覆盖：`guide_state` 文件缺失返回 unknown；`starting` 不应作为 ready；`qa_listening` 与主循环/导航 ready 组合为前端 ready 依据；`guide_running` 时前端导览按钮条件不满足；`read_guide_state()` 可解析四个字段。
-
-### 阻塞问题
-
-- 无代码层面阻塞。
-
-### 建议的下一步
-
-- 重启服务后打开控制台，观察 `guide_state=starting` 或 `guide_preparing` 阶段不再显示“所有服务已加载成功”。
-- 等待状态进入 `qa_listening` 后，确认页面显示“QA 待命，可开始导览”，且“导览”按钮可用。
-- 导览运行中确认页面显示“导览中”，且“导览”按钮禁用。
-
-### 注意事项
-
-- 前端 ready 已不再由旧 `workflow.ready` 决定；旧字段只用于排查预启动 workflow 闸门、pid、退出码等信息。
-- 如果 `runtime/nav_workflow_control/guide_state` 不存在，控制台会显示状态未知，不会误判为 ready。
-- 本轮新增日志点较少，主要复用导航 loop 已写入的 `guide_state` 状态文件；诊断重点从控制台 `/api/status.guide_state` 和导航 loop 日志中的“导览状态已更新”查看。
-
-### 其它信息
-
-- 生成时间：2026-06-17 00:00:00
-
 ## 本轮补充：提交控制台端口清理与 TTS 默认后端调整
 
 ### 背景和目标
@@ -323,5 +274,58 @@ Aaron 要求通过 SSH 登录 AGX-orin-FX，阅读 `/mnt/ssd/navgation/projects/
 ### 其它信息
 
 - 本轮没有新增或调整代码日志点；仅确认既有未提交脚本中包含运行时健康检查失败阈值、健康恢复、TTS 端口卡死识别、旧 TTS 进程清理等日志或诊断输出。
+- 生成时间：2026-06-22
+
+## 本轮补充：补充导览引导词、点位7等待和 TTS 读音调整
+
+### 背景和目标
+
+Aaron 要求基于当前 test7 长导览台词继续调整：每次前往地点前增加引导词，用于提示将前往的板块并引导客人跟随；点位7讲解完成后等待4分37秒，再前往下一个讲解点位；将分区讲解中的 ABCD 改成中文近似读音，避免 TTS 播报英文字母不稳定。同时要求把现有未提交改动一并提交。
+
+### 当前状态
+
+已完成：
+
+- `conf/dialogue_0.json` 已为主要导航 step 增加 `guide` 字段，workflow 会在导航前先播报这些引导词。
+- 已覆盖点位间过渡、点位2至点位13的主要前往提示，包括企业服务中心、科创带背景、创新资源、园区共建、复星创富、功能布局、规划配套、企业入驻、投融资、产学研、智慧园区和出口小巴方向。
+- 已在点位7最后一段讲解后增加 `post_wait_seconds=277`，对应4分37秒等待，然后才进入下一步导航。
+- 当前台词中 ABCD 分区实际位于功能布局讲解段，已替换为 `埃区域`、`毙区域`、`锡区域`、`第区域`。
+- 本轮按要求一并纳入既有未提交改动：test7 长路线台词和点位、TTS 默认本地后端、导航 loop 健康检查失败阈值、TTS 端口卡死识别与旧 TTS 进程清理、systemd 默认地图切到 `/home/unitree/test7.pcd`。
+
+未完成：
+
+- 本轮没有启动或停止 `rabbitbot-loop.service`，没有触发真实导览、返航、机器人移动或 TTS 出声。
+- 新增引导词和 277 秒等待尚未做现场完整导览验证。
+
+### 已验证的事实
+
+- `python3 -m json.tool conf/dialogue_0.json` 通过，台词 JSON 格式有效。
+- `bash -n scripts/start_tts_app.bash` 通过。
+- `bash -n scripts_1/start_nav_bridge_workflow_loop.sh` 通过。
+- `bash -n scripts_1/start_unified_integration_workflow.sh` 通过。
+- `bash -n scripts_1/unified_runtime/start_unified_container.sh` 通过。
+- `git diff --check` 通过。
+- 已确认 `conf/dialogue_0.json` 中不再包含 `A区域`、`B区域`、`C区域`、`D区域` 原始写法。
+
+### 阻塞问题
+
+无代码和配置层面的阻塞。运行层面仍需要现场安全窗口验证：test7 地图路线、13个点位、返航点、4分37秒等待节奏，以及本地 TTS 对新增引导词和中文近似读音的实际播报效果。
+
+### 建议的下一步
+
+- 现场安全确认后重启或启动 `rabbitbot-loop.service`，让新的台词 JSON、test7 地图和脚本配置生效。
+- 完整跑一次导览，重点观察每次导航前是否先播报对应 `guide` 引导词。
+- 到点位7后确认讲解播完会等待约277秒，再继续前往园区规划和硬件配套板块。
+- 重点听功能布局段落中的 `埃区域`、`毙区域`、`锡区域`、`第区域` 是否比英文字母播报更稳定。
+
+### 注意事项
+
+- `post_wait_seconds` 是在对应台词段播报完成后生效；如果 TTS 队列自身卡住，等待计时会在该段完成后才开始。
+- 新增 `guide` 字段依赖现有 workflow 逻辑，播报发生在该 step 导航前。
+- 本轮提交包含此前未提交的脚本和 systemd 配置变更，部署时需确认实际 systemd unit 是否已从仓库模板同步到系统目录。
+
+### 其它信息
+
+- 本轮新增/调整的日志点：没有新增代码日志模块；但一并提交的导航 loop 和统一容器脚本包含运行时健康检查连续失败日志、健康恢复日志、TTS 端口卡死识别日志和旧 TTS 进程清理日志，可用于排查 TTS 卡死和服务恢复问题。
 - 生成时间：2026-06-22
 

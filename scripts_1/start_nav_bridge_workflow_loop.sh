@@ -13,6 +13,7 @@
 #   RABBITBOT_NAV_WORKFLOW_STATUS_POLL_SECONDS：workflow 运行期间检查状态和预接收 back 的轮询间隔。
 #   RABBITBOT_TTS_STRICT_FAILURE：TTS 失败是否终止 workflow，默认 0，即记录错误并继续。
 #   RABBITBOT_NAV_WORKFLOW_HEALTH_CHECK_INTERVAL_SECONDS：等待命令和运行期间的健康检查间隔秒数。
+#   RABBITBOT_NAV_WORKFLOW_HEALTH_FAILURE_LIMIT：连续失败多少次才恢复服务，默认 3。
 #   RABBITBOT_NAV_WORKFLOW_LOST_PROCESS_GRACE_SECONDS：workflow 进程丢失后等待状态文件落盘的宽限秒数。
 #   RABBITBOT_NAV_WORKFLOW_BACK_RETRY_LIMIT：返航失败后自动恢复导航桥接并重试的次数，默认 1。
 #   RABBITBOT_NAV_WORKFLOW_ENABLE_QA：是否默认启动 QA 语音模式，默认 1。
@@ -106,6 +107,7 @@ CONTAINER_WORKFLOW_CONTROL_DIR="${RABBITBOT_NAV_WORKFLOW_CONTAINER_CONTROL_DIR:-
 WORKFLOW_GATE_READY_TIMEOUT_SECONDS="${RABBITBOT_NAV_WORKFLOW_GATE_READY_TIMEOUT_SECONDS:-30}"
 WORKFLOW_GATE_POLL_SECONDS="${RABBITBOT_WORKFLOW_START_GATE_POLL_SECONDS:-0.05}"
 HEALTH_CHECK_INTERVAL_SECONDS="${RABBITBOT_NAV_WORKFLOW_HEALTH_CHECK_INTERVAL_SECONDS:-5}"
+HEALTH_CHECK_FAILURE_LIMIT="${RABBITBOT_NAV_WORKFLOW_HEALTH_FAILURE_LIMIT:-3}"
 WORKFLOW_LOST_PROCESS_GRACE_SECONDS="${RABBITBOT_NAV_WORKFLOW_LOST_PROCESS_GRACE_SECONDS:-5}"
 NAV_BRIDGE_RESTART_WAIT_SECONDS="${RABBITBOT_NAV_WORKFLOW_NAV_RESTART_WAIT_SECONDS:-3}"
 BACK_RETRY_LIMIT="${RABBITBOT_NAV_WORKFLOW_BACK_RETRY_LIMIT:-1}"
@@ -132,6 +134,7 @@ CONTAINER_QA_PID_FILE="${CONTAINER_WORKFLOW_CONTROL_DIR}/vlm_qa.pid"
 HOST_QA_LOG_DIR="${HOST_WORKFLOW_RUN_DIR}/vlm_qa_workflow"
 CONTAINER_QA_LOG_DIR="${CONTAINER_WORKFLOW_RUN_DIR}/vlm_qa_workflow"
 last_runtime_health_check_ms=0
+runtime_health_failure_count=0
 
 log_info() {
     echo -e "\033[32m[INFO]\033[0m $1"
@@ -367,7 +370,7 @@ base_services_health_ok() {
     if [ "${RABBITBOT_UNIFIED_START_VLM}" = "1" ] && ! http_ok http://127.0.0.1:8000/v1/models; then
         problems+=("VLM(8000)")
     fi
-    if ! http_ok http://127.0.0.1:28185/docs; then
+    if ! port_open 28185; then
         problems+=("TTS(28185)")
     fi
     if [ "${RABBITBOT_UNIFIED_START_STT}" = "1" ] && ! http_ok http://127.0.0.1:28184/docs; then
@@ -405,8 +408,20 @@ check_runtime_health_periodic() {
     now="$(now_ms)"
     if [ "${last_runtime_health_check_ms}" = "0" ] || [ $((now - last_runtime_health_check_ms)) -ge $((HEALTH_CHECK_INTERVAL_SECONDS * 1000)) ]; then
         last_runtime_health_check_ms="${now}"
-        runtime_health_ok "${stage}"
-        return $?
+        if runtime_health_ok "${stage}"; then
+            if [ "${runtime_health_failure_count}" -gt 0 ]; then
+                log_info "运行时健康检查已恢复：stage=${stage}, previous_failures=${runtime_health_failure_count}"
+            fi
+            runtime_health_failure_count=0
+            return 0
+        fi
+        runtime_health_failure_count=$((runtime_health_failure_count + 1))
+        if [ "${runtime_health_failure_count}" -lt "${HEALTH_CHECK_FAILURE_LIMIT}" ]; then
+            log_warn "运行时健康检查失败但未达恢复阈值：stage=${stage}, failures=${runtime_health_failure_count}/${HEALTH_CHECK_FAILURE_LIMIT}"
+            return 0
+        fi
+        log_warn "运行时健康检查连续失败达到阈值：stage=${stage}, failures=${runtime_health_failure_count}/${HEALTH_CHECK_FAILURE_LIMIT}"
+        return 1
     fi
     return 0
 }
@@ -718,6 +733,7 @@ recover_runtime_services() {
     fi
     if runtime_health_ok "恢复后复查"; then
         log_info "运行时恢复完成：reason=${reason}, recovered=${recovered}"
+        runtime_health_failure_count=0
         last_runtime_health_check_ms="$(now_ms)"
         return 0
     fi

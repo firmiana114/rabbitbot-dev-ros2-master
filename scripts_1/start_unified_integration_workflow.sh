@@ -67,7 +67,7 @@ WAIT_VLM_SECONDS="${WAIT_VLM_SECONDS:-600}"
 RABBITBOT_UNIFIED_START_VLM="${RABBITBOT_UNIFIED_START_VLM:-0}"
 RABBITBOT_UNIFIED_START_EMBEDDING="${RABBITBOT_UNIFIED_START_EMBEDDING:-0}"
 RABBITBOT_UNIFIED_START_STT="${RABBITBOT_UNIFIED_START_STT:-0}"
-RABBITBOT_TTS_BACKEND="${RABBITBOT_TTS_BACKEND:-auto}"
+RABBITBOT_TTS_BACKEND="${RABBITBOT_TTS_BACKEND:-local}"
 RABBITBOT_UNITREE_TTS_INTERFACE="${RABBITBOT_UNITREE_TTS_INTERFACE:-eno1}"
 RABBITBOT_UNITREE_TTS_VOLUME="${RABBITBOT_UNITREE_TTS_VOLUME:-100}"
 RABBITBOT_UNITREE_TTS_SPEAKER_ID="${RABBITBOT_UNITREE_TTS_SPEAKER_ID:-0}"
@@ -232,6 +232,8 @@ ensure_compatible_container() {
         incompatible_reason="Unitree TTS 每次请求设置音量配置变化：container=${container_unitree_set_volume_each_request:-0}, expected=${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST}"
     elif [ "${RABBITBOT_TTS_BACKEND}" = "auto" ] && [ "${container_unitree_auto_probe:-0}" != "${RABBITBOT_UNITREE_TTS_AUTO_PROBE}" ]; then
         incompatible_reason="Unitree TTS auto 探测配置变化：container=${container_unitree_auto_probe:-0}, expected=${RABBITBOT_UNITREE_TTS_AUTO_PROBE}"
+    elif port_open 28185 && ! tts_exec_ok; then
+        incompatible_reason="TTS 端口 28185 存在但 /exec 健康检查无响应，疑似旧 TTS 播放进程卡死"
     fi
 
     if [ -n "${incompatible_reason}" ]; then

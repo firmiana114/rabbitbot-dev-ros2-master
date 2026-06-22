@@ -157,13 +157,26 @@ start_vlm_and_embedding() {
     fi
 }
 
+stop_stale_tts() {
+    log_info "清理旧 TTS 进程与 28185 端口"
+    pkill -TERM -f "uvicorn tts_app:app" 2>/dev/null || true
+    pkill -TERM -f "scripts/start_tts_app.bash" 2>/dev/null || true
+    sleep 2
+    pkill -KILL -f "uvicorn tts_app:app" 2>/dev/null || true
+    pkill -KILL -f "scripts/start_tts_app.bash" 2>/dev/null || true
+}
+
 start_tts() {
     if tts_exec_ok; then
         log_success "TTS /exec 服务已运行"
         return 0
     fi
     if port_open 28185; then
-        log_error "28185 端口已被非 /exec 兼容 TTS 服务占用，请先停止旧 TTS 进程或容器。"
+        log_info "28185 端口存在但 /exec 健康检查未通过，重启 TTS"
+        stop_stale_tts
+    fi
+    if port_open 28185; then
+        log_error "28185 端口仍被占用，请检查旧 TTS 进程。"
         return 1
     fi
     log_info "TTS 启动配置：后端=${RABBITBOT_TTS_BACKEND}，Unitree 网卡=${RABBITBOT_UNITREE_TTS_INTERFACE}，音量=${RABBITBOT_UNITREE_TTS_VOLUME}，每次请求设置音量=${RABBITBOT_UNITREE_TTS_SET_VOLUME_EACH_REQUEST}，auto_probe=${RABBITBOT_UNITREE_TTS_AUTO_PROBE}"
