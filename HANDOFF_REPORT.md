@@ -176,6 +176,15 @@ Aaron 本轮要求撤销此前为“每前往一个地点”增加的导览引�
 - 当前状态：TTS 进程已恢复并监听 28185；主 workflow 未重启，仍在 run_id `20260622_130416` 中，导览状态为 `guide_running`，点位7导航仍持续 ACTIVE，状态接口显示定位状态待确认。
 - 注意：本次修复解决 TTS 服务被 ALSA abort 拖死的问题；点位6到点位7导航持续 ACTIVE 仍需现场处理障碍、定位状态或重新采点，属于独立导航问题。
 
+### 只读排查：定位坐标完全不变与异常跳变
+
+- 目标：Aaron 指出机器人本体即使原地晃动也应有细微位姿变化，连续完全不变更像定位或导航丢失；本轮只读取状态和日志，未下发移动、停止、重启或导览控制命令。
+- 当前状态：最新状态接口显示 run_id `20260622_145657`，`guide_state=guide_running`，导航桥接就绪，pose 被标记为 `localized=true`，但位姿为 `x=-113.3204, y=20.9846, z=-5.2644`，明显超出正常展厅地图范围。
+- 关键证据：最新 `nav_bridge_20260622_145645.log` 中自动重定位前两次失败，第三次成功后位姿先后跳到 `(-0.9929, 0.9543)`、`(-8.5851, -2.3710)`、`(-5.7693, 4.2980)`、`(-15.0300, 56.1782)`，随后出现 SLAM 提示 `Exceeding the maximum speed, relocation is invalid.`。
+- 关键证据：之后位姿固定为 `x=-113.3204, y=20.9846, z=-5.2644` 并连续多次完全相同；导航到点位1目标时底层返回 `statusCode:4`、`Failed to obtain the current pose information.`。
+- 结论：这次不是普通的“导航 ACTIVE 但底盘不动”，而是定位/重定位链路已经异常，pose 输出跳变后冻结；上层仍把 `localized=true` 和 `go_to_status=ACTIVE` 暴露给 workflow，导致导览一直等待。
+- 建议：现场应先停止当前导览并重新做定位/重定位，必要时重启导航桥接或底层 SLAM/导航进程；代码层面建议增加位姿合理性校验、pose 新鲜度检查、异常跳变检测，以及底层 `Failed to obtain current pose` 时向 workflow 返回失败而不是持续 ACTIVE。
+
 ## 其它信息
 
 - 本轮新增 QA 导览触发日志字段 `match_reason` 和 `text_preview`，用于判断口令是精确命中、同音归一、短口令还是编辑距离触发；本次排查同时依靠 `vlm_qa_workflow_20260622_114516.log`、`vlm_qa_dialogue_20260622_034518.log`、STT 日志和 `/api/status` 确认未触发原因。
