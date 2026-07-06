@@ -182,6 +182,12 @@ def _docx_guide_dialogue_path():
     return DOCX_GUIDE_DIALOGUE_DIR / f"dialogue_{_docx_guide_dialogue_index()}.json"
 
 
+def reload_docx_guide_dialogue(reason="manual"):
+    _DOCX_GUIDE_DIALOGUE_CACHE["path"] = None
+    _DOCX_GUIDE_DIALOGUE_CACHE["data"] = None
+    _workflow_log(f"DOCX 导览台词缓存已清空，下一次读取将重新加载: reason={reason}")
+
+
 def _load_docx_guide_dialogue():
     dialogue_path = _docx_guide_dialogue_path()
     cache_path = _DOCX_GUIDE_DIALOGUE_CACHE.get("path")

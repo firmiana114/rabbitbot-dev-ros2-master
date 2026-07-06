@@ -1,4 +1,7 @@
+import json
+
 from fastapi.testclient import TestClient
+import pytest
 from unittest.mock import patch
 
 from rabbitbot.control_console.app import create_app
@@ -71,6 +74,7 @@ def test_status_does_not_require_login(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["map_path"] == "/home/unitree/test9.pcd"
+    assert response.json()["autostart"]["enabled"] is False
 
 
 def test_status_prefers_runtime_map_env_file(tmp_path):
@@ -269,6 +273,19 @@ def test_stop_stops_loop_service_without_login(tmp_path):
     assert record.read_text(encoding="utf-8").splitlines() == ["stop", "rabbitbot-loop.service"]
 
 
+def test_autostart_toggles_loop_service_without_login(tmp_path):
+    config = make_config(tmp_path)
+    client = TestClient(create_app(config))
+
+    response = client.post("/api/autostart", json={"enabled": True})
+
+    assert response.status_code == 200
+    assert response.json()["service"] == "rabbitbot-loop.service"
+    assert response.json()["enabled"] is True
+    record = config.project_root / "systemctl_args.txt"
+    assert record.read_text(encoding="utf-8").splitlines() == ["enable", "rabbitbot-loop.service"]
+
+
 def test_dialogue_loads_current_config(tmp_path):
     client = TestClient(create_app(make_config(tmp_path)))
 
@@ -313,6 +330,159 @@ def test_dialogue_save_rejects_invalid_structure(tmp_path):
 
     assert response.status_code == 400
     assert "根节点必须是对象" in response.json()["detail"]
+
+
+def test_dialogue_hot_rows_loads_empty_table(tmp_path):
+    client = TestClient(create_app(make_config(tmp_path)))
+
+    response = client.get("/api/dialogue/hot-rows")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rows"] == []
+    assert body["message"] == "点位台词已加载"
+
+
+def test_dialogue_hot_rows_reads_existing_table_rows(tmp_path):
+    config = make_config(tmp_path)
+    (config.dialogue_dir / "dialogue_0.json").write_text(
+        json.dumps(
+            {
+                "variables": {"leader_calling": "各位领导"},
+                "opening": {},
+                "steps": [
+                    {
+                        "scene": "console_point_1",
+                        "entity_key": "console_point_1",
+                        "source": "control_console_table",
+                        "row_id": "1",
+                        "segments": [{"text": "新增讲解"}],
+                    }
+                ],
+                "map_file": "test9.pcd",
+                "points": {
+                    "console_point_1": {
+                        "name": "console_point_1",
+                        "source": "control_console_table",
+                        "row_id": "1",
+                        "location": [{"x": 1, "y": 2, "z": 3, "ox": 0, "oy": 0, "oz": 0, "ow": 1, "mode": 1}],
+                    }
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(config))
+
+    response = client.get("/api/dialogue/hot-rows")
+
+    assert response.status_code == 200
+    assert response.json()["rows"] == [
+        {
+            "id": "1",
+            "point_key": "console_point_1",
+            "coordinate": '{"x":1,"y":2,"z":3,"ox":0,"oy":0,"oz":0,"ow":1,"mode":1}',
+            "script": "新增讲解",
+        }
+    ]
+
+
+def test_dialogue_hot_rows_save_appends_rows_and_backup(tmp_path):
+    config = make_config(tmp_path)
+    client = TestClient(create_app(config))
+
+    response = client.post(
+        "/api/dialogue/hot-rows",
+        json={
+            "rows": [
+                {
+                    "coordinate": '{"x":1,"y":2,"z":3,"ox":0,"oy":0,"oz":0,"ow":1}',
+                    "script": "新增点位讲解",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["message"] == "点位台词已保存，下一次导览生效，无需重启"
+    saved = json.loads((config.dialogue_dir / "dialogue_0.json").read_text(encoding="utf-8"))
+    assert saved["points"]["console_point_1"]["source"] == "control_console_table"
+    assert saved["points"]["console_point_1"]["location"][0]["mode"] == 1
+    assert saved["steps"][-1]["entity_key"] == "console_point_1"
+    assert saved["steps"][-1]["segments"][0]["text"] == "新增点位讲解"
+    assert saved["steps"][0]["segments"][0]["text"] == "欢迎"
+    assert list(config.dialogue_dir.glob("dialogue_0.json.*.bak"))
+
+
+def test_dialogue_hot_rows_save_replaces_only_managed_rows(tmp_path):
+    config = make_config(tmp_path)
+    original = {
+        "variables": {"leader_calling": "各位领导"},
+        "opening": {},
+        "steps": [
+            {"scene": "原始点位", "entity_key": "point_1", "segments": [{"text": "原始讲解"}]},
+            {
+                "scene": "console_point_old",
+                "entity_key": "console_point_old",
+                "source": "control_console_table",
+                "row_id": "old",
+                "segments": [{"text": "旧讲解"}],
+            },
+        ],
+        "map_file": "test9.pcd",
+        "points": {
+            "point_1": {"name": "点位1", "location": [{"x": 0, "y": 0, "z": 0, "ox": 0, "oy": 0, "oz": 0, "ow": 1, "mode": 1}]},
+            "console_point_old": {
+                "name": "console_point_old",
+                "source": "control_console_table",
+                "location": [{"x": 9, "y": 9, "z": 0, "ox": 0, "oy": 0, "oz": 0, "ow": 1, "mode": 1}],
+            },
+        },
+        "back_points": [{"name": "返航点", "location": [{"x": 0, "y": 1, "z": 0, "ox": 0, "oy": 0, "oz": 0, "ow": 1, "mode": 1}]}],
+    }
+    (config.dialogue_dir / "dialogue_0.json").write_text(json.dumps(original, ensure_ascii=False), encoding="utf-8")
+    client = TestClient(create_app(config))
+
+    response = client.post(
+        "/api/dialogue/hot-rows",
+        json={
+            "rows": [
+                {
+                    "id": "fresh",
+                    "coordinate": '{"x":2,"y":3,"z":0,"ox":0,"oy":0,"oz":0,"ow":1,"mode":1}',
+                    "script": "新讲解",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    saved = json.loads((config.dialogue_dir / "dialogue_0.json").read_text(encoding="utf-8"))
+    assert "point_1" in saved["points"]
+    assert "console_point_old" not in saved["points"]
+    assert saved["back_points"] == original["back_points"]
+    assert saved["steps"][0]["scene"] == "原始点位"
+    assert saved["steps"][1]["entity_key"] == "console_point_fresh"
+
+
+@pytest.mark.parametrize(
+    ("rows", "message"),
+    [
+        ([{"coordinate": "{", "script": "讲解"}], "不是有效 JSON 对象"),
+        ([{"coordinate": '{"x":1}', "script": "讲解"}], "缺少字段"),
+        ([{"coordinate": '{"x":"bad","y":0,"z":0,"ox":0,"oy":0,"oz":0,"ow":1}', "script": "讲解"}], "必须是数字"),
+        ([{"coordinate": '{"x":1,"y":0,"z":0,"ox":0,"oy":0,"oz":0,"ow":1}', "script": ""}], "讲解台词不能为空"),
+    ],
+)
+def test_dialogue_hot_rows_save_rejects_invalid_rows(tmp_path, rows, message):
+    client = TestClient(create_app(make_config(tmp_path)))
+
+    response = client.post("/api/dialogue/hot-rows", json={"rows": rows})
+
+    assert response.status_code == 400
+    assert message in response.json()["detail"]
 
 
 def test_logs_return_latest_nav_log_lines(tmp_path):
@@ -362,6 +532,10 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '开始程序' in response.text
     assert '一键重启' in response.text
     assert '关闭程序' in response.text
+    assert '开机自启动' in response.text
+    assert 'autostartBtn' in response.text
+    assert 'toggleAutostart' in response.text
+    assert '/api/autostart' in response.text
     assert '/api/start' in response.text
     assert 'startProgram' in response.text
     assert 'waitForServicesReady' in response.text
@@ -374,6 +548,11 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert 'mapPathInput' in response.text
     assert 'map_path' in response.text
     assert '导览讲解词' in response.text
+    assert '点位坐标' in response.text
+    assert '讲解台词' in response.text
+    assert '保存点位台词' in response.text
+    assert '>+<' in response.text
+    assert '/api/dialogue/hot-rows' in response.text
     assert '加载讲解词' in response.text
     assert '保存讲解词' in response.text
     assert '折叠讲解词' in response.text

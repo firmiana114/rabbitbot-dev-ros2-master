@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch
 
-from rabbitbot.control_console.commands import CommandError, _cleanup_tcp_port_occupants, read_map_path, restart_loop_service, send_workflow_command, start_loop_service, start_task, stop_loop_service, write_map_path
+from rabbitbot.control_console.commands import CommandError, _cleanup_tcp_port_occupants, loop_service_autostart_enabled, read_map_path, restart_loop_service, send_workflow_command, set_loop_service_autostart, start_loop_service, start_task, stop_loop_service, write_map_path
 
 
 def test_send_workflow_command_allows_go_and_invokes_script(tmp_path):
@@ -204,6 +204,56 @@ def test_stop_loop_service_rejects_other_services(tmp_path):
         stop_loop_service("ssh.service", systemctl_path=systemctl, sudo_path=None)
 
     assert "不支持关闭的服务" in str(excinfo.value)
+
+
+def test_loop_service_autostart_enabled_reads_enabled(tmp_path):
+    systemctl = tmp_path / "systemctl"
+    systemctl.write_text("#!/usr/bin/env bash\necho enabled\nexit 0\n", encoding="utf-8")
+    systemctl.chmod(0o755)
+
+    assert loop_service_autostart_enabled(systemctl_path=systemctl, sudo_path=None) is True
+
+
+def test_loop_service_autostart_enabled_reads_disabled(tmp_path):
+    systemctl = tmp_path / "systemctl"
+    systemctl.write_text("#!/usr/bin/env bash\necho disabled\nexit 1\n", encoding="utf-8")
+    systemctl.chmod(0o755)
+
+    assert loop_service_autostart_enabled(systemctl_path=systemctl, sudo_path=None) is False
+
+
+def test_set_loop_service_autostart_enable_invokes_systemctl(tmp_path):
+    systemctl = tmp_path / "systemctl"
+    record = tmp_path / "record.txt"
+    systemctl.write_text(
+        f"#!/usr/bin/env bash\nprintf '%s\n' \"$@\" > {record}\n",
+        encoding="utf-8",
+    )
+    systemctl.chmod(0o755)
+
+    result = set_loop_service_autostart(True, systemctl_path=systemctl, sudo_path=None)
+
+    assert result["ok"] is True
+    assert result["enabled"] is True
+    assert result["message"] == "已启用开机自启动"
+    assert record.read_text(encoding="utf-8").splitlines() == ["enable", "rabbitbot-loop.service"]
+
+
+def test_set_loop_service_autostart_disable_invokes_systemctl(tmp_path):
+    systemctl = tmp_path / "systemctl"
+    record = tmp_path / "record.txt"
+    systemctl.write_text(
+        f"#!/usr/bin/env bash\nprintf '%s\n' \"$@\" > {record}\n",
+        encoding="utf-8",
+    )
+    systemctl.chmod(0o755)
+
+    result = set_loop_service_autostart(False, systemctl_path=systemctl, sudo_path=None)
+
+    assert result["ok"] is True
+    assert result["enabled"] is False
+    assert result["message"] == "已关闭开机自启动"
+    assert record.read_text(encoding="utf-8").splitlines() == ["disable", "rabbitbot-loop.service"]
 
 
 def test_start_task_guide_sends_go(tmp_path):

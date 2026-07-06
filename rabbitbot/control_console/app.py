@@ -6,9 +6,26 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from .commands import CommandError, read_map_path, restart_loop_service, send_workflow_command, start_loop_service, start_task, stop_loop_service
+from .commands import (
+    CommandError,
+    loop_service_autostart_enabled,
+    read_map_path,
+    restart_loop_service,
+    send_workflow_command,
+    set_loop_service_autostart,
+    start_loop_service,
+    start_task,
+    stop_loop_service,
+)
 from .config import ConsoleConfig
-from .dialogue import DialogueError, read_dialogue_editor, resolve_dialogue_path, write_dialogue_config
+from .dialogue import (
+    DialogueError,
+    read_dialogue_editor,
+    read_dialogue_hot_rows,
+    resolve_dialogue_path,
+    write_dialogue_config,
+    write_dialogue_hot_rows,
+)
 from .status import (
     detect_main_loop_running,
     get_latest_workflow_status,
@@ -36,6 +53,14 @@ class DialogueRequest(BaseModel):
     content: str
 
 
+class DialogueHotRowsRequest(BaseModel):
+    rows: list[dict]
+
+
+class AutostartRequest(BaseModel):
+    enabled: bool
+
+
 def _html() -> str:
     return """<!doctype html>
 <html lang="zh-CN">
@@ -44,7 +69,7 @@ def _html() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RabbitBot 控制台</title>
   <style>
-    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.field{margin-top:16px}.text-input,.dialogue-editor{width:100%;box-sizing:border-box;padding:10px 11px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;color:#172033;background:#fff}.dialogue-editor{font-family:ui-monospace,Menlo,monospace;min-height:420px;line-height:1.45;resize:vertical}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}</style>
+    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.field{margin-top:16px}.text-input,.dialogue-editor,.hot-input{width:100%;box-sizing:border-box;padding:10px 11px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;color:#172033;background:#fff}.dialogue-editor{font-family:ui-monospace,Menlo,monospace;min-height:420px;line-height:1.45;resize:vertical}.hot-table{width:100%;border-collapse:collapse;margin-top:12px}.hot-table th,.hot-table td{border-top:1px solid #e2e8f0;padding:10px;text-align:left;vertical-align:top}.hot-table th{font-size:12px;color:#667085}.hot-coordinate{font-family:ui-monospace,Menlo,monospace;min-height:84px;resize:vertical}.hot-script{min-height:84px;resize:vertical}.icon-btn{min-width:44px;padding:10px 12px}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}.hot-table,.hot-table thead,.hot-table tbody,.hot-table tr,.hot-table th,.hot-table td{display:block}.hot-table th{display:none}.hot-table td{padding:8px 0}}</style>
 </head>
 <body>
   <div class="wrap">
@@ -59,6 +84,7 @@ def _html() -> str:
             <div class="card"><div class="label">主循环</div><div id="mainLoop" class="value">-</div></div>
             <div class="card"><div class="label">导航桥接</div><div id="navBridge" class="value">-</div></div>
             <div class="card"><div class="label">Workflow</div><div id="workflow" class="value">-</div></div>
+            <div class="card"><div class="label">开机自启动</div><div id="autostart" class="value">-</div></div>
           </div>
           <div class="label" style="margin-top:16px">开始任务</div>
           <div class="actions">
@@ -72,6 +98,7 @@ def _html() -> str:
             <button id="startBtn" class="go" onclick="startProgram()">开始程序</button>
             <button id="restartBtn" class="restart" onclick="restartProgram()">一键重启</button>
             <button id="stopBtn" class="back" onclick="stopProgram()">关闭程序</button>
+            <button id="autostartBtn" class="refresh" onclick="toggleAutostart()">开机自启动</button>
           </div>
           <div class="field">
             <div class="label">重启地图</div>
@@ -86,6 +113,22 @@ def _html() -> str:
           <div id="pose" class="value pose-line">暂无定位位姿数据</div>
         </section>
       </div>
+      <section class="panel" style="margin-top:16px">
+        <div class="top" style="margin-bottom:10px">
+          <div class="label">点位台词热更新</div>
+          <div class="actions" style="margin-top:0">
+            <button id="hotRowsLoadBtn" class="refresh" onclick="loadHotRows()">加载点位台词</button>
+            <button id="hotRowsAddBtn" class="refresh icon-btn" onclick="addHotRow()">+</button>
+            <button id="hotRowsSaveBtn" class="go" onclick="saveHotRows()">保存点位台词</button>
+          </div>
+        </div>
+        <div id="hotRowsSummary" class="label">未加载</div>
+        <table id="hotRowsTable" class="hot-table">
+          <thead><tr><th style="width:42%">点位坐标</th><th>讲解台词</th><th style="width:80px">操作</th></tr></thead>
+          <tbody id="hotRowsBody"></tbody>
+        </table>
+        <p id="hotRowsMessage"></p>
+      </section>
       <section class="panel" style="margin-top:16px">
         <div class="top" style="margin-bottom:10px">
           <div class="label">导览讲解词</div>
@@ -113,6 +156,7 @@ var logsVisible=false;
 var mapPathTouched=false;
 var dialogueLoaded=false;
 var dialogueCollapsed=false;
+var hotRowSequence=0;
 function setText(id,text){document.getElementById(id).textContent=text;}
 function requestJson(method,url,payload,callback){
   var xhr=new XMLHttpRequest();
@@ -154,6 +198,7 @@ function canStartGuide(data){
 function servicesReady(data){
   return data&&data.main_loop==='running'&&data.nav_bridge&&data.nav_bridge.ready&&data.guide_state&&data.guide_state.state==='qa_listening';
 }
+function autostartLabel(enabled){return enabled?'已启用':'未启用';}
 function renderStatus(data){
   var guideState=guideStateValue(data);
   setText('map','地图：'+data.map_path);
@@ -162,6 +207,8 @@ function renderStatus(data){
   setText('mainLoop',data.main_loop);
   setText('navBridge',data.nav_bridge.ready?'28180 就绪':'未就绪');
   setText('workflow',guideStateLabel(guideState));
+  setText('autostart',autostartLabel(!!(data.autostart&&data.autostart.enabled)));
+  setText('autostartBtn',!!(data.autostart&&data.autostart.enabled)?'关闭开机自启动':'启用开机自启动');
   document.getElementById('guideBtn').disabled=!canStartGuide(data);
   setText('poseStatus',(data.pose&&data.pose.status_message)||(data.pose&&data.pose.localized?'定位成功':'定位未成功：程序会持续重定位，需要遥控机器人的位姿，帮助机器人完成定位'));
   if(data.pose&&data.pose.available){
@@ -236,6 +283,76 @@ function renderDialogue(body){
   setText('dialogueSummary',dialogueSummaryText(body.summary));
   setText('dialogueMessage',body.message||'');
 }
+function hotRowsSummaryText(summary,rowCount){
+  if(!summary){return '未加载';}
+  return '文件：'+summary.path+' / 表格行：'+rowCount+' / 总步骤：'+summary.steps+' / 总点位：'+summary.points;
+}
+function addHotRow(row){
+  row=row||{};
+  hotRowSequence+=1;
+  var tbody=document.getElementById('hotRowsBody');
+  var tr=document.createElement('tr');
+  tr.setAttribute('data-row-id',row.id||'');
+  var coordinateTd=document.createElement('td');
+  var coordinateInput=document.createElement('textarea');
+  coordinateInput.className='hot-input hot-coordinate';
+  coordinateInput.placeholder='{"x":0,"y":0,"z":0,"ox":0,"oy":0,"oz":0,"ow":1,"mode":1}';
+  coordinateInput.value=row.coordinate||'';
+  coordinateTd.appendChild(coordinateInput);
+  var scriptTd=document.createElement('td');
+  var scriptInput=document.createElement('textarea');
+  scriptInput.className='hot-input hot-script';
+  scriptInput.value=row.script||'';
+  scriptTd.appendChild(scriptInput);
+  var actionTd=document.createElement('td');
+  var removeBtn=document.createElement('button');
+  removeBtn.className='back icon-btn';
+  removeBtn.type='button';
+  removeBtn.textContent='-';
+  removeBtn.onclick=function(){tr.parentNode.removeChild(tr);};
+  actionTd.appendChild(removeBtn);
+  tr.appendChild(coordinateTd);
+  tr.appendChild(scriptTd);
+  tr.appendChild(actionTd);
+  tbody.appendChild(tr);
+}
+function collectHotRows(){
+  var rows=[];
+  var trs=document.querySelectorAll('#hotRowsBody tr');
+  for(var i=0;i<trs.length;i++){
+    var inputs=trs[i].querySelectorAll('textarea');
+    rows.push({id:trs[i].getAttribute('data-row-id')||'',coordinate:inputs[0].value,script:inputs[1].value});
+  }
+  return rows;
+}
+function renderHotRows(body){
+  var tbody=document.getElementById('hotRowsBody');
+  tbody.innerHTML='';
+  var rows=body.rows||[];
+  for(var i=0;i<rows.length;i++){addHotRow(rows[i]);}
+  setText('hotRowsSummary',hotRowsSummaryText(body.summary,rows.length));
+  setText('hotRowsMessage',body.message||'');
+}
+function loadHotRows(){
+  document.getElementById('hotRowsLoadBtn').disabled=true;
+  setText('hotRowsMessage','正在加载点位台词...');
+  requestJson('GET','/api/dialogue/hot-rows',null,function(error,body){
+    document.getElementById('hotRowsLoadBtn').disabled=false;
+    if(error){setText('hotRowsMessage',error.message);return;}
+    renderHotRows(body);
+  });
+}
+function saveHotRows(){
+  var button=document.getElementById('hotRowsSaveBtn');
+  button.disabled=true;
+  setText('hotRowsMessage','正在保存点位台词...');
+  requestJson('POST','/api/dialogue/hot-rows',{rows:collectHotRows()},function(error,body){
+    button.disabled=false;
+    if(error){setText('hotRowsMessage',error.message);return;}
+    renderHotRows(body);
+    if(dialogueLoaded){loadDialogue();}
+  });
+}
 function toggleDialogueEditor(){
   if(!dialogueLoaded){return;}
   dialogueCollapsed=!dialogueCollapsed;
@@ -296,6 +413,18 @@ function stopProgram(){
     setTimeout(function(){button.disabled=false;refresh();},1500);
   });
 }
+function toggleAutostart(){
+  var button=document.getElementById('autostartBtn');
+  var enable=button.textContent.indexOf('启用')===0;
+  if(!window.confirm(enable?'确定启用导航主程序开机自启动吗？':'确定关闭导航主程序开机自启动吗？')){return;}
+  button.disabled=true;
+  setText('message',enable?'正在启用开机自启动...':'正在关闭开机自启动...');
+  requestJson('POST','/api/autostart',{enabled:enable},function(error,body){
+    button.disabled=false;
+    setText('message',error?error.message:body.message);
+    refresh();
+  });
+}
 function restartProgram(){
   if(!window.confirm('确定重新启动导航主程序吗？')){return;}
   var button=document.getElementById('restartBtn');
@@ -309,6 +438,7 @@ function restartProgram(){
     waitForServicesReady(button,Date.now());
   });
 }
+loadHotRows();
 refresh();
 setInterval(refresh,2000);
 </script>
@@ -329,6 +459,11 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
         main_loop = detect_main_loop_running()
         current_map_path = read_map_path(config.map_env_file, config.map_path)
         guide_state = read_guide_state(config.guide_state_file)
+        autostart_enabled = loop_service_autostart_enabled(
+            config.loop_service_name,
+            systemctl_path=config.systemctl_path,
+            sudo_path=config.sudo_path,
+        )
         if main_loop != "running":
             pose = parse_latest_pose(Path("/missing-nav-log"))
             workflow = {"run_id": None, "status": "loop_not_running", "ready": False, "pid": None, "exit_code": None, "finished_at": None}
@@ -339,6 +474,7 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
                 "nav_bridge": {"ready": False, "port": config.nav_port},
                 "workflow": workflow,
                 "guide_state": guide_state.to_dict(),
+                "autostart": {"enabled": autostart_enabled},
                 "pose": pose.to_dict(),
             }
 
@@ -352,6 +488,7 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
             "nav_bridge": {"ready": is_port_open("127.0.0.1", config.nav_port), "port": config.nav_port},
             "workflow": workflow.to_dict(),
             "guide_state": guide_state.to_dict(),
+            "autostart": {"enabled": autostart_enabled},
             "pose": pose.to_dict(),
         }
 
@@ -407,6 +544,18 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
         except CommandError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.post("/api/autostart")
+    def set_autostart(payload: AutostartRequest) -> dict:
+        try:
+            return set_loop_service_autostart(
+                payload.enabled,
+                config.loop_service_name,
+                systemctl_path=config.systemctl_path,
+                sudo_path=config.sudo_path,
+            )
+        except CommandError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/api/dialogue")
     def get_dialogue() -> dict:
         try:
@@ -420,6 +569,22 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
         try:
             path = resolve_dialogue_path(config.dialogue_dir, config.dialogue_index, config.dialogue_file)
             return write_dialogue_config(path, payload.content)
+        except DialogueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/dialogue/hot-rows")
+    def get_dialogue_hot_rows() -> dict:
+        try:
+            path = resolve_dialogue_path(config.dialogue_dir, config.dialogue_index, config.dialogue_file)
+            return read_dialogue_hot_rows(path)
+        except DialogueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/dialogue/hot-rows")
+    def save_dialogue_hot_rows(payload: DialogueHotRowsRequest) -> dict:
+        try:
+            path = resolve_dialogue_path(config.dialogue_dir, config.dialogue_index, config.dialogue_file)
+            return write_dialogue_hot_rows(path, payload.rows)
         except DialogueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

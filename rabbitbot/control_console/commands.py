@@ -173,7 +173,7 @@ def _run_loop_service_action(
 ) -> str:
     if service_name != LOOP_SERVICE_NAME:
         raise CommandError(f"不支持操作的服务：{service_name}")
-    if action not in {"start", "restart", "stop"}:
+    if action not in {"start", "restart", "stop", "enable", "disable"}:
         raise CommandError(f"不支持的服务操作：{action}")
     if not systemctl_path.exists():
         raise CommandError(f"systemctl 不存在：{systemctl_path}")
@@ -253,3 +253,49 @@ def stop_loop_service(
         _cleanup_tcp_port_occupants(NAV_BRIDGE_PORT, sudo_path)
     logger.info("导航主程序关闭完成：service=%s", service_name)
     return {"ok": True, "service": service_name, "message": output or "已关闭导航主程序"}
+
+
+def loop_service_autostart_enabled(
+    service_name: str = LOOP_SERVICE_NAME,
+    systemctl_path: Path = Path("/usr/bin/systemctl"),
+    sudo_path: Path | None = Path("/usr/bin/sudo"),
+) -> bool:
+    if service_name != LOOP_SERVICE_NAME:
+        raise CommandError(f"不支持查询的服务：{service_name}")
+    if not systemctl_path.exists():
+        raise CommandError(f"systemctl 不存在：{systemctl_path}")
+    if sudo_path is not None and not sudo_path.exists():
+        raise CommandError(f"sudo 不存在：{sudo_path}")
+
+    args: list[str] = []
+    if sudo_path is not None:
+        args.extend([str(sudo_path), "-n"])
+    args.extend([str(systemctl_path), "is-enabled", service_name])
+
+    result = subprocess.run(
+        args,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    output = (result.stdout or result.stderr or "").strip().lower()
+    if result.returncode == 0:
+        return output == "enabled"
+    if output in {"disabled", "static", "indirect", "masked"}:
+        return False
+    raise CommandError(output or f"查询开机自启动失败，退出码：{result.returncode}")
+
+
+def set_loop_service_autostart(
+    enabled: bool,
+    service_name: str = LOOP_SERVICE_NAME,
+    systemctl_path: Path = Path("/usr/bin/systemctl"),
+    sudo_path: Path | None = Path("/usr/bin/sudo"),
+) -> dict:
+    if service_name != LOOP_SERVICE_NAME:
+        raise CommandError(f"不支持设置开机自启动的服务：{service_name}")
+    action = "enable" if enabled else "disable"
+    failure_label = "启用开机自启动" if enabled else "关闭开机自启动"
+    output = _run_loop_service_action(action, service_name, systemctl_path, sudo_path, failure_label)
+    message = output or ("已启用开机自启动" if enabled else "已关闭开机自启动")
+    return {"ok": True, "service": service_name, "enabled": enabled, "message": message}
