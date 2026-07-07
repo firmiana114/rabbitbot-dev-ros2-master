@@ -1,2 +1,2 @@
 # Allow the LAN control console to manage only the RabbitBot loop service.
-pc ALL=(root) NOPASSWD: /usr/bin/systemctl start rabbitbot-loop.service, /usr/bin/systemctl restart rabbitbot-loop.service, /usr/bin/systemctl stop rabbitbot-loop.service
+pc ALL=(root) NOPASSWD: /usr/bin/systemctl start rabbitbot-loop.service, /usr/bin/systemctl restart rabbitbot-loop.service, /usr/bin/systemctl stop rabbitbot-loop.service, /usr/bin/systemctl enable rabbitbot-loop.service, /usr/bin/systemctl disable rabbitbot-loop.service, /usr/bin/systemctl is-enabled rabbitbot-loop.service
