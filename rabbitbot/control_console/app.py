@@ -95,9 +95,9 @@ def _html() -> str:
           <div class="label" style="margin-top:16px">开始任务</div>
           <div class="actions">
             <button id="guideBtn" class="go" onclick="startTask('guide')">导览</button>
+            <button class="back" onclick="sendCommand('back')">返航</button>
           </div>
           <div class="actions">
-            <button class="back" onclick="sendCommand('back')">返航</button>
             <button id="restartBtn" class="restart" onclick="restartProgram()">一键重启</button>
             <button id="stopBtn" class="back" onclick="stopProgram()">关闭程序</button>
             <button id="autostartBtn" class="refresh" onclick="toggleAutostart()">开机自启动</button>

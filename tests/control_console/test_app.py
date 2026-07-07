@@ -590,6 +590,7 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '>刷新状态<' not in response.text
     assert '/api/task' in response.text
     assert '返航' in response.text
+    assert '<button id="guideBtn" class="go" onclick="startTask(\'guide\')">导览</button>\n            <button class="back" onclick="sendCommand(\'back\')">返航</button>' in response.text
     assert '定位状态' in response.text
     assert '当前位姿' in response.text
     assert 'id="startBtn"' not in response.text
