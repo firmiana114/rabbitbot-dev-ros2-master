@@ -20,10 +20,12 @@ from .commands import (
 from .config import ConsoleConfig
 from .dialogue import (
     DialogueError,
+    read_dialogue_leader_calling,
     read_dialogue_editor,
     read_dialogue_hot_rows,
     resolve_dialogue_path,
     write_dialogue_config,
+    write_dialogue_leader_calling,
     write_dialogue_hot_rows,
 )
 from .status import (
@@ -51,6 +53,10 @@ class RestartRequest(BaseModel):
 
 class DialogueRequest(BaseModel):
     content: str
+
+
+class LeaderCallingRequest(BaseModel):
+    leader_calling: str
 
 
 class DialogueHotRowsRequest(BaseModel):
@@ -115,6 +121,20 @@ def _html() -> str:
       </div>
       <section class="panel" style="margin-top:16px">
         <div class="top" style="margin-bottom:10px">
+          <div>
+            <div class="label">领导称呼</div>
+            <div id="leaderCallingSummary" class="label">未加载</div>
+          </div>
+          <div class="actions" style="margin-top:0">
+            <button id="leaderCallingLoadBtn" class="refresh" onclick="loadLeaderCalling()">加载领导称呼</button>
+            <button id="leaderCallingSaveBtn" class="go" onclick="saveLeaderCalling()" disabled>保存领导称呼</button>
+          </div>
+        </div>
+        <input id="leaderCallingInput" class="text-input" type="text" maxlength="80" placeholder="例如：各位领导" oninput="updateLeaderCallingState()" onkeydown="leaderCallingKeydown(event)">
+        <p id="leaderCallingMessage"></p>
+      </section>
+      <section class="panel" style="margin-top:16px">
+        <div class="top" style="margin-bottom:10px">
           <div class="label">点位台词热更新</div>
           <div class="actions" style="margin-top:0">
             <button id="hotRowsLoadBtn" class="refresh" onclick="loadHotRows()">加载点位台词</button>
@@ -157,6 +177,8 @@ var mapPathTouched=false;
 var dialogueLoaded=false;
 var dialogueCollapsed=false;
 var hotRowSequence=0;
+var leaderCallingLoaded=false;
+var leaderCallingOriginal='';
 function setText(id,text){document.getElementById(id).textContent=text;}
 function requestJson(method,url,payload,callback){
   var xhr=new XMLHttpRequest();
@@ -282,6 +304,45 @@ function renderDialogue(body){
   updateDialogueFoldState();
   setText('dialogueSummary',dialogueSummaryText(body.summary));
   setText('dialogueMessage',body.message||'');
+}
+function updateLeaderCallingState(){
+  var input=document.getElementById('leaderCallingInput');
+  var value=input.value.trim();
+  document.getElementById('leaderCallingSaveBtn').disabled=!leaderCallingLoaded||!value||value===leaderCallingOriginal;
+}
+function leaderCallingKeydown(event){
+  if(event.key==='Enter'&&!document.getElementById('leaderCallingSaveBtn').disabled){saveLeaderCalling();}
+}
+function renderLeaderCalling(body){
+  leaderCallingLoaded=true;
+  leaderCallingOriginal=(body.leader_calling||'').trim();
+  document.getElementById('leaderCallingInput').value=leaderCallingOriginal;
+  setText('leaderCallingSummary','文件：'+((body.summary&&body.summary.path)||body.path||'-')+' / 当前称呼会替换台词里的 {leader_calling}');
+  setText('leaderCallingMessage',body.message||'');
+  updateLeaderCallingState();
+}
+function loadLeaderCalling(){
+  var button=document.getElementById('leaderCallingLoadBtn');
+  button.disabled=true;
+  setText('leaderCallingMessage','正在加载领导称呼...');
+  requestJson('GET','/api/dialogue/leader-calling',null,function(error,body){
+    button.disabled=false;
+    if(error){setText('leaderCallingMessage',error.message);return;}
+    renderLeaderCalling(body);
+  });
+}
+function saveLeaderCalling(){
+  var input=document.getElementById('leaderCallingInput');
+  var value=input.value.trim();
+  if(!value){setText('leaderCallingMessage','领导称呼不能为空');updateLeaderCallingState();return;}
+  var button=document.getElementById('leaderCallingSaveBtn');
+  button.disabled=true;
+  setText('leaderCallingMessage','正在保存领导称呼...');
+  requestJson('POST','/api/dialogue/leader-calling',{leader_calling:value},function(error,body){
+    if(error){setText('leaderCallingMessage',error.message);updateLeaderCallingState();return;}
+    renderLeaderCalling(body);
+    if(dialogueLoaded){loadDialogue();}
+  });
 }
 function hotRowsSummaryText(summary,rowCount){
   if(!summary){return '未加载';}
@@ -468,6 +529,7 @@ function restartProgram(){
   });
 }
 loadHotRows();
+loadLeaderCalling();
 refresh();
 setInterval(refresh,2000);
 </script>
@@ -598,6 +660,22 @@ def create_app(config: ConsoleConfig | None = None) -> FastAPI:
         try:
             path = resolve_dialogue_path(config.dialogue_dir, config.dialogue_index, config.dialogue_file)
             return write_dialogue_config(path, payload.content)
+        except DialogueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/dialogue/leader-calling")
+    def get_dialogue_leader_calling() -> dict:
+        try:
+            path = resolve_dialogue_path(config.dialogue_dir, config.dialogue_index, config.dialogue_file)
+            return read_dialogue_leader_calling(path)
+        except DialogueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/dialogue/leader-calling")
+    def save_dialogue_leader_calling(payload: LeaderCallingRequest) -> dict:
+        try:
+            path = resolve_dialogue_path(config.dialogue_dir, config.dialogue_index, config.dialogue_file)
+            return write_dialogue_leader_calling(path, payload.leader_calling)
         except DialogueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
