@@ -274,6 +274,7 @@ var mapPathTouched=false;
 var hotRowSequence=0;
 var leaderCallingLoaded=false;
 var leaderCallingOriginal='';
+var latestPose=null;
 function setText(id,text){document.getElementById(id).textContent=text;}
 function showPage(page){
   var pages=document.querySelectorAll('.page');
@@ -338,8 +339,10 @@ function renderStatus(data){
   setText('poseStatus',(data.pose&&data.pose.status_message)||(data.pose&&data.pose.localized?'定位成功':'定位未成功：程序会持续重定位，需要遥控机器人的位姿，帮助机器人完成定位'));
   if(data.pose&&data.pose.available){
     var newline=String.fromCharCode(10);
+    latestPose=data.pose;
     setText('pose','x '+data.pose.x+' / y '+data.pose.y+' / z '+data.pose.z+newline+'ox '+data.pose.ox+' / oy '+data.pose.oy+' / oz '+data.pose.oz+' / ow '+data.pose.ow);
   }else{
+    latestPose=null;
     setText('pose',(data.pose&&data.pose.message)||'暂无定位位姿数据');
   }
 }
@@ -415,10 +418,31 @@ function hotRowsSummaryText(summary,rowCount){
 function updateHotCoordinateState(tr){
   var nameInput=tr.querySelector('.hot-name');
   var coordinateInput=tr.querySelector('.hot-coordinate');
+  var currentPoseBtn=tr.querySelector('.hot-current-pose');
   var isOpening=(nameInput.value||'').trim().toLowerCase()==='opening'||tr.getAttribute('data-row-type')==='opening';
   coordinateInput.disabled=isOpening;
+  if(currentPoseBtn){currentPoseBtn.disabled=isOpening;}
   if(isOpening){coordinateInput.value='';coordinateInput.placeholder='opening 无需点位坐标';}
   else{coordinateInput.placeholder='{"x":0,"y":0,"z":0,"ox":0,"oy":0,"oz":0,"ow":1,"mode":1}';}
+}
+function poseCoordinateJson(pose){
+  return JSON.stringify({
+    x:pose.x,
+    y:pose.y,
+    z:pose.z,
+    ox:pose.ox,
+    oy:pose.oy,
+    oz:pose.oz,
+    ow:pose.ow,
+    mode:1
+  });
+}
+function updateHotRowFromCurrentPose(tr){
+  var coordinateInput=tr.querySelector('.hot-coordinate');
+  if(coordinateInput.disabled){setText('hotRowsMessage','opening 无需点位坐标');return;}
+  if(!latestPose){setText('hotRowsMessage','暂无机器人当前位姿，请等待定位状态刷新后再试');return;}
+  coordinateInput.value=poseCoordinateJson(latestPose);
+  setText('hotRowsMessage','已更新该行点位坐标为机器人当前位姿，保存后下一次导览生效');
 }
 function addHotRow(row){
   row=row||{};
@@ -448,12 +472,19 @@ function addHotRow(row){
   scriptInput.value=row.script||'';
   scriptTd.appendChild(scriptInput);
   var actionTd=document.createElement('td');
+  var currentPoseBtn=document.createElement('button');
+  currentPoseBtn.className='refresh hot-current-pose';
+  currentPoseBtn.type='button';
+  currentPoseBtn.textContent='更新为机器人当前位置';
+  currentPoseBtn.onclick=function(){updateHotRowFromCurrentPose(tr);};
+  actionTd.appendChild(currentPoseBtn);
   var removeBtn=document.createElement('button');
   removeBtn.className='back icon-btn';
   removeBtn.type='button';
   removeBtn.textContent='-';
   removeBtn.onclick=function(){tr.parentNode.removeChild(tr);};
   if((row.row_type||'')==='opening'){removeBtn.disabled=true;}
+  actionTd.appendChild(document.createElement('br'));
   actionTd.appendChild(removeBtn);
   tr.appendChild(nameTd);
   tr.appendChild(coordinateTd);

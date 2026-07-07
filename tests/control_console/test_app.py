@@ -654,6 +654,11 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '点位名字' in response.text
     assert '点位坐标' in response.text
     assert '讲解台词' in response.text
+    assert '更新为机器人当前位置' in response.text
+    assert 'function updateHotRowFromCurrentPose(tr)' in response.text
+    assert 'poseCoordinateJson' in response.text
+    assert 'latestPose=data.pose' in response.text
+    assert '暂无机器人当前位姿，请等待定位状态刷新后再试' in response.text
     assert '保存点位台词' in response.text
     assert '>+<' in response.text
     assert 'if(rows.length===0){addHotRow();}' in response.text
