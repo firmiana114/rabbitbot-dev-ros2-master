@@ -590,7 +590,7 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert 'data-page="models"' in response.text
     assert "function showPage(page)" in response.text
     assert 'id="page-overview"' in response.text
-    assert 'id="page-control" class="page subpage" hidden' in response.text
+    assert 'id="page-control" class="page subpage control-page" hidden' in response.text
     assert 'id="page-status" class="page subpage" hidden' in response.text
     assert 'id="page-leader" class="page subpage" hidden' in response.text
     assert 'id="page-dialogue" class="page subpage" hidden' in response.text
@@ -601,6 +601,13 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '领导称呼' in response.text
     assert '点位台词' in response.text
     assert '模型服务' in response.text
+    assert '收起' not in response.text
+    assert 'class="collapse"' not in response.text
+    assert '双足机器人导览系统' in response.text
+    assert 'class="control-deck"' in response.text
+    assert 'class="robot-stage"' in response.text
+    assert 'class="motion-console"' in response.text
+    assert 'class="voice-wave"' in response.text
     assert 'repeat(auto-fit,minmax(240px,1fr))' in response.text
     assert '@media(max-width:820px)' in response.text
     assert '@media(max-width:520px)' in response.text
