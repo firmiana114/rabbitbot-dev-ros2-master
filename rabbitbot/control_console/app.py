@@ -75,18 +75,19 @@ def _html() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RabbitBot 控制台</title>
   <style>
-    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#182235;background:#f3f6fb}body{margin:0}.shell{min-height:100vh;display:grid;grid-template-columns:220px 1fr}.sidebar{background:#061a33;color:#eaf2ff;padding:22px 14px;display:flex;flex-direction:column;gap:18px}.brand{font-size:24px;font-weight:800;letter-spacing:.2px;padding:0 10px 14px}.nav{display:grid;gap:8px}.nav-item{border-radius:8px;padding:12px 14px;color:#c8d7ed;font-weight:700}.nav-item.active{background:#1261d8;color:#fff}.sidebar-spacer{flex:1}.collapse{background:rgba(255,255,255,.08);border-radius:8px;padding:12px 14px;color:#d9e6f7}.main{min-width:0}.topbar{height:72px;background:#fff;border-bottom:1px solid #d9e1ee;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 22px;box-sizing:border-box}.title{font-size:22px;font-weight:800}.top-status{display:flex;gap:14px;align-items:center;flex-wrap:wrap}.status-pill{display:grid;gap:3px;min-width:118px;padding:9px 14px;border-left:1px solid #dbe3ef}.status-pill strong{font-size:14px}.status-pill span{font-size:12px;color:#667085}.content{padding:16px;display:grid;grid-template-columns:minmax(360px,1fr) minmax(420px,1.35fr) minmax(320px,.95fr);gap:16px;align-items:start}.stack{display:grid;gap:16px}.panel{background:white;border:1px solid #dbe3ef;border-radius:8px;padding:16px;box-shadow:0 6px 20px rgba(20,38,70,.05)}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}.panel-title{font-size:16px;font-weight:800}.panel-link{color:#1261d8;font-size:13px;font-weight:700}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.card{background:#f8fafd;border:1px solid #e2e8f0;border-radius:8px;padding:14px;min-height:72px;box-sizing:border-box}.label{font-size:12px;color:#667085;font-weight:700}.value{font-size:19px;font-weight:800;margin-top:6px;color:#182235}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.primary-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.secondary-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.field{margin-top:14px}.text-input,.dialogue-editor,.hot-input{width:100%;box-sizing:border-box;padding:10px 11px;border:1px solid #cbd5e1;border-radius:7px;font-size:14px;color:#172033;background:#fff}.dialogue-editor{font-family:ui-monospace,Menlo,monospace;min-height:360px;line-height:1.45;resize:vertical}.hot-wrap{overflow:auto}.hot-table{width:100%;border-collapse:collapse;margin-top:12px;min-width:780px}.hot-table th,.hot-table td{border-top:1px solid #e2e8f0;padding:10px;text-align:left;vertical-align:top}.hot-table th{font-size:12px;color:#667085}.hot-name{min-height:42px}.hot-coordinate{font-family:ui-monospace,Menlo,monospace;min-height:76px;resize:vertical}.hot-script{min-height:76px;resize:vertical}.icon-btn{min-width:46px;padding:10px 12px}button{border:0;border-radius:7px;color:white;padding:11px 15px;font-size:15px;font-weight:800;cursor:pointer;white-space:nowrap}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:8px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}.wide{grid-column:span 2}.full{grid-column:1/-1}@media(max-width:1180px){.content{grid-template-columns:1fr 1fr}.wide{grid-column:1/-1}}@media(max-width:820px){.shell{grid-template-columns:1fr}.sidebar{display:none}.topbar{height:auto;align-items:flex-start;flex-direction:column;padding:16px}.top-status{width:100%}.status-pill{border-left:0;border-top:1px solid #dbe3ef;min-width:0;flex:1}.content{grid-template-columns:1fr;padding:12px}.grid,.cards,.primary-actions,.secondary-actions{grid-template-columns:1fr}.panel-head{align-items:flex-start;flex-direction:column}.hot-table,.hot-table thead,.hot-table tbody,.hot-table tr,.hot-table th,.hot-table td{display:block;min-width:0}.hot-table th{display:none}.hot-table td{padding:8px 0}}</style>
+    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#182235;background:#f3f6fb}*{box-sizing:border-box}body{margin:0}.shell{min-height:100vh;display:grid;grid-template-columns:clamp(180px,13vw,220px) minmax(0,1fr)}.sidebar{background:#061a33;color:#eaf2ff;padding:22px 14px;display:flex;flex-direction:column;gap:18px;min-width:0}.brand{font-size:24px;font-weight:800;letter-spacing:.2px;padding:0 10px 14px}.nav{display:grid;gap:8px}.nav-item{border-radius:8px;padding:12px 14px;color:#c8d7ed;font-weight:700}.nav-item.active{background:#1261d8;color:#fff}.sidebar-spacer{flex:1}.collapse{background:rgba(255,255,255,.08);border-radius:8px;padding:12px 14px;color:#d9e6f7}.main{min-width:0;overflow:hidden}.topbar{min-height:72px;background:#fff;border-bottom:1px solid #d9e1ee;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 22px}.title{font-size:22px;font-weight:800}.top-status{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:10px;align-items:stretch;max-width:min(760px,58vw);width:100%}.status-pill{display:grid;gap:3px;min-width:0;padding:8px 12px;border-left:1px solid #dbe3ef}.status-pill strong{font-size:14px}.status-pill span{font-size:12px;color:#667085;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.content{padding:16px;min-width:0}.page[hidden]{display:none}.page-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;align-items:stretch}.subpage{width:min(100%,1180px)}.stack{display:grid;gap:16px;min-width:0}.panel{background:white;border:1px solid #dbe3ef;border-radius:8px;padding:16px;box-shadow:0 6px 20px rgba(20,38,70,.05);min-width:0}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}.panel-title{font-size:16px;font-weight:800}.panel-link{color:#1261d8;font-size:13px;font-weight:700}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.card{background:#f8fafd;border:1px solid #e2e8f0;border-radius:8px;padding:14px;min-height:72px}.label{font-size:12px;color:#667085;font-weight:700}.value{font-size:19px;font-weight:800;margin-top:6px;color:#182235}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.primary-actions{display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:10px}.secondary-actions{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:10px}.field{margin-top:14px}.text-input,.dialogue-editor,.hot-input{width:100%;padding:10px 11px;border:1px solid #cbd5e1;border-radius:7px;font-size:14px;color:#172033;background:#fff}.dialogue-editor{font-family:ui-monospace,Menlo,monospace;min-height:360px;line-height:1.45;resize:vertical}.hot-wrap{overflow-x:auto;max-width:100%}.hot-table{width:100%;border-collapse:collapse;margin-top:12px;min-width:min(780px,calc(100vw - 260px))}.hot-table th,.hot-table td{border-top:1px solid #e2e8f0;padding:10px;text-align:left;vertical-align:top}.hot-table th{font-size:12px;color:#667085}.hot-name{min-height:42px}.hot-coordinate{font-family:ui-monospace,Menlo,monospace;min-height:76px;resize:vertical}.hot-script{min-height:76px;resize:vertical}.icon-btn{min-width:46px;padding:10px 12px}button{border:0;border-radius:7px;color:white;padding:11px 15px;font-size:15px;font-weight:800;cursor:pointer;white-space:nowrap}button:disabled{opacity:.45;cursor:not-allowed}.sidebar .nav-item{border:0;border-radius:8px;background:transparent;color:#c8d7ed;padding:12px 14px;font-size:15px;font-weight:800;text-align:left;cursor:pointer;overflow:hidden;text-overflow:ellipsis}.sidebar .nav-item.active{background:#1261d8;color:#fff}.overview-card{width:100%;display:block;text-align:left;background:white;color:#182235;border:1px solid #dbe3ef;border-radius:8px;padding:18px;box-shadow:0 6px 20px rgba(20,38,70,.05);min-height:118px}.overview-card strong{display:block;font-size:17px;margin-bottom:8px}.overview-card span{display:block;color:#667085;font-size:13px;line-height:1.45;white-space:normal}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:8px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}.wide{grid-column:span 2}.full{grid-column:1/-1}@media(max-width:1180px){.topbar{align-items:flex-start;flex-direction:column}.top-status{max-width:none}.wide{grid-column:1/-1}.secondary-actions{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}}@media(max-width:820px){.shell{grid-template-columns:1fr}.sidebar{position:static;display:block;padding:14px}.brand{padding-bottom:8px}.nav{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.sidebar-spacer,.collapse{display:none}.topbar{padding:16px}.top-status{grid-template-columns:repeat(2,minmax(0,1fr))}.content{padding:12px}.page-grid,.grid,.cards,.primary-actions,.secondary-actions{grid-template-columns:1fr}.panel-head{align-items:flex-start;flex-direction:column}.hot-table{min-width:640px}}@media(max-width:520px){.top-status{grid-template-columns:1fr}.hot-table,.hot-table thead,.hot-table tbody,.hot-table tr,.hot-table th,.hot-table td{display:block;min-width:0}.hot-table th{display:none}.hot-table td{padding:8px 0}}</style>
 </head>
 <body>
   <div id="app" class="shell">
     <aside class="sidebar">
       <div class="brand">RabbitBot</div>
       <nav class="nav">
-        <div class="nav-item active">总览</div>
-        <div class="nav-item">任务控制</div>
-        <div class="nav-item">台词配置</div>
-        <div class="nav-item">日志告警</div>
-        <div class="nav-item">系统设置</div>
+        <button class="nav-item active" type="button" data-page="overview" onclick="showPage('overview')">总览</button>
+        <button class="nav-item" type="button" data-page="control" onclick="showPage('control')">任务控制</button>
+        <button class="nav-item" type="button" data-page="status" onclick="showPage('status')">机器人状态</button>
+        <button class="nav-item" type="button" data-page="leader" onclick="showPage('leader')">领导称呼</button>
+        <button class="nav-item" type="button" data-page="dialogue" onclick="showPage('dialogue')">点位台词</button>
+        <button class="nav-item" type="button" data-page="models" onclick="showPage('models')">模型服务</button>
       </nav>
       <div class="sidebar-spacer"></div>
       <div class="collapse">收起</div>
@@ -105,7 +106,17 @@ def _html() -> str:
         </div>
       </header>
       <div class="content">
-        <div class="stack">
+        <section id="page-overview" class="page">
+          <div class="page-grid">
+            <button class="overview-card" type="button" onclick="showPage('control')"><strong>任务控制</strong><span>导览、返航、一键重启、关闭程序和开机自启动集中操作。</span></button>
+            <button class="overview-card" type="button" onclick="showPage('status')"><strong>机器人状态</strong><span>查看开机自启动、定位状态和当前位姿。</span></button>
+            <button class="overview-card" type="button" onclick="showPage('leader')"><strong>领导称呼</strong><span>加载并保存导览台词里的领导称呼变量。</span></button>
+            <button class="overview-card" type="button" onclick="showPage('dialogue')"><strong>点位台词</strong><span>加载完整点位列表，热更新点位名字、坐标和讲解台词。</span></button>
+            <button class="overview-card" type="button" onclick="showPage('models')"><strong>模型服务</strong><span>查看 VLM、ASR、TTS 和 Planner 的服务概览。</span></button>
+          </div>
+        </section>
+        <section id="page-control" class="page subpage" hidden>
+          <div class="stack">
           <section class="panel">
             <div class="panel-head">
               <div class="panel-title">任务控制</div>
@@ -127,7 +138,11 @@ def _html() -> str:
             </div>
             <p id="message"></p>
           </section>
-          <section class="panel">
+          </div>
+        </section>
+        <section id="page-status" class="page subpage" hidden>
+          <div class="stack">
+            <section class="panel">
             <div class="panel-head">
               <div class="panel-title">机器人状态</div>
               <div class="panel-link">自动刷新</div>
@@ -141,7 +156,11 @@ def _html() -> str:
               <div id="pose" class="value pose-line">暂无定位位姿数据</div>
             </div>
           </section>
-          <section class="panel">
+          </div>
+        </section>
+        <section id="page-leader" class="page subpage" hidden>
+          <div class="stack">
+            <section class="panel">
             <div class="panel-head">
               <div>
                 <div class="panel-title">领导称呼</div>
@@ -155,9 +174,11 @@ def _html() -> str:
             </div>
             <p id="leaderCallingMessage"></p>
           </section>
-        </div>
-        <div class="stack">
-          <section class="panel">
+          </div>
+        </section>
+        <section id="page-dialogue" class="page subpage" hidden>
+          <div class="stack">
+            <section class="panel">
             <div class="panel-head">
               <div>
                 <div class="panel-title">点位台词热更新</div>
@@ -177,9 +198,11 @@ def _html() -> str:
             </div>
             <p id="hotRowsMessage"></p>
           </section>
-        </div>
-        <div class="stack">
-          <section class="panel">
+          </div>
+        </section>
+        <section id="page-models" class="page subpage" hidden>
+          <div class="stack">
+            <section class="panel">
             <div class="panel-head">
               <div class="panel-title">模型服务</div>
               <div class="panel-link">运行中</div>
@@ -191,7 +214,8 @@ def _html() -> str:
               <div class="card"><div class="label">Planner</div><div class="value ok">健康</div></div>
             </div>
           </section>
-        </div>
+          </div>
+        </section>
       </div>
     </main>
   </div>
@@ -201,6 +225,14 @@ var hotRowSequence=0;
 var leaderCallingLoaded=false;
 var leaderCallingOriginal='';
 function setText(id,text){document.getElementById(id).textContent=text;}
+function showPage(page){
+  var pages=document.querySelectorAll('.page');
+  for(var i=0;i<pages.length;i++){pages[i].hidden=true;}
+  var target=document.getElementById('page-'+page)||document.getElementById('page-overview');
+  target.hidden=false;
+  var navItems=document.querySelectorAll('[data-page]');
+  for(var j=0;j<navItems.length;j++){navItems[j].classList.toggle('active',navItems[j].getAttribute('data-page')===page);}
+}
 function requestJson(method,url,payload,callback){
   var xhr=new XMLHttpRequest();
   xhr.open(method,url,true);
