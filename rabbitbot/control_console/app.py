@@ -69,7 +69,7 @@ def _html() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RabbitBot 控制台</title>
   <style>
-    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.field{margin-top:16px}.text-input,.dialogue-editor,.hot-input{width:100%;box-sizing:border-box;padding:10px 11px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;color:#172033;background:#fff}.dialogue-editor{font-family:ui-monospace,Menlo,monospace;min-height:420px;line-height:1.45;resize:vertical}.hot-table{width:100%;border-collapse:collapse;margin-top:12px}.hot-table th,.hot-table td{border-top:1px solid #e2e8f0;padding:10px;text-align:left;vertical-align:top}.hot-table th{font-size:12px;color:#667085}.hot-coordinate{font-family:ui-monospace,Menlo,monospace;min-height:84px;resize:vertical}.hot-script{min-height:84px;resize:vertical}.icon-btn{min-width:44px;padding:10px 12px}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}.hot-table,.hot-table thead,.hot-table tbody,.hot-table tr,.hot-table th,.hot-table td{display:block}.hot-table th{display:none}.hot-table td{padding:8px 0}}</style>
+    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.field{margin-top:16px}.text-input,.dialogue-editor,.hot-input{width:100%;box-sizing:border-box;padding:10px 11px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;color:#172033;background:#fff}.dialogue-editor{font-family:ui-monospace,Menlo,monospace;min-height:420px;line-height:1.45;resize:vertical}.hot-table{width:100%;border-collapse:collapse;margin-top:12px}.hot-table th,.hot-table td{border-top:1px solid #e2e8f0;padding:10px;text-align:left;vertical-align:top}.hot-table th{font-size:12px;color:#667085}.hot-name{min-height:44px}.hot-coordinate{font-family:ui-monospace,Menlo,monospace;min-height:84px;resize:vertical}.hot-script{min-height:84px;resize:vertical}.icon-btn{min-width:44px;padding:10px 12px}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}.hot-table,.hot-table thead,.hot-table tbody,.hot-table tr,.hot-table th,.hot-table td{display:block}.hot-table th{display:none}.hot-table td{padding:8px 0}}</style>
 </head>
 <body>
   <div class="wrap">
@@ -124,7 +124,7 @@ def _html() -> str:
         </div>
         <div id="hotRowsSummary" class="label">未加载</div>
         <table id="hotRowsTable" class="hot-table">
-          <thead><tr><th style="width:42%">点位坐标</th><th>讲解台词</th><th style="width:80px">操作</th></tr></thead>
+          <thead><tr><th style="width:16%">点位名字</th><th style="width:30%">点位坐标</th><th>讲解台词</th><th style="width:80px">操作</th></tr></thead>
           <tbody id="hotRowsBody"></tbody>
         </table>
         <p id="hotRowsMessage"></p>
@@ -287,12 +287,30 @@ function hotRowsSummaryText(summary,rowCount){
   if(!summary){return '未加载';}
   return '文件：'+summary.path+' / 表格行：'+rowCount+' / 总步骤：'+summary.steps+' / 总点位：'+summary.points;
 }
+function updateHotCoordinateState(tr){
+  var nameInput=tr.querySelector('.hot-name');
+  var coordinateInput=tr.querySelector('.hot-coordinate');
+  var isOpening=(nameInput.value||'').trim().toLowerCase()==='opening'||tr.getAttribute('data-row-type')==='opening';
+  coordinateInput.disabled=isOpening;
+  if(isOpening){coordinateInput.value='';coordinateInput.placeholder='opening 无需点位坐标';}
+  else{coordinateInput.placeholder='{"x":0,"y":0,"z":0,"ox":0,"oy":0,"oz":0,"ow":1,"mode":1}';}
+}
 function addHotRow(row){
   row=row||{};
   hotRowSequence+=1;
   var tbody=document.getElementById('hotRowsBody');
   var tr=document.createElement('tr');
   tr.setAttribute('data-row-id',row.id||'');
+  tr.setAttribute('data-row-type',row.row_type||'step');
+  tr.setAttribute('data-point-key',row.point_key||'');
+  if(row.step_index!==undefined&&row.step_index!==null){tr.setAttribute('data-step-index',row.step_index);}
+  var nameTd=document.createElement('td');
+  var nameInput=document.createElement('input');
+  nameInput.className='hot-input hot-name';
+  nameInput.type='text';
+  nameInput.value=row.point_name||'';
+  nameInput.oninput=function(){updateHotCoordinateState(tr);};
+  nameTd.appendChild(nameInput);
   var coordinateTd=document.createElement('td');
   var coordinateInput=document.createElement('textarea');
   coordinateInput.className='hot-input hot-coordinate';
@@ -310,18 +328,28 @@ function addHotRow(row){
   removeBtn.type='button';
   removeBtn.textContent='-';
   removeBtn.onclick=function(){tr.parentNode.removeChild(tr);};
+  if((row.row_type||'')==='opening'){removeBtn.disabled=true;}
   actionTd.appendChild(removeBtn);
+  tr.appendChild(nameTd);
   tr.appendChild(coordinateTd);
   tr.appendChild(scriptTd);
   tr.appendChild(actionTd);
   tbody.appendChild(tr);
+  updateHotCoordinateState(tr);
 }
 function collectHotRows(){
   var rows=[];
   var trs=document.querySelectorAll('#hotRowsBody tr');
   for(var i=0;i<trs.length;i++){
-    var inputs=trs[i].querySelectorAll('textarea');
-    rows.push({id:trs[i].getAttribute('data-row-id')||'',coordinate:inputs[0].value,script:inputs[1].value});
+    rows.push({
+      id:trs[i].getAttribute('data-row-id')||'',
+      row_type:trs[i].getAttribute('data-row-type')||'step',
+      step_index:trs[i].getAttribute('data-step-index')||'',
+      point_key:trs[i].getAttribute('data-point-key')||'',
+      point_name:trs[i].querySelector('.hot-name').value,
+      coordinate:trs[i].querySelector('.hot-coordinate').value,
+      script:trs[i].querySelector('.hot-script').value
+    });
   }
   return rows;
 }

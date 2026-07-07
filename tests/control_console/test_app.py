@@ -26,7 +26,7 @@ def make_config(tmp_path):
     workflow_log_dir.mkdir(parents=True, exist_ok=True)
     dialogue_dir.mkdir(parents=True, exist_ok=True)
     (dialogue_dir / "dialogue_0.json").write_text(
-        '{"variables":{"leader_calling":"各位领导"},"opening":{},"steps":[{"segments":[{"text":"欢迎"}]}],"map_file":"test9.pcd","points":{}}\n',
+        '{"variables":{"leader_calling":"各位领导"},"opening":{"short_mode_intro":"开场"},"steps":[{"scene":"点位1","entity_key":"point_1","segments":[{"text":"欢迎"}]}],"map_file":"test9.pcd","points":{"point_1":{"name":"点位1","location":[{"x":0,"y":0,"z":0,"ox":0,"oy":0,"oz":0,"ow":1,"mode":1}]}}}\n',
         encoding="utf-8",
     )
     command_script.write_text("#!/usr/bin/env bash\necho \"已发送命令：$1\"\n", encoding="utf-8")
@@ -339,8 +339,13 @@ def test_dialogue_hot_rows_loads_empty_table(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["rows"] == []
-    assert body["message"] == "当前暂无表格新增点位，请点击 + 添加"
+    assert body["message"] == "点位台词已加载"
+    assert body["rows"][0]["point_name"] == "opening"
+    assert body["rows"][0]["coordinate"] == ""
+    assert '"short_mode_intro": "开场"' in body["rows"][0]["script"]
+    assert body["rows"][1]["point_name"] == "点位1"
+    assert body["rows"][1]["point_key"] == "point_1"
+    assert body["rows"][1]["script"] == "欢迎"
 
 
 def test_dialogue_hot_rows_reads_existing_table_rows(tmp_path):
@@ -349,7 +354,7 @@ def test_dialogue_hot_rows_reads_existing_table_rows(tmp_path):
         json.dumps(
             {
                 "variables": {"leader_calling": "各位领导"},
-                "opening": {},
+                "opening": {"short_mode_intro": "开场"},
                 "steps": [
                     {
                         "scene": "console_point_1",
@@ -378,14 +383,13 @@ def test_dialogue_hot_rows_reads_existing_table_rows(tmp_path):
     response = client.get("/api/dialogue/hot-rows")
 
     assert response.status_code == 200
-    assert response.json()["rows"] == [
-        {
-            "id": "1",
-            "point_key": "console_point_1",
-            "coordinate": '{"x":1,"y":2,"z":3,"ox":0,"oy":0,"oz":0,"ow":1,"mode":1}',
-            "script": "新增讲解",
-        }
-    ]
+    rows = response.json()["rows"]
+    assert rows[0]["point_name"] == "opening"
+    assert rows[1]["id"] == "step_0"
+    assert rows[1]["point_name"] == "console_point_1"
+    assert rows[1]["point_key"] == "console_point_1"
+    assert rows[1]["coordinate"] == '{"x":1,"y":2,"z":3,"ox":0,"oy":0,"oz":0,"ow":1,"mode":1}'
+    assert rows[1]["script"] == "新增讲解"
 
 
 def test_dialogue_hot_rows_save_appends_rows_and_backup(tmp_path):
@@ -396,10 +400,19 @@ def test_dialogue_hot_rows_save_appends_rows_and_backup(tmp_path):
         "/api/dialogue/hot-rows",
         json={
             "rows": [
+                {"row_type": "opening", "point_name": "opening", "script": '{"short_mode_intro":"新开场"}'},
                 {
+                    "id": "step_0",
+                    "point_key": "point_1",
+                    "point_name": "点位1",
+                    "coordinate": '{"x":0,"y":0,"z":0,"ox":0,"oy":0,"oz":0,"ow":1}',
+                    "script": "欢迎",
+                },
+                {
+                    "point_name": "新增点位",
                     "coordinate": '{"x":1,"y":2,"z":3,"ox":0,"oy":0,"oz":0,"ow":1}',
                     "script": "新增点位讲解",
-                }
+                },
             ]
         },
     )
@@ -408,9 +421,10 @@ def test_dialogue_hot_rows_save_appends_rows_and_backup(tmp_path):
     body = response.json()
     assert body["message"] == "点位台词已保存，下一次导览生效，无需重启"
     saved = json.loads((config.dialogue_dir / "dialogue_0.json").read_text(encoding="utf-8"))
-    assert saved["points"]["console_point_1"]["source"] == "control_console_table"
-    assert saved["points"]["console_point_1"]["location"][0]["mode"] == 1
-    assert saved["steps"][-1]["entity_key"] == "console_point_1"
+    assert saved["opening"]["short_mode_intro"] == "新开场"
+    assert saved["points"]["console_point_新增点位"]["source"] == "control_console_table"
+    assert saved["points"]["console_point_新增点位"]["location"][0]["mode"] == 1
+    assert saved["steps"][-1]["entity_key"] == "console_point_新增点位"
     assert saved["steps"][-1]["segments"][0]["text"] == "新增点位讲解"
     assert saved["steps"][0]["segments"][0]["text"] == "欢迎"
     assert list(config.dialogue_dir.glob("dialogue_0.json.*.bak"))
@@ -449,11 +463,20 @@ def test_dialogue_hot_rows_save_replaces_only_managed_rows(tmp_path):
         "/api/dialogue/hot-rows",
         json={
             "rows": [
+                {"row_type": "opening", "point_name": "opening", "script": '{"short_mode_intro":"开场"}'},
+                {
+                    "id": "step_0",
+                    "point_key": "point_1",
+                    "point_name": "原始点位",
+                    "coordinate": '{"x":0,"y":0,"z":0,"ox":0,"oy":0,"oz":0,"ow":1,"mode":1}',
+                    "script": "原始讲解",
+                },
                 {
                     "id": "fresh",
+                    "point_name": "新点位",
                     "coordinate": '{"x":2,"y":3,"z":0,"ox":0,"oy":0,"oz":0,"ow":1,"mode":1}',
                     "script": "新讲解",
-                }
+                },
             ]
         },
     )
@@ -461,19 +484,20 @@ def test_dialogue_hot_rows_save_replaces_only_managed_rows(tmp_path):
     assert response.status_code == 200
     saved = json.loads((config.dialogue_dir / "dialogue_0.json").read_text(encoding="utf-8"))
     assert "point_1" in saved["points"]
-    assert "console_point_old" not in saved["points"]
+    assert "console_point_old" in saved["points"]
     assert saved["back_points"] == original["back_points"]
     assert saved["steps"][0]["scene"] == "原始点位"
-    assert saved["steps"][1]["entity_key"] == "console_point_fresh"
+    assert saved["steps"][1]["entity_key"] == "console_point_新点位"
 
 
 @pytest.mark.parametrize(
     ("rows", "message"),
     [
-        ([{"coordinate": "{", "script": "讲解"}], "不是有效 JSON 对象"),
-        ([{"coordinate": '{"x":1}', "script": "讲解"}], "缺少字段"),
-        ([{"coordinate": '{"x":"bad","y":0,"z":0,"ox":0,"oy":0,"oz":0,"ow":1}', "script": "讲解"}], "必须是数字"),
-        ([{"coordinate": '{"x":1,"y":0,"z":0,"ox":0,"oy":0,"oz":0,"ow":1}', "script": ""}], "讲解台词不能为空"),
+        ([{"point_name": "点位", "coordinate": "{", "script": "讲解"}], "不是有效 JSON 对象"),
+        ([{"point_name": "点位", "coordinate": '{"x":1}', "script": "讲解"}], "缺少字段"),
+        ([{"point_name": "点位", "coordinate": '{"x":"bad","y":0,"z":0,"ox":0,"oy":0,"oz":0,"ow":1}', "script": "讲解"}], "必须是数字"),
+        ([{"coordinate": '{"x":1,"y":0,"z":0,"ox":0,"oy":0,"oz":0,"ow":1}', "script": "讲解"}], "点位名字不能为空"),
+        ([{"row_type": "opening", "point_name": "opening", "script": "不是 JSON"}], "opening 讲解台词必须是 JSON 对象"),
     ],
 )
 def test_dialogue_hot_rows_save_rejects_invalid_rows(tmp_path, rows, message):
@@ -548,6 +572,7 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert 'mapPathInput' in response.text
     assert 'map_path' in response.text
     assert '导览讲解词' in response.text
+    assert '点位名字' in response.text
     assert '点位坐标' in response.text
     assert '讲解台词' in response.text
     assert '保存点位台词' in response.text
