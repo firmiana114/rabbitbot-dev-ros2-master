@@ -585,7 +585,7 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert 'data-page="overview"' not in response.text
     assert 'data-page="control"' in response.text
     assert 'data-page="status"' in response.text
-    assert 'data-page="leader"' in response.text
+    assert 'data-page="leader"' not in response.text
     assert 'data-page="dialogue"' in response.text
     assert 'data-page="models"' in response.text
     assert "function showPage(page)" in response.text
@@ -593,7 +593,7 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert 'id="page-control" class="page subpage control-page"' in response.text
     assert 'id="page-control" class="page subpage control-page" hidden' not in response.text
     assert 'id="page-status" class="page subpage" hidden' in response.text
-    assert 'id="page-leader" class="page subpage" hidden' in response.text
+    assert 'id="page-leader"' not in response.text
     assert 'id="page-dialogue" class="page subpage" hidden' in response.text
     assert 'id="page-models" class="page subpage" hidden' in response.text
     assert '总览' not in response.text
@@ -602,6 +602,7 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '机器人状态' in response.text
     assert '领导称呼' in response.text
     assert '点位台词' in response.text
+    assert response.text.index('领导称呼') < response.text.index('点位台词热更新')
     assert '模型服务' in response.text
     assert '收起' not in response.text
     assert 'class="collapse"' not in response.text

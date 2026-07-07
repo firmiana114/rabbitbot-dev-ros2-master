@@ -88,7 +88,6 @@ def _html() -> str:
       <nav class="nav">
         <button class="nav-item active" type="button" data-page="control" onclick="showPage('control')">任务控制</button>
         <button class="nav-item" type="button" data-page="status" onclick="showPage('status')">机器人状态</button>
-        <button class="nav-item" type="button" data-page="leader" onclick="showPage('leader')">领导称呼</button>
         <button class="nav-item" type="button" data-page="dialogue" onclick="showPage('dialogue')">点位台词</button>
         <button class="nav-item" type="button" data-page="models" onclick="showPage('models')">模型服务</button>
       </nav>
@@ -213,26 +212,22 @@ def _html() -> str:
           </section>
           </div>
         </section>
-        <section id="page-leader" class="page subpage" hidden>
-          <div class="stack">
-            <section class="panel">
-            <div class="panel-head">
-              <div>
-                <div class="panel-title">领导称呼</div>
-                <div id="leaderCallingSummary" class="label">未加载</div>
-              </div>
-            </div>
-            <input id="leaderCallingInput" class="text-input" type="text" maxlength="80" placeholder="例如：各位领导" oninput="updateLeaderCallingState()" onkeydown="leaderCallingKeydown(event)">
-            <div class="actions">
-              <button id="leaderCallingLoadBtn" class="refresh" onclick="loadLeaderCalling()">加载领导称呼</button>
-              <button id="leaderCallingSaveBtn" class="go" onclick="saveLeaderCalling()" disabled>保存领导称呼</button>
-            </div>
-            <p id="leaderCallingMessage"></p>
-          </section>
-          </div>
-        </section>
         <section id="page-dialogue" class="page subpage" hidden>
           <div class="stack">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">领导称呼</div>
+                  <div id="leaderCallingSummary" class="label">未加载</div>
+                </div>
+              </div>
+              <input id="leaderCallingInput" class="text-input" type="text" maxlength="80" placeholder="例如：各位领导" oninput="updateLeaderCallingState()" onkeydown="leaderCallingKeydown(event)">
+              <div class="actions">
+                <button id="leaderCallingLoadBtn" class="refresh" onclick="loadLeaderCalling()">加载领导称呼</button>
+                <button id="leaderCallingSaveBtn" class="go" onclick="saveLeaderCalling()" disabled>保存领导称呼</button>
+              </div>
+              <p id="leaderCallingMessage"></p>
+            </section>
             <section class="panel">
             <div class="panel-head">
               <div>
