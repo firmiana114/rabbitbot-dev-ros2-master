@@ -582,20 +582,22 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert 'class="shell"' in response.text
     assert 'class="sidebar"' in response.text
     assert 'class="topbar"' in response.text
-    assert 'data-page="overview"' in response.text
+    assert 'data-page="overview"' not in response.text
     assert 'data-page="control"' in response.text
     assert 'data-page="status"' in response.text
     assert 'data-page="leader"' in response.text
     assert 'data-page="dialogue"' in response.text
     assert 'data-page="models"' in response.text
     assert "function showPage(page)" in response.text
-    assert 'id="page-overview"' in response.text
-    assert 'id="page-control" class="page subpage control-page" hidden' in response.text
+    assert 'id="page-overview"' not in response.text
+    assert 'id="page-control" class="page subpage control-page"' in response.text
+    assert 'id="page-control" class="page subpage control-page" hidden' not in response.text
     assert 'id="page-status" class="page subpage" hidden' in response.text
     assert 'id="page-leader" class="page subpage" hidden' in response.text
     assert 'id="page-dialogue" class="page subpage" hidden' in response.text
     assert 'id="page-models" class="page subpage" hidden' in response.text
-    assert '总览' in response.text
+    assert '总览' not in response.text
+    assert '返回首页' not in response.text
     assert '任务控制' in response.text
     assert '机器人状态' in response.text
     assert '领导称呼' in response.text
