@@ -186,12 +186,12 @@ def read_dialogue_leader_calling(path: Path) -> dict:
     data = _read_dialogue_data(path)
     variables = data.get("variables", {}) or {}
     leader_calling = str(variables.get("leader_calling") or "").strip()
-    logger.info("导览领导称呼已读取：path=%s, value_length=%s", path, len(leader_calling))
+    logger.info("导览嘉宾称呼已读取：path=%s, value_length=%s", path, len(leader_calling))
     return {
         "ok": True,
         "path": str(path),
         "leader_calling": leader_calling,
-        "message": "领导称呼已加载",
+        "message": "嘉宾称呼已加载",
         "summary": _summary(data, path),
     }
 
@@ -200,24 +200,24 @@ def write_dialogue_leader_calling(path: Path, leader_calling: object) -> dict:
     data = _read_dialogue_data(path)
     value = str(leader_calling or "").strip()
     if not value:
-        logger.info("导览领导称呼校验失败：path=%s, reason=empty", path)
-        raise DialogueError("领导称呼不能为空")
+        logger.info("导览嘉宾称呼校验失败：path=%s, reason=empty", path)
+        raise DialogueError("嘉宾称呼不能为空")
     if "\n" in value or "\r" in value or "\x00" in value:
-        logger.info("导览领导称呼校验失败：path=%s, reason=illegal_character", path)
-        raise DialogueError("领导称呼不能包含换行或非法字符")
+        logger.info("导览嘉宾称呼校验失败：path=%s, reason=illegal_character", path)
+        raise DialogueError("嘉宾称呼不能包含换行或非法字符")
     if len(value) > 80:
-        logger.info("导览领导称呼校验失败：path=%s, reason=too_long, value_length=%s", path, len(value))
-        raise DialogueError("领导称呼不能超过 80 个字符")
+        logger.info("导览嘉宾称呼校验失败：path=%s, reason=too_long, value_length=%s", path, len(value))
+        raise DialogueError("嘉宾称呼不能超过 80 个字符")
 
     variables = data.get("variables", {}) or {}
     old_value = str(variables.get("leader_calling") or "").strip()
     if old_value == value:
-        logger.info("导览领导称呼未变化：path=%s, value_length=%s", path, len(value))
+        logger.info("导览嘉宾称呼未变化：path=%s, value_length=%s", path, len(value))
         return {
             "ok": True,
             "path": str(path),
             "leader_calling": value,
-            "message": "领导称呼未变化",
+            "message": "嘉宾称呼未变化",
             "summary": _summary(data, path),
         }
 
@@ -229,14 +229,14 @@ def write_dialogue_leader_calling(path: Path, leader_calling: object) -> dict:
     try:
         path.write_text(_format_dialogue(data), encoding="utf-8")
     except OSError as exc:
-        logger.error("导览领导称呼写入失败：path=%s, error_type=%s", path, type(exc).__name__)
+        logger.error("导览嘉宾称呼写入失败：path=%s, error_type=%s", path, type(exc).__name__)
         raise DialogueError(f"写入导览台词失败：{path}") from exc
-    logger.info("导览领导称呼已保存：path=%s, value_length=%s", path, len(value))
+    logger.info("导览嘉宾称呼已保存：path=%s, value_length=%s", path, len(value))
     return {
         "ok": True,
         "path": str(path),
         "leader_calling": value,
-        "message": "领导称呼已保存，下一次导览生效，无需重启",
+        "message": "嘉宾称呼已保存，下一次导览生效，无需重启",
         "summary": _summary(data, path),
     }
 

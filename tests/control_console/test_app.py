@@ -340,7 +340,7 @@ def test_dialogue_leader_calling_loads_current_value(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert body["leader_calling"] == "各位领导"
-    assert body["message"] == "领导称呼已加载"
+    assert body["message"] == "嘉宾称呼已加载"
 
 
 def test_dialogue_leader_calling_saves_value_and_backup(tmp_path):
@@ -352,7 +352,7 @@ def test_dialogue_leader_calling_saves_value_and_backup(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert body["leader_calling"] == "张总"
-    assert body["message"] == "领导称呼已保存，下一次导览生效，无需重启"
+    assert body["message"] == "嘉宾称呼已保存，下一次导览生效，无需重启"
     saved = json.loads((config.dialogue_dir / "dialogue_0.json").read_text(encoding="utf-8"))
     assert saved["variables"]["leader_calling"] == "张总"
     assert saved["opening"]["short_mode_intro"] == "开场"
@@ -365,7 +365,7 @@ def test_dialogue_leader_calling_save_rejects_empty_value(tmp_path):
     response = client.post("/api/dialogue/leader-calling", json={"leader_calling": "  "})
 
     assert response.status_code == 400
-    assert "领导称呼不能为空" in response.json()["detail"]
+    assert "嘉宾称呼不能为空" in response.json()["detail"]
 
 
 def test_dialogue_hot_rows_loads_empty_table(tmp_path):
@@ -600,9 +600,9 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '返回首页' not in response.text
     assert '任务控制' in response.text
     assert '机器人状态' in response.text
-    assert '领导称呼' in response.text
+    assert '嘉宾称呼' in response.text
     assert '点位台词' in response.text
-    assert response.text.index('领导称呼') < response.text.index('点位台词热更新')
+    assert response.text.index('嘉宾称呼') < response.text.index('点位台词热更新')
     assert '模型服务' in response.text
     assert '收起' not in response.text
     assert 'class="collapse"' not in response.text
@@ -667,7 +667,7 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert 'if(rows.length===0){addHotRow();}' in response.text
     assert '/api/dialogue/hot-rows' in response.text
     assert 'leaderCallingInput' in response.text
-    assert '保存领导称呼' in response.text
+    assert '保存嘉宾称呼' in response.text
     assert '/api/dialogue/leader-calling' in response.text
     assert '当前称呼会替换台词里的 {leader_calling}' in response.text
     assert '导览讲解词' not in response.text

@@ -217,14 +217,14 @@ def _html() -> str:
             <section class="panel">
               <div class="panel-head">
                 <div>
-                  <div class="panel-title">领导称呼</div>
+                  <div class="panel-title">嘉宾称呼</div>
                   <div id="leaderCallingSummary" class="label">未加载</div>
                 </div>
               </div>
-              <input id="leaderCallingInput" class="text-input" type="text" maxlength="80" placeholder="例如：各位领导" oninput="updateLeaderCallingState()" onkeydown="leaderCallingKeydown(event)">
+              <input id="leaderCallingInput" class="text-input" type="text" maxlength="80" placeholder="例如：各位嘉宾" oninput="updateLeaderCallingState()" onkeydown="leaderCallingKeydown(event)">
               <div class="actions">
-                <button id="leaderCallingLoadBtn" class="refresh" onclick="loadLeaderCalling()">加载领导称呼</button>
-                <button id="leaderCallingSaveBtn" class="go" onclick="saveLeaderCalling()" disabled>保存领导称呼</button>
+                <button id="leaderCallingLoadBtn" class="refresh" onclick="loadLeaderCalling()">加载嘉宾称呼</button>
+                <button id="leaderCallingSaveBtn" class="go" onclick="saveLeaderCalling()" disabled>保存嘉宾称呼</button>
               </div>
               <p id="leaderCallingMessage"></p>
             </section>
@@ -392,7 +392,7 @@ function renderLeaderCalling(body){
 function loadLeaderCalling(){
   var button=document.getElementById('leaderCallingLoadBtn');
   button.disabled=true;
-  setText('leaderCallingMessage','正在加载领导称呼...');
+  setText('leaderCallingMessage','正在加载嘉宾称呼...');
   requestJson('GET','/api/dialogue/leader-calling',null,function(error,body){
     button.disabled=false;
     if(error){setText('leaderCallingMessage',error.message);return;}
@@ -402,10 +402,10 @@ function loadLeaderCalling(){
 function saveLeaderCalling(){
   var input=document.getElementById('leaderCallingInput');
   var value=input.value.trim();
-  if(!value){setText('leaderCallingMessage','领导称呼不能为空');updateLeaderCallingState();return;}
+  if(!value){setText('leaderCallingMessage','嘉宾称呼不能为空');updateLeaderCallingState();return;}
   var button=document.getElementById('leaderCallingSaveBtn');
   button.disabled=true;
-  setText('leaderCallingMessage','正在保存领导称呼...');
+  setText('leaderCallingMessage','正在保存嘉宾称呼...');
   requestJson('POST','/api/dialogue/leader-calling',{leader_calling:value},function(error,body){
     if(error){setText('leaderCallingMessage',error.message);updateLeaderCallingState();return;}
     renderLeaderCalling(body);
