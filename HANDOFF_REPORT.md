@@ -26,6 +26,7 @@
 - 2026-07-07 补充：热更新表格首次没有新增点位时，前端会自动显示一行空白输入；接口提示改为“当前暂无表格新增点位，请点击 + 添加”，避免误以为已有 18 个导览点应该出现在该表格中。
 - 2026-07-07 再次补充：热更新表格升级为完整台词表，新增“点位名字”列；加载 `dialogue_0.json` 时会显示 `opening` 和全部 `steps` 对应的点位坐标/讲解台词；`opening` 行不需要点位坐标，讲解台词栏显示并保存 opening JSON 对象。
 - 2026-07-07 领导称呼补充：控制台新增独立“领导称呼”输入框和加载/保存按钮，读写 `variables.leader_calling`；保存时会校验非空、非法字符和长度，下一次导览生效，无需重启导航主程序。
+- 2026-07-07 前端按钮精简：控制台页面移除“对话”“视觉导航”“开始程序”“刷新状态”四个按钮；后端接口和自动刷新未删除，避免影响已有调用和状态更新。
 
 ## 已验证事实
 
@@ -35,6 +36,7 @@
 - 2026-07-07 小修后再次运行同一组控制台测试，结果仍为 61 passed。
 - 2026-07-07 完整台词表修改后运行 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/control_console/test_app.py tests/control_console/test_commands.py`，结果为 62 passed；`python3 -m py_compile rabbitbot/control_console/app.py rabbitbot/control_console/dialogue.py tests/control_console/test_app.py` 通过；`python3 -m json.tool conf/dialogue_0.json` 通过。
 - 2026-07-07 领导称呼修改后运行同一组控制台测试，结果为 65 passed；相关 py_compile 和 JSON 校验通过。
+- 2026-07-07 按钮精简后再次运行同一组控制台测试，结果为 65 passed；相关 py_compile 和 JSON 校验通过。
 - 直接运行系统 `python3 -m pytest ...` 会因远端全局 pytest/anyio 插件版本不匹配失败，失败发生在 pytest 启动阶段；关闭插件自动加载可正常测试。
 
 ## 阻塞问题

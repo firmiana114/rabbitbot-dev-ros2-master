@@ -580,16 +580,20 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '/api/login' not in response.text
     assert '开始任务' in response.text
     assert '导览' in response.text
-    assert '对话' in response.text
     assert "data.guide_state.state==='qa_listening'" in response.text
     assert "function canStartGuide(data)" in response.text
     assert "guide_running:'导览中'" in response.text
-    assert '视觉导航' in response.text
+    assert 'id="dialogueBtn"' not in response.text
+    assert 'id="visionBtn"' not in response.text
+    assert '>对话<' not in response.text
+    assert '>视觉导航<' not in response.text
+    assert '>刷新状态<' not in response.text
     assert '/api/task' in response.text
     assert '返航' in response.text
     assert '定位状态' in response.text
     assert '当前位姿' in response.text
-    assert '开始程序' in response.text
+    assert 'id="startBtn"' not in response.text
+    assert '>开始程序<' not in response.text
     assert '一键重启' in response.text
     assert '关闭程序' in response.text
     assert '开机自启动' in response.text
