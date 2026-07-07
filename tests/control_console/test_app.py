@@ -655,6 +655,9 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '点位坐标' in response.text
     assert '讲解台词' in response.text
     assert '更新为机器人当前位置' in response.text
+    assert 'hot-row-actions' in response.text
+    assert "actionGroup.appendChild(currentPoseBtn)" in response.text
+    assert "actionGroup.appendChild(removeBtn)" in response.text
     assert 'function updateHotRowFromCurrentPose(tr)' in response.text
     assert 'poseCoordinateJson' in response.text
     assert 'latestPose=data.pose' in response.text
