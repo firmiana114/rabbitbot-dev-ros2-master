@@ -340,7 +340,7 @@ def test_dialogue_hot_rows_loads_empty_table(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert body["rows"] == []
-    assert body["message"] == "点位台词已加载"
+    assert body["message"] == "当前暂无表格新增点位，请点击 + 添加"
 
 
 def test_dialogue_hot_rows_reads_existing_table_rows(tmp_path):
@@ -552,6 +552,7 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '讲解台词' in response.text
     assert '保存点位台词' in response.text
     assert '>+<' in response.text
+    assert 'if(rows.length===0){addHotRow();}' in response.text
     assert '/api/dialogue/hot-rows' in response.text
     assert '加载讲解词' in response.text
     assert '保存讲解词' in response.text

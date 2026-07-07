@@ -23,12 +23,14 @@
 - workflow 新增 `reload_docx_guide_dialogue()`，并在 go 闸门释放后清空台词缓存，确保等待开始导览期间保存的配置能在本次导览启动时重新读取。
 - 控制台保存/读取/校验失败/备份/写入路径增加了 INFO/ERROR 日志，日志记录行数、路径、点位 key、错误类型，不记录完整台词或大段 JSON。
 - 顺手修正 `loop_service_autostart_enabled()`：只有 `systemctl is-enabled` 明确输出 `enabled` 才显示已启用，空输出不再误判。
+- 2026-07-07 补充：热更新表格首次没有新增点位时，前端会自动显示一行空白输入；接口提示改为“当前暂无表格新增点位，请点击 + 添加”，避免误以为已有 18 个导览点应该出现在该表格中。
 
 ## 已验证事实
 
 - `python3 -m py_compile rabbitbot/control_console/app.py rabbitbot/control_console/dialogue.py rabbitbot/control_console/commands.py scripts/run_kuavo_agno_workflow.py rabbitbot/agno_agents/workflow.py tests/control_console/test_app.py` 已通过。
 - `python3 -m json.tool conf/dialogue_0.json` 已通过，当前现场台词 JSON 格式有效。
 - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/control_console/test_app.py tests/control_console/test_commands.py` 已通过，结果为 61 passed。
+- 2026-07-07 小修后再次运行同一组控制台测试，结果仍为 61 passed。
 - 直接运行系统 `python3 -m pytest ...` 会因远端全局 pytest/anyio 插件版本不匹配失败，失败发生在 pytest 启动阶段；关闭插件自动加载可正常测试。
 
 ## 阻塞问题

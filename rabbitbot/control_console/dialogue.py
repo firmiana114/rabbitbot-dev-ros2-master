@@ -222,7 +222,7 @@ def read_dialogue_hot_rows(path: Path) -> dict:
         "ok": True,
         "path": str(path),
         "rows": rows,
-        "message": "点位台词已加载",
+        "message": "点位台词已加载" if rows else "当前暂无表格新增点位，请点击 + 添加",
         "summary": _summary(data, path),
     }
 

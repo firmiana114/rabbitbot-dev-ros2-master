@@ -330,6 +330,7 @@ function renderHotRows(body){
   tbody.innerHTML='';
   var rows=body.rows||[];
   for(var i=0;i<rows.length;i++){addHotRow(rows[i]);}
+  if(rows.length===0){addHotRow();}
   setText('hotRowsSummary',hotRowsSummaryText(body.summary,rows.length));
   setText('hotRowsMessage',body.message||'');
 }
