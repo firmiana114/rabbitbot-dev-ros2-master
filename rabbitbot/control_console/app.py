@@ -75,103 +75,128 @@ def _html() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RabbitBot 控制台</title>
   <style>
-    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#172033;background:#eef2f6}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:20px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:16px}.panel{background:white;border:1px solid #d7dde8;border-radius:8px;padding:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f7f9fc;border-radius:6px;padding:12px}.label{font-size:12px;color:#667085;text-transform:uppercase}.value{font-size:18px;font-weight:700;margin-top:4px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.field{margin-top:16px}.text-input,.dialogue-editor,.hot-input{width:100%;box-sizing:border-box;padding:10px 11px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;color:#172033;background:#fff}.dialogue-editor{font-family:ui-monospace,Menlo,monospace;min-height:420px;line-height:1.45;resize:vertical}.hot-table{width:100%;border-collapse:collapse;margin-top:12px}.hot-table th,.hot-table td{border-top:1px solid #e2e8f0;padding:10px;text-align:left;vertical-align:top}.hot-table th{font-size:12px;color:#667085}.hot-name{min-height:44px}.hot-coordinate{font-family:ui-monospace,Menlo,monospace;min-height:84px;resize:vertical}.hot-script{min-height:84px;resize:vertical}.icon-btn{min-width:44px;padding:10px 12px}button{border:0;border-radius:6px;color:white;padding:11px 16px;font-size:15px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:6px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}@media(max-width:820px){.grid,.cards{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}.hot-table,.hot-table thead,.hot-table tbody,.hot-table tr,.hot-table th,.hot-table td{display:block}.hot-table th{display:none}.hot-table td{padding:8px 0}}</style>
+    :root{font-family:Arial,'Noto Sans SC',sans-serif;color:#182235;background:#f3f6fb}body{margin:0}.shell{min-height:100vh;display:grid;grid-template-columns:220px 1fr}.sidebar{background:#061a33;color:#eaf2ff;padding:22px 14px;display:flex;flex-direction:column;gap:18px}.brand{font-size:24px;font-weight:800;letter-spacing:.2px;padding:0 10px 14px}.nav{display:grid;gap:8px}.nav-item{border-radius:8px;padding:12px 14px;color:#c8d7ed;font-weight:700}.nav-item.active{background:#1261d8;color:#fff}.sidebar-spacer{flex:1}.collapse{background:rgba(255,255,255,.08);border-radius:8px;padding:12px 14px;color:#d9e6f7}.main{min-width:0}.topbar{height:72px;background:#fff;border-bottom:1px solid #d9e1ee;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 22px;box-sizing:border-box}.title{font-size:22px;font-weight:800}.top-status{display:flex;gap:14px;align-items:center;flex-wrap:wrap}.status-pill{display:grid;gap:3px;min-width:118px;padding:9px 14px;border-left:1px solid #dbe3ef}.status-pill strong{font-size:14px}.status-pill span{font-size:12px;color:#667085}.content{padding:16px;display:grid;grid-template-columns:minmax(360px,1fr) minmax(420px,1.35fr) minmax(320px,.95fr);gap:16px;align-items:start}.stack{display:grid;gap:16px}.panel{background:white;border:1px solid #dbe3ef;border-radius:8px;padding:16px;box-shadow:0 6px 20px rgba(20,38,70,.05)}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}.panel-title{font-size:16px;font-weight:800}.panel-link{color:#1261d8;font-size:13px;font-weight:700}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.card{background:#f8fafd;border:1px solid #e2e8f0;border-radius:8px;padding:14px;min-height:72px;box-sizing:border-box}.label{font-size:12px;color:#667085;font-weight:700}.value{font-size:19px;font-weight:800;margin-top:6px;color:#182235}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.primary-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.secondary-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.field{margin-top:14px}.text-input,.dialogue-editor,.hot-input{width:100%;box-sizing:border-box;padding:10px 11px;border:1px solid #cbd5e1;border-radius:7px;font-size:14px;color:#172033;background:#fff}.dialogue-editor{font-family:ui-monospace,Menlo,monospace;min-height:360px;line-height:1.45;resize:vertical}.hot-wrap{overflow:auto}.hot-table{width:100%;border-collapse:collapse;margin-top:12px;min-width:780px}.hot-table th,.hot-table td{border-top:1px solid #e2e8f0;padding:10px;text-align:left;vertical-align:top}.hot-table th{font-size:12px;color:#667085}.hot-name{min-height:42px}.hot-coordinate{font-family:ui-monospace,Menlo,monospace;min-height:76px;resize:vertical}.hot-script{min-height:76px;resize:vertical}.icon-btn{min-width:46px;padding:10px 12px}button{border:0;border-radius:7px;color:white;padding:11px 15px;font-size:15px;font-weight:800;cursor:pointer;white-space:nowrap}button:disabled{opacity:.45;cursor:not-allowed}.go{background:#137333}.task{background:#0f766e}.placeholder{background:#64748b}.back{background:#b3261e}.refresh{background:#334155}.restart{background:#7c2d12}.log{font-family:ui-monospace,Menlo,monospace;background:#111827;color:#d1d5db;border-radius:8px;padding:12px;line-height:1.5;font-size:12px;min-height:220px;overflow:auto}.error{color:#b3261e}.ok{color:#137333}.pose-line{white-space:pre-line}.wide{grid-column:span 2}.full{grid-column:1/-1}@media(max-width:1180px){.content{grid-template-columns:1fr 1fr}.wide{grid-column:1/-1}}@media(max-width:820px){.shell{grid-template-columns:1fr}.sidebar{display:none}.topbar{height:auto;align-items:flex-start;flex-direction:column;padding:16px}.top-status{width:100%}.status-pill{border-left:0;border-top:1px solid #dbe3ef;min-width:0;flex:1}.content{grid-template-columns:1fr;padding:12px}.grid,.cards,.primary-actions,.secondary-actions{grid-template-columns:1fr}.panel-head{align-items:flex-start;flex-direction:column}.hot-table,.hot-table thead,.hot-table tbody,.hot-table tr,.hot-table th,.hot-table td{display:block;min-width:0}.hot-table th{display:none}.hot-table td{padding:8px 0}}</style>
 </head>
 <body>
-  <div class="wrap">
-    <div id="app">
-      <div class="top">
-        <div><h2>RabbitBot 控制台</h2><div id="map" class="label">地图：-</div></div>
-        <div id="overall" class="value">读取中</div>
+  <div id="app" class="shell">
+    <aside class="sidebar">
+      <div class="brand">RabbitBot</div>
+      <nav class="nav">
+        <div class="nav-item active">总览</div>
+        <div class="nav-item">任务控制</div>
+        <div class="nav-item">台词配置</div>
+        <div class="nav-item">日志告警</div>
+        <div class="nav-item">系统设置</div>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="collapse">收起</div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="title">RabbitBot 控制台</div>
+          <div id="map" class="label">地图：-</div>
+        </div>
+        <div class="top-status">
+          <div class="status-pill"><strong>控制台</strong><span id="overall">读取中</span></div>
+          <div class="status-pill"><strong>主循环</strong><span id="mainLoop">-</span></div>
+          <div class="status-pill"><strong>导航桥接</strong><span id="navBridge">-</span></div>
+          <div class="status-pill"><strong>当前模式</strong><span id="workflow">-</span></div>
+        </div>
+      </header>
+      <div class="content">
+        <div class="stack">
+          <section class="panel">
+            <div class="panel-head">
+              <div class="panel-title">任务控制</div>
+              <div class="panel-link">Workflow</div>
+            </div>
+            <div class="label">开始任务</div>
+            <div class="actions primary-actions">
+              <button id="guideBtn" class="go" onclick="startTask('guide')">导览</button>
+              <button class="back" onclick="sendCommand('back')">返航</button>
+            </div>
+            <div class="actions secondary-actions">
+              <button id="restartBtn" class="restart" onclick="restartProgram()">一键重启</button>
+              <button id="stopBtn" class="back" onclick="stopProgram()">关闭程序</button>
+              <button id="autostartBtn" class="refresh" onclick="toggleAutostart()">开机自启动</button>
+            </div>
+            <div class="field">
+              <div class="label">重启地图</div>
+              <input id="mapPathInput" class="text-input" type="text" value="/home/unitree/test9.pcd" oninput="mapPathTouched=true">
+            </div>
+            <p id="message"></p>
+          </section>
+          <section class="panel">
+            <div class="panel-head">
+              <div class="panel-title">机器人状态</div>
+              <div class="panel-link">自动刷新</div>
+            </div>
+            <div class="cards">
+              <div class="card"><div class="label">开机自启动</div><div id="autostart" class="value">-</div></div>
+              <div class="card"><div class="label">定位状态</div><div id="poseStatus" class="value">读取中</div></div>
+            </div>
+            <div class="field">
+              <div class="label">当前位姿</div>
+              <div id="pose" class="value pose-line">暂无定位位姿数据</div>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">领导称呼</div>
+                <div id="leaderCallingSummary" class="label">未加载</div>
+              </div>
+            </div>
+            <input id="leaderCallingInput" class="text-input" type="text" maxlength="80" placeholder="例如：各位领导" oninput="updateLeaderCallingState()" onkeydown="leaderCallingKeydown(event)">
+            <div class="actions">
+              <button id="leaderCallingLoadBtn" class="refresh" onclick="loadLeaderCalling()">加载领导称呼</button>
+              <button id="leaderCallingSaveBtn" class="go" onclick="saveLeaderCalling()" disabled>保存领导称呼</button>
+            </div>
+            <p id="leaderCallingMessage"></p>
+          </section>
+        </div>
+        <div class="stack">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">点位台词热更新</div>
+                <div id="hotRowsSummary" class="label">未加载</div>
+              </div>
+              <div class="actions" style="margin-top:0">
+                <button id="hotRowsLoadBtn" class="refresh" onclick="loadHotRows()">加载点位台词</button>
+                <button id="hotRowsAddBtn" class="refresh icon-btn" onclick="addHotRow()">+</button>
+                <button id="hotRowsSaveBtn" class="go" onclick="saveHotRows()">保存点位台词</button>
+              </div>
+            </div>
+            <div class="hot-wrap">
+              <table id="hotRowsTable" class="hot-table">
+                <thead><tr><th style="width:16%">点位名字</th><th style="width:30%">点位坐标</th><th>讲解台词</th><th style="width:80px">操作</th></tr></thead>
+                <tbody id="hotRowsBody"></tbody>
+              </table>
+            </div>
+            <p id="hotRowsMessage"></p>
+          </section>
+        </div>
+        <div class="stack">
+          <section class="panel">
+            <div class="panel-head">
+              <div class="panel-title">模型服务</div>
+              <div class="panel-link">运行中</div>
+            </div>
+            <div class="grid">
+              <div class="card"><div class="label">VLM</div><div class="value ok">健康</div></div>
+              <div class="card"><div class="label">ASR</div><div class="value ok">健康</div></div>
+              <div class="card"><div class="label">TTS</div><div class="value ok">健康</div></div>
+              <div class="card"><div class="label">Planner</div><div class="value ok">健康</div></div>
+            </div>
+          </section>
+        </div>
       </div>
-      <div class="grid">
-        <section class="panel">
-          <div class="cards">
-            <div class="card"><div class="label">主循环</div><div id="mainLoop" class="value">-</div></div>
-            <div class="card"><div class="label">导航桥接</div><div id="navBridge" class="value">-</div></div>
-            <div class="card"><div class="label">Workflow</div><div id="workflow" class="value">-</div></div>
-            <div class="card"><div class="label">开机自启动</div><div id="autostart" class="value">-</div></div>
-          </div>
-          <div class="label" style="margin-top:16px">开始任务</div>
-          <div class="actions">
-            <button id="guideBtn" class="go" onclick="startTask('guide')">导览</button>
-            <button class="back" onclick="sendCommand('back')">返航</button>
-          </div>
-          <div class="actions">
-            <button id="restartBtn" class="restart" onclick="restartProgram()">一键重启</button>
-            <button id="stopBtn" class="back" onclick="stopProgram()">关闭程序</button>
-            <button id="autostartBtn" class="refresh" onclick="toggleAutostart()">开机自启动</button>
-          </div>
-          <div class="field">
-            <div class="label">重启地图</div>
-            <input id="mapPathInput" class="text-input" type="text" value="/home/unitree/test9.pcd" oninput="mapPathTouched=true">
-          </div>
-          <p id="message"></p>
-        </section>
-        <section class="panel">
-          <div class="label">定位状态</div>
-          <div id="poseStatus" class="value">读取中</div>
-          <div class="label" style="margin-top:12px">当前位姿</div>
-          <div id="pose" class="value pose-line">暂无定位位姿数据</div>
-        </section>
-      </div>
-      <section class="panel" style="margin-top:16px">
-        <div class="top" style="margin-bottom:10px">
-          <div>
-            <div class="label">领导称呼</div>
-            <div id="leaderCallingSummary" class="label">未加载</div>
-          </div>
-          <div class="actions" style="margin-top:0">
-            <button id="leaderCallingLoadBtn" class="refresh" onclick="loadLeaderCalling()">加载领导称呼</button>
-            <button id="leaderCallingSaveBtn" class="go" onclick="saveLeaderCalling()" disabled>保存领导称呼</button>
-          </div>
-        </div>
-        <input id="leaderCallingInput" class="text-input" type="text" maxlength="80" placeholder="例如：各位领导" oninput="updateLeaderCallingState()" onkeydown="leaderCallingKeydown(event)">
-        <p id="leaderCallingMessage"></p>
-      </section>
-      <section class="panel" style="margin-top:16px">
-        <div class="top" style="margin-bottom:10px">
-          <div class="label">点位台词热更新</div>
-          <div class="actions" style="margin-top:0">
-            <button id="hotRowsLoadBtn" class="refresh" onclick="loadHotRows()">加载点位台词</button>
-            <button id="hotRowsAddBtn" class="refresh icon-btn" onclick="addHotRow()">+</button>
-            <button id="hotRowsSaveBtn" class="go" onclick="saveHotRows()">保存点位台词</button>
-          </div>
-        </div>
-        <div id="hotRowsSummary" class="label">未加载</div>
-        <table id="hotRowsTable" class="hot-table">
-          <thead><tr><th style="width:16%">点位名字</th><th style="width:30%">点位坐标</th><th>讲解台词</th><th style="width:80px">操作</th></tr></thead>
-          <tbody id="hotRowsBody"></tbody>
-        </table>
-        <p id="hotRowsMessage"></p>
-      </section>
-      <section class="panel" style="margin-top:16px">
-        <div class="top" style="margin-bottom:10px">
-          <div class="label">导览讲解词</div>
-          <div class="actions" style="margin-top:0">
-            <button id="dialogueLoadBtn" class="refresh" onclick="loadDialogue()">加载讲解词</button>
-            <button id="dialogueToggleBtn" class="refresh" onclick="toggleDialogueEditor()" disabled>折叠讲解词</button>
-            <button id="dialogueSaveBtn" class="go" onclick="saveDialogue()" disabled>保存讲解词</button>
-          </div>
-        </div>
-        <div id="dialogueSummary" class="label">未加载</div>
-        <textarea id="dialogueEditor" class="dialogue-editor" hidden></textarea>
-        <p id="dialogueMessage"></p>
-      </section>
-      <section class="panel" style="margin-top:16px">
-        <div class="top" style="margin-bottom:10px">
-          <div class="label">最近日志</div>
-          <button id="logsToggleBtn" class="refresh" onclick="toggleLogs()">显示日志</button>
-        </div>
-        <pre id="logs" class="log" hidden></pre>
-      </section>
-    </div>
+    </main>
   </div>
 <script>
-var logsVisible=false;
 var mapPathTouched=false;
-var dialogueLoaded=false;
-var dialogueCollapsed=false;
 var hotRowSequence=0;
 var leaderCallingLoaded=false;
 var leaderCallingOriginal='';
@@ -240,7 +265,6 @@ function refresh(){
   requestJson('GET','/api/status',null,function(error,data){
     if(error){showError(error.message);return;}
     renderStatus(data);
-    if(logsVisible){refreshLogs();}
   });
 }
 function waitForServicesReady(button,startedAt){
@@ -252,7 +276,6 @@ function waitForServicesReady(button,startedAt){
       if(servicesReady(data)){
         setText('message','所有服务已加载成功，可执行相关操作');
         button.disabled=false;
-        if(logsVisible){refreshLogs();}
         return;
       }
       setText('message','正在等待所有服务加载完成...');
@@ -264,42 +287,6 @@ function waitForServicesReady(button,startedAt){
     }
     setTimeout(function(){waitForServicesReady(button,startedAt);},2000);
   });
-}
-function refreshLogs(){
-  if(!logsVisible){return;}
-  requestJson('GET','/api/logs?target=nav&lines=120',null,function(logError,body){
-    if(logError){setText('logs',logError.message);return;}
-    setText('logs',(body.lines&&body.lines.join(String.fromCharCode(10)))||'暂无日志');
-  });
-}
-function toggleLogs(){
-  logsVisible=!logsVisible;
-  document.getElementById('logs').hidden=!logsVisible;
-  setText('logsToggleBtn',logsVisible?'关闭日志':'显示日志');
-  if(logsVisible){
-    setText('logs','读取中...');
-    refreshLogs();
-  }else{
-    setText('logs','');
-  }
-}
-function dialogueSummaryText(summary){
-  if(!summary){return '未加载';}
-  return '文件：'+summary.path+' / 称呼：'+(summary.leader_calling||'-')+' / 地图：'+(summary.map_file||'-')+' / 步骤：'+summary.steps+' / 台词段：'+summary.segments+' / 点位：'+summary.points;
-}
-function updateDialogueFoldState(){
-  document.getElementById('dialogueEditor').hidden=dialogueCollapsed;
-  document.getElementById('dialogueSaveBtn').disabled=!dialogueLoaded||dialogueCollapsed;
-  document.getElementById('dialogueToggleBtn').disabled=!dialogueLoaded;
-  setText('dialogueToggleBtn',dialogueCollapsed?'展开讲解词':'折叠讲解词');
-}
-function renderDialogue(body){
-  dialogueLoaded=true;
-  dialogueCollapsed=false;
-  document.getElementById('dialogueEditor').value=body.content||'';
-  updateDialogueFoldState();
-  setText('dialogueSummary',dialogueSummaryText(body.summary));
-  setText('dialogueMessage',body.message||'');
 }
 function updateLeaderCallingState(){
   var input=document.getElementById('leaderCallingInput');
@@ -337,7 +324,6 @@ function saveLeaderCalling(){
   requestJson('POST','/api/dialogue/leader-calling',{leader_calling:value},function(error,body){
     if(error){setText('leaderCallingMessage',error.message);updateLeaderCallingState();return;}
     renderLeaderCalling(body);
-    if(dialogueLoaded){loadDialogue();}
   });
 }
 function hotRowsSummaryText(summary,rowCount){
@@ -436,32 +422,6 @@ function saveHotRows(){
     button.disabled=false;
     if(error){setText('hotRowsMessage',error.message);return;}
     renderHotRows(body);
-    if(dialogueLoaded){loadDialogue();}
-  });
-}
-function toggleDialogueEditor(){
-  if(!dialogueLoaded){return;}
-  dialogueCollapsed=!dialogueCollapsed;
-  updateDialogueFoldState();
-}
-function loadDialogue(){
-  document.getElementById('dialogueLoadBtn').disabled=true;
-  setText('dialogueMessage','正在加载讲解词...');
-  requestJson('GET','/api/dialogue',null,function(error,body){
-    document.getElementById('dialogueLoadBtn').disabled=false;
-    if(error){setText('dialogueMessage',error.message);return;}
-    renderDialogue(body);
-  });
-}
-function saveDialogue(){
-  if(!window.confirm('确定保存导览讲解词吗？保存后需要一键重启生效。')){return;}
-  var button=document.getElementById('dialogueSaveBtn');
-  button.disabled=true;
-  setText('dialogueMessage','正在保存讲解词...');
-  requestJson('POST','/api/dialogue',{content:document.getElementById('dialogueEditor').value},function(error,body){
-    button.disabled=false;
-    if(error){setText('dialogueMessage',error.message);return;}
-    renderDialogue(body);
   });
 }
 function sendCommand(command){

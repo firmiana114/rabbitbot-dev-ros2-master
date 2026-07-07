@@ -578,6 +578,16 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert 'id="loginForm"' not in response.text
     assert 'password' not in response.text.lower()
     assert '/api/login' not in response.text
+    assert 'RabbitBot 控制台' in response.text
+    assert 'class="shell"' in response.text
+    assert 'class="sidebar"' in response.text
+    assert 'class="topbar"' in response.text
+    assert '总览' in response.text
+    assert '任务控制' in response.text
+    assert '台词配置' in response.text
+    assert '日志告警' in response.text
+    assert '机器人状态' in response.text
+    assert '模型服务' in response.text
     assert '开始任务' in response.text
     assert '导览' in response.text
     assert "data.guide_state.state==='qa_listening'" in response.text
@@ -590,7 +600,7 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '>刷新状态<' not in response.text
     assert '/api/task' in response.text
     assert '返航' in response.text
-    assert '<button id="guideBtn" class="go" onclick="startTask(\'guide\')">导览</button>\n            <button class="back" onclick="sendCommand(\'back\')">返航</button>' in response.text
+    assert response.text.index("startTask('guide')") < response.text.index("sendCommand('back')")
     assert '定位状态' in response.text
     assert '当前位姿' in response.text
     assert 'id="startBtn"' not in response.text
@@ -612,7 +622,6 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '重启地图' in response.text
     assert 'mapPathInput' in response.text
     assert 'map_path' in response.text
-    assert '导览讲解词' in response.text
     assert '点位名字' in response.text
     assert '点位坐标' in response.text
     assert '讲解台词' in response.text
@@ -625,15 +634,13 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert '保存领导称呼' in response.text
     assert '/api/dialogue/leader-calling' in response.text
     assert '当前称呼会替换台词里的 {leader_calling}' in response.text
-    assert '加载讲解词' in response.text
-    assert '保存讲解词' in response.text
-    assert '折叠讲解词' in response.text
-    assert '展开讲解词' in response.text
-    assert 'dialogueToggleBtn' in response.text
-    assert 'toggleDialogueEditor' in response.text
-    assert 'dialogueEditor' in response.text
+    assert '导览讲解词' not in response.text
+    assert '<div class="panel-title">导览讲解词</div>' not in response.text
+    assert 'id="dialogueToggleBtn"' not in response.text
+    assert '<textarea id="dialogueEditor"' not in response.text
     assert '/api/dialogue' in response.text
-    assert '显示日志' in response.text
-    assert '关闭日志' in response.text
-    assert 'logsVisible=false' in response.text
-    assert '<pre id="logs" class="log" hidden>' in response.text
+    assert '最近日志' not in response.text
+    assert '<div class="panel-title">最近日志</div>' not in response.text
+    assert 'id="logsToggleBtn"' not in response.text
+    assert 'function toggleLogs' not in response.text
+    assert '<pre id="logs" class="log" hidden>' not in response.text
