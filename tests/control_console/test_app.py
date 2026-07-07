@@ -608,6 +608,9 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert 'class="robot-stage"' in response.text
     assert 'class="motion-console"' in response.text
     assert 'class="voice-wave"' in response.text
+    assert '宇树 G1 机器人展示图' in response.text
+    assert '/static/control_console/unitree-g1-dashboard.png' in response.text
+    assert response.text.count('开发中') >= 7
     assert 'repeat(auto-fit,minmax(240px,1fr))' in response.text
     assert '@media(max-width:820px)' in response.text
     assert '@media(max-width:520px)' in response.text
@@ -666,3 +669,13 @@ def test_page_shows_console_without_login_form(tmp_path):
     assert 'id="logsToggleBtn"' not in response.text
     assert 'function toggleLogs' not in response.text
     assert '<pre id="logs" class="log" hidden>' not in response.text
+
+
+def test_page_serves_control_console_robot_asset(tmp_path):
+    client = TestClient(create_app(make_config(tmp_path)))
+
+    response = client.get("/static/control_console/unitree-g1-dashboard.png")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG")
